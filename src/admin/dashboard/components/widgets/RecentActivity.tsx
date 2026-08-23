@@ -129,7 +129,7 @@ export const RecentActivity: React.FC = () => {
 
               return (
                 <div key={log.id} className="relative group/item">
-                  {/* Timeline bullet dot wrapper */}
+                  {/* Timeline status dot wrapper */}
                   <div
                     className={`absolute -left-[27px] top-1.5 p-1 rounded-full border-4 border-white dark:border-[#1A1A1A] shrink-0 ${bg}`}
                   >

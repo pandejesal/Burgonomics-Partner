@@ -1,10 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace = "com.burgonomics.partner"
+    namespace = "com.glassdoorsstudio.burgonomics.partner"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.burgonomics.partner"
+        applicationId "com.glassdoorsstudio.burgonomics.partner"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

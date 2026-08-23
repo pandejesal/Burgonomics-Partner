@@ -22,7 +22,7 @@ export const SystemHealth: React.FC = () => {
   const redisStatus = health?.details?.redis?.status || health?.info?.redis?.status || "up";
   const redisLatency = health?.details?.redis?.latency || health?.info?.redis?.latency || 1.1;
 
-  const bullmqStatus = health?.details?.bullmq?.status || health?.info?.bullmq?.status || "up";
+  const queueStatus = (health as any)?.details?.queue?.status || (health as any)?.info?.queue?.status || "up";
 
   const petpoojaApiStatus =
     health?.details?.petpooja?.status || health?.info?.petpooja?.status || "up";

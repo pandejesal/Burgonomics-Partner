@@ -1,10 +1,29 @@
+import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/config/firebase';
-import { doc, getDoc, updateDoc, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, updateDoc, Timestamp } from 'firebase/firestore';
 import type { Order, OrderStatus } from '@/types';
 
 export function useOrder(orderId: string) {
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (!orderId) return;
+    const orderRef = doc(db, 'orders', orderId);
+    const unsubscribe = onSnapshot(
+      orderRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          const liveOrder = { id: snapshot.id, ...snapshot.data() } as Order;
+          queryClient.setQueryData(['order', orderId], liveOrder);
+        }
+      },
+      (err) => {
+        console.warn('useOrder onSnapshot listener error:', err);
+      }
+    );
+    return () => unsubscribe();
+  }, [orderId, queryClient]);
 
   const { data: order, isLoading, error } = useQuery<Order>({
     queryKey: ['order', orderId],
@@ -23,6 +42,7 @@ export function useOrder(orderId: string) {
     },
     enabled: !!orderId,
   });
+
 
   const updateStatus = useMutation({
     mutationFn: async ({

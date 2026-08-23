@@ -1,4 +1,4 @@
-package com.burgonomics.partner;
+package com.glassdoorsstudio.burgonomics.partner;
 
 import com.getcapacitor.BridgeActivity;
 

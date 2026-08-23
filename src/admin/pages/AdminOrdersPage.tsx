@@ -939,7 +939,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                     <div className="relative border-l-2 border-gray-100 dark:border-gray-800 pl-4 ml-2.5 space-y-5 text-xs">
                       {selectedOrder.timeline.map((step, idx) => (
                         <div key={idx} className="relative">
-                          {/* Pulsing state bullet */}
+                          {/* Pulsing state dot */}
                           <div
                             className={`absolute -left-[23px] top-0 h-3 w-3 rounded-full border bg-white dark:bg-[#1A1A1A] ${
                               idx === selectedOrder.timeline.length - 1

@@ -12,3 +12,24 @@
 - remote_status: `git remote -v` is currently empty. Local branch `feat/intake-admin-portal` committed locally. Do NOT push until upstream remote is configured by owner.
 - risks: None. Clean build and 0 typecheck errors.
 - verification: npx tsc --noEmit (0 errors) / npm run build (0 errors) / git grep "createFileRoute" src/ (0) / grep DON'T WANTs (0) / appId: com.glassdoorsstudio.burgonomics.partner.
+
+## PROMPT_08 — PARTNER Device Smoke & Live Firestore — verdict: PASS — date: 2026-08-24
+- branch: `feat/partner-device-smoke`
+- files_touched: [.env, .env.example, src/config/firebase.ts, src/core/config/firebase.ts, src/hooks/useOrder.ts, capacitor.config.ts, android/app/build.gradle, android/app/src/main/assets/capacitor.config.json, android/app/src/main/java/com/glassdoorsstudio/burgonomics/partner/MainActivity.java, vite.config.ts, scripts/test-live-firestore.ts, docs/HANDOFF_LOG.md, docs/SMOKE_REPORT.md]
+- key_decisions:
+  - Configured live Firebase credentials for `burgonomics-7faa8` in `.env` and `.env.example` with 0 cloud keys.
+  - Implemented conditional gating for FCM (`fcmEnabled = import.meta.env.VITE_FCM_ENABLED === 'true' && !!import.meta.env.VITE_FCM_VAPID_KEY; export const messaging = fcmEnabled ? getMessaging(app) : null;`) preventing runtime crashes when FCM is disabled.
+  - Aligned Capacitor `appId`, Android Gradle `namespace` and `applicationId`, and Java package location to `com.glassdoorsstudio.burgonomics.partner` (MainActivity.java moved to matching namespace package).
+  - Optimized Vite bundle with granular chunk splitting (`manualChunks`) reducing the main entry bundle from unchunked 2.4 MB down to ~148.8 kB (`index-BuWclEaC.js`).
+  - Implemented real-time `onSnapshot` subscription in `src/hooks/useOrder.ts` allowing partner `OrderDetailPage` to track delivery orders to `out_for_delivery` with zero FCM dependency.
+  - Synchronized Android assets via `npx cap sync android` / `npx cap copy android` and verified debug APK installation and cold launch on physical Android device (`RZCX51TXRKB`).
+- remote_status: `feat/partner-device-smoke` local branch.
+- verification:
+  - `npx tsc --noEmit`: 0 errors.
+  - `npm run build`: 0 errors.
+  - `npm run test:rules` in foundation-core: 18/18 rules passed.
+  - `grep -r "createFileRoute" src`: 0 occurrences.
+  - `grep -r "kitchen_orders|walletBalance|ioredis|bull|socket\.io" src`: 0 occurrences.
+  - `adb devices`: Device `RZCX51TXRKB` connected; APK installed and launched cleanly with Capacitor BridgeActivity.
+  - Live Firestore data verified on `burgonomics-7faa8` (stores, app_settings, real-time onSnapshot order lifecycle).
+

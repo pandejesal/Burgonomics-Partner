@@ -333,10 +333,10 @@ export const SystemMetricsTab: React.FC = () => {
             <div className="p-6 rounded-[24px] bg-[#0c130e] border border-gray-800 shadow-xl space-y-4">
               <div>
                 <span className="block text-xs font-black text-emerald-400 font-mono uppercase tracking-widest">
-                  BullMQ Queue Processing Volume
+                  Async Queue Processing Volume
                 </span>
                 <span className="block text-[10px] text-gray-500 font-mono uppercase mt-0.5">
-                  Prometheus: bullmq_processed_jobs_total [1h rate]
+                  Prometheus: queue_processed_jobs_total [1h rate]
                 </span>
               </div>
               <div className="h-[240px] font-mono text-[10px]">
