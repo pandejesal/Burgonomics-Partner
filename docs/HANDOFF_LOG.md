@@ -33,3 +33,19 @@
   - `adb devices`: Device `RZCX51TXRKB` connected; APK installed and launched cleanly with Capacitor BridgeActivity.
   - Live Firestore data verified on `burgonomics-7faa8` (stores, app_settings, real-time onSnapshot order lifecycle).
 
+## PROMPT_09 — Delivery Queue & Fleet Hardening — verdict: PASS — date: 2026-08-24
+- branch: `feat/partner-device-smoke`
+- files_touched: [src/pages/DeliveryQueuePage.tsx, src/pages/OrderDetailPage.tsx, src/pages/admin/AdminRoutes.tsx, src/admin/layouts/PetpoojaOperationsLayout.tsx, src/App.tsx, src/hooks/useNavigation.ts, docs/HANDOFF_LOG.md]
+- key_decisions:
+  - Created standalone [src/pages/DeliveryQueuePage.tsx](file:///c:/Users/DELL/Desktop/Burgonomics/burgonomics-partner/src/pages/DeliveryQueuePage.tsx) filtering active delivery orders (`fulfillment === 'delivery' || orderType === 'delivery'`) across statuses `[placed, new, pending, accepted, preparing, ready, out_for_delivery, dispatched]`.
+  - Mounted `/admin/delivery-queue` and `/admin/petpooja/delivery-queue` under [PetpoojaOperationsLayout](file:///c:/Users/DELL/Desktop/Burgonomics/burgonomics-partner/src/admin/layouts/PetpoojaOperationsLayout.tsx) in [AdminRoutes.tsx](file:///c:/Users/DELL/Desktop/Burgonomics/burgonomics-partner/src/pages/admin/AdminRoutes.tsx) with a dedicated tab and Bike icon.
+  - Enhanced [src/pages/OrderDetailPage.tsx](file:///c:/Users/DELL/Desktop/Burgonomics/burgonomics-partner/src/pages/OrderDetailPage.tsx) Delivery Fleet card with:
+    - Live Haversine client fare & distance preview (`~X.X km • ₹40 base + ₹10/km => ₹XX • ~5-8 mins`).
+    - Direct "🗺️ Open in Maps" button navigating to Google Maps directions for the customer address.
+    - Quick-assign chips for store fleet riders `[Ramesh Patel, Sanjay Varma, Jayesh Parmar]`.
+    - Stepper progression and quick dispatch / mark delivered controls.
+    - `PorterQuoteModal` pre-flight simulation indicator with `dryRun: true` (`wouldCreate: true`).
+    - `AssignRiderModal` mock rider selection presets alongside manual entry.
+- verification: `npx tsc --noEmit` (0 errors), `npm run build` (0 errors), `grep createFileRoute src` (0 occurrences), `npx cap copy android` (synced).
+
+
