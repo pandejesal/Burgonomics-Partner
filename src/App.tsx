@@ -14,6 +14,7 @@ import { BranchesPage } from '@/pages/BranchesPage';
 import { UsersPage } from '@/pages/UsersPage';
 import { NotificationsPage } from '@/pages/NotificationsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { DeliveryQueuePage } from '@/pages/DeliveryQueuePage';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 
@@ -45,6 +46,7 @@ function App() {
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/orders" element={<OrdersPage />} />
               <Route path="/orders/:id" element={<OrderDetailPage />} />
+              <Route path="/delivery-queue" element={<DeliveryQueuePage />} />
               <Route path="/customers" element={<CustomersPage />} />
               <Route path="/customers/:id" element={<CustomerDetailPage />} />
               <Route path="/tickets" element={<TicketsPage />} />
@@ -52,6 +54,7 @@ function App() {
               <Route path="/menu" element={<MenuPage />} />
               <Route path="/notifications" element={<NotificationsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
+
 
               {/* Brand owner only */}
               <Route

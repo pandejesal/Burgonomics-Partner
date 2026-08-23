@@ -45,6 +45,8 @@ import {
   PetpoojaQueuesPage,
   PetpoojaHealthPage,
 } from "@/admin/pages/petpooja";
+import { DeliveryQueuePage } from "@/pages/DeliveryQueuePage";
+
 
 export function AdminPortalLayout() {
   const navigate = useNavigate();
@@ -153,7 +155,7 @@ export function AdminRoutes() {
         <Route path="profile" element={<AdminProfilePage />} />
         <Route path="developer" element={<AdminDeveloperPage />} />
 
-        {/* Petpooja POS Bridge */}
+        {/* Petpooja POS Bridge & Delivery Operations */}
         <Route path="petpooja" element={<PetpoojaOperationsLayout />}>
           <Route index element={<PetpoojaDashboardPage />} />
           <Route path="stores" element={<PetpoojaStoresPage />} />
@@ -161,7 +163,19 @@ export function AdminRoutes() {
           <Route path="webhooks" element={<PetpoojaWebhooksPage />} />
           <Route path="queues" element={<PetpoojaQueuesPage />} />
           <Route path="health" element={<PetpoojaHealthPage />} />
+          <Route path="delivery-queue" element={<DeliveryQueuePage />} />
         </Route>
+
+        {/* Delivery Queue (Mounted under PetpoojaOperationsLayout) */}
+        <Route
+          path="delivery-queue"
+          element={
+            <PetpoojaOperationsLayout>
+              <DeliveryQueuePage />
+            </PetpoojaOperationsLayout>
+          }
+        />
+
 
         {/* System Diagnostics (10 tabs Firestore-emulated) */}
         <Route path="system" element={<SystemOperationsLayout />}>

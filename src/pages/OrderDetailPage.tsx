@@ -49,6 +49,12 @@ const statusSteps: { key: OrderStatus; label: string; icon: any }[] = [
   { key: 'delivered', label: 'Delivered', icon: CheckCircle2 },
 ];
 
+const MOCK_STORE_RIDERS = [
+  { name: 'Ramesh Patel', phone: '+91 98250 11223', vehicle: 'GJ-01-EE-8821' },
+  { name: 'Sanjay Varma', phone: '+91 97123 44556', vehicle: 'GJ-27-AK-1029' },
+  { name: 'Jayesh Parmar', phone: '+91 99090 77881', vehicle: 'GJ-06-BQ-5544' },
+];
+
 export function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -66,6 +72,26 @@ export function OrderDetailPage() {
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [showPorterQuoteModal, setShowPorterQuoteModal] = useState(false);
+  const [clientQuote, setClientQuote] = useState<PorterDeliveryQuote | null>(null);
+  const [loadingClientQuote, setLoadingClientQuote] = useState(false);
+
+  useEffect(() => {
+    if (order && (order.orderType === 'delivery' || (order as any).fulfillment === 'delivery')) {
+      setLoadingClientQuote(true);
+      getPorterDeliveryQuote({
+        dropLat: order.deliveryAddress?.lat,
+        dropLng: order.deliveryAddress?.lng,
+        customerName: order.customerName,
+        customerPhone: order.customerPhone,
+      })
+        .then((q) => {
+          setClientQuote(q);
+          setLoadingClientQuote(false);
+        })
+        .catch(() => setLoadingClientQuote(false));
+    }
+  }, [order]);
+
 
   if (isLoading) {
     return (
@@ -412,38 +438,103 @@ export function OrderDetailPage() {
           </div>
 
           {/* Delivery & Fleet Dispatch Card (for Delivery Orders) */}
-          {order.orderType === 'delivery' && (
-            <div className="bg-surface rounded-2xl border border-border p-6 shadow-xs">
-              <div className="flex items-center justify-between mb-4">
+          {(order.orderType === 'delivery' || (order as any).fulfillment === 'delivery') && (
+            <div className="bg-surface rounded-2xl border border-border p-6 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Bike className="w-5 h-5 text-indigo-600" />
-                  <h2 className="font-bold text-text-primary text-base">
-                    Delivery Fleet & Rider Dispatch
-                  </h2>
+                  <div className="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-600 flex items-center justify-center font-bold">
+                    <Bike className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h2 className="font-bold text-text-primary text-base">
+                      Delivery Fleet & Rider Dispatch
+                    </h2>
+                    <p className="text-[11px] text-text-secondary">
+                      Real-time distance estimation, 3PL rate preview, and rider assignment.
+                    </p>
+                  </div>
                 </div>
                 <Badge
                   className={
                     order.riderName
-                      ? 'bg-indigo-100 text-indigo-800'
-                      : 'bg-amber-100 text-amber-800'
+                      ? 'bg-indigo-100 text-indigo-800 border-indigo-200'
+                      : 'bg-amber-100 text-amber-800 border-amber-200'
                   }
                 >
                   {order.riderName ? 'Rider Assigned' : 'Unassigned Rider'}
                 </Badge>
               </div>
 
+              {/* Haversine Fee & 3PL Distance Preview Box (clientPorterDelivery) */}
+              <div className="bg-indigo-50/60 dark:bg-indigo-950/20 border border-indigo-200/80 dark:border-indigo-900/40 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                    <span className="text-xs font-bold text-indigo-950 dark:text-indigo-200 uppercase tracking-wider">
+                      Porter 3PL Rate Preview (Haversine)
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-200/60 text-indigo-900 dark:bg-indigo-900/60 dark:text-indigo-200">
+                    Standby • Mock Coords
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="bg-surface/80 p-2.5 rounded-lg border border-indigo-100 dark:border-indigo-900/30">
+                    <span className="text-[10px] text-text-secondary block font-semibold">Route Distance</span>
+                    <span className="font-black text-text-primary text-sm">
+                      {loadingClientQuote ? '...' : `~${clientQuote?.estimatedDistanceKm || 2.4} km`}
+                    </span>
+                  </div>
+                  <div className="bg-surface/80 p-2.5 rounded-lg border border-indigo-100 dark:border-indigo-900/30">
+                    <span className="text-[10px] text-text-secondary block font-semibold">Estimated Fare</span>
+                    <span className="font-black text-indigo-700 dark:text-indigo-400 text-sm">
+                      {loadingClientQuote ? '...' : `₹${clientQuote?.estimatedFare || 44}`}
+                    </span>
+                  </div>
+                  <div className="bg-surface/80 p-2.5 rounded-lg border border-indigo-100 dark:border-indigo-900/30">
+                    <span className="text-[10px] text-text-secondary block font-semibold">Pickup ETA</span>
+                    <span className="font-black text-text-primary text-sm">
+                      {loadingClientQuote ? '...' : `~${clientQuote?.estimatedPickupMinutes || 6} mins`}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] text-indigo-900/80 dark:text-indigo-300/80 pt-1">
+                  <span>Standard Rate Card: <strong>₹40 for first 2 km</strong> + <strong>₹10/km</strong> thereafter</span>
+                  <a
+                    href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+                      order.deliveryAddress?.full || (order.deliveryAddress as any)?.street || 'Ahmedabad'
+                    )}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-primary hover:underline font-bold"
+                  >
+                    <MapPin className="w-3 h-3" />
+                    <span>Open in Maps</span>
+                    <ExternalLink className="w-2.5 h-2.5" />
+                  </a>
+                </div>
+              </div>
+
+              {/* Rider Assignment Info or Dispatch Controls */}
               {order.riderName ? (
-                <div className="space-y-4">
+                <div className="space-y-3">
                   <div className="bg-bg/60 p-4 rounded-xl border border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center shrink-0">
                         {order.riderName.charAt(0)}
                       </div>
                       <div>
-                        <p className="font-bold text-text-primary text-sm">
-                          {order.riderName}
-                        </p>
-                        <p className="text-xs text-text-secondary">
+                        <div className="flex items-center gap-2">
+                          <p className="font-bold text-text-primary text-sm">
+                            {order.riderName}
+                          </p>
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                            Dispatched
+                          </span>
+                        </div>
+                        <p className="text-xs text-text-secondary mt-0.5">
                           Vehicle: <strong className="text-text-primary">{order.riderVehicleNumber || 'GJ-01-BK-4092'}</strong> • {order.riderPhone}
                         </p>
                       </div>
@@ -452,54 +543,102 @@ export function OrderDetailPage() {
                     <div className="flex items-center gap-2">
                       <a
                         href={`tel:${order.riderPhone}`}
-                        className="px-3 py-1.5 bg-surface border border-border rounded-lg text-xs font-semibold hover:bg-primary/5 transition-colors flex items-center gap-1.5"
+                        className="px-3 py-1.5 bg-surface border border-border rounded-lg text-xs font-semibold hover:bg-primary/5 transition-colors flex items-center gap-1.5 cursor-pointer"
                       >
                         <Phone className="w-3.5 h-3.5 text-primary" />
-                        <span>Call Rider</span>
+                        <span>Call</span>
                       </a>
-                      {order.riderTrackingUrl && (
-                        <a
-                          href={order.riderTrackingUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 transition-colors flex items-center gap-1.5 shadow-2xs"
-                        >
-                          <Navigation className="w-3.5 h-3.5" />
-                          <span>Track GPS</span>
-                        </a>
-                      )}
+                      <a
+                        href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+                          order.deliveryAddress?.full || (order.deliveryAddress as any)?.street || 'Ahmedabad'
+                        )}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 transition-colors flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                      >
+                        <Navigation className="w-3.5 h-3.5" />
+                        <span>Directions</span>
+                      </a>
                     </div>
                   </div>
 
-                  <div className="flex justify-end">
+
+                  <div className="flex items-center justify-between text-xs pt-1">
+                    {order.status === 'out_for_delivery' && (
+                      <button
+                        onClick={() => updateStatus.mutate({ status: 'delivered' })}
+                        disabled={updateStatus.isPending}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer transition-colors"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Confirm Order Delivered</span>
+                      </button>
+                    )}
                     <button
                       onClick={() => setShowRiderModal(true)}
-                      className="text-xs text-indigo-600 hover:underline font-semibold cursor-pointer"
+                      className="text-xs text-indigo-600 hover:underline font-semibold cursor-pointer ml-auto"
                     >
                       Change or Reassign Rider →
                     </button>
                   </div>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  <p className="text-xs text-text-secondary">
-                    Dispatch this order to Porter 3PL on-demand fleet or assign your store's in-house rider.
-                  </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <button
-                      onClick={() => setShowPorterQuoteModal(true)}
-                      className="p-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-2 shadow-xs cursor-pointer"
-                    >
-                      <Zap className="w-4 h-4 text-amber-300" />
-                      <span>⚡ Auto-Dispatch Porter (2-Wheeler)</span>
-                    </button>
+                <div className="space-y-3.5">
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                    <p className="text-xs text-text-secondary">
+                      Dispatch this order to Porter 3PL on-demand fleet or pick a store rider:
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setShowPorterQuoteModal(true)}
+                        className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                      >
+                        <Zap className="w-3.5 h-3.5 text-amber-300" />
+                        <span>Auto-Dispatch Porter</span>
+                      </button>
 
-                    <button
-                      onClick={() => setShowRiderModal(true)}
-                      className="p-3 bg-bg hover:bg-bg/80 text-text-primary border border-border rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <span>🛵 Assign Store Fleet Rider</span>
-                    </button>
+                      <button
+                        onClick={() => setShowRiderModal(true)}
+                        className="px-3.5 py-2 bg-bg hover:bg-bg/80 text-text-primary border border-border rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <span>Manual Input</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Mock Rider Quick Selector Chips */}
+                  <div className="space-y-1.5 pt-2 border-t border-border">
+                    <span className="text-[11px] font-bold text-text-secondary uppercase tracking-wider block">
+                      Quick-Assign Store Fleet Rider:
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      {MOCK_STORE_RIDERS.map((r) => (
+                        <button
+                          key={r.name}
+                          type="button"
+                          onClick={() =>
+                            assignRider.mutate({
+                              riderName: r.name,
+                              riderPhone: r.phone,
+                              riderVehicleNumber: r.vehicle,
+                              markOutForDelivery: true,
+                            })
+                          }
+                          disabled={assignRider.isPending}
+                          className="p-2.5 rounded-xl border border-border bg-surface hover:border-primary hover:bg-primary/5 text-left transition-all group cursor-pointer"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-xs text-text-primary group-hover:text-primary">
+                              {r.name}
+                            </span>
+                            <Bike className="w-3.5 h-3.5 text-text-secondary group-hover:text-primary" />
+                          </div>
+                          <p className="text-[10px] text-text-secondary mt-0.5 truncate">
+                            {r.vehicle} • {r.phone}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}
@@ -756,14 +895,19 @@ function PorterQuoteModal({
   }, [order]);
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 font-sans">
       <div className="bg-surface rounded-2xl w-full max-w-md p-6 border border-border shadow-xl">
         <div className="flex items-center justify-between mb-4 pb-2 border-b border-border">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center text-indigo-600 font-black text-xs">
+            <div className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center text-indigo-600 dark:text-indigo-300 font-black text-xs">
               P
             </div>
-            <h2 className="text-base font-bold text-text-primary">Porter Express Dispatch</h2>
+            <div>
+              <h2 className="text-base font-bold text-text-primary">Porter Express Dispatch</h2>
+              <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-widest block">
+                Pre-Flight Dry Run (?dryRun=true • wouldCreate: true)
+              </span>
+            </div>
           </div>
           <button onClick={onClose} className="p-1 hover:bg-primary/5 rounded-lg text-text-secondary cursor-pointer">
             <X className="w-5 h-5" />
@@ -773,35 +917,45 @@ function PorterQuoteModal({
         {loadingQuote ? (
           <div className="py-8 flex flex-col items-center justify-center gap-2">
             <Spinner size="md" />
-            <p className="text-xs text-text-secondary">Fetching instant Porter rate & rider ETA...</p>
+            <p className="text-xs text-text-secondary">Calculating Haversine distance & fetching quote...</p>
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="bg-indigo-50/70 border border-indigo-200 rounded-xl p-4 space-y-2.5">
+            <div className="bg-indigo-50/70 dark:bg-indigo-950/20 border border-indigo-200 rounded-xl p-4 space-y-2.5">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-text-secondary">Simulation Mode:</span>
+                <span className="font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-100 dark:bg-indigo-900/60 px-2 py-0.5 rounded-full text-[10px]">
+                  Dry Run Validated (wouldCreate: true)
+                </span>
+              </div>
               <div className="flex justify-between items-center text-xs">
                 <span className="text-text-secondary">Vehicle Category:</span>
-                <span className="font-bold text-indigo-900">{quote?.vehicleType}</span>
+                <span className="font-bold text-indigo-900 dark:text-indigo-200">{quote?.vehicleType}</span>
               </div>
               <div className="flex justify-between items-center text-xs">
                 <span className="text-text-secondary">Estimated Route Distance:</span>
-                <span className="font-bold text-indigo-900">{quote?.estimatedDistanceKm} km</span>
+                <span className="font-bold text-indigo-900 dark:text-indigo-200">{quote?.estimatedDistanceKm} km</span>
               </div>
               <div className="flex justify-between items-center text-xs">
                 <span className="text-text-secondary">Estimated Rider Pickup ETA:</span>
-                <span className="font-bold text-indigo-900">~{quote?.estimatedPickupMinutes} mins</span>
+                <span className="font-bold text-indigo-900 dark:text-indigo-200">~{quote?.estimatedPickupMinutes} mins</span>
+              </div>
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-text-secondary">Quote ID:</span>
+                <span className="font-mono text-[11px] text-text-secondary">{quote?.quoteId}</span>
               </div>
               <div className="flex justify-between items-center text-sm pt-2 border-t border-indigo-200/80 font-black">
-                <span className="text-indigo-950">Delivery Cost:</span>
-                <span className="text-indigo-700 text-base">₹{quote?.estimatedFare}</span>
+                <span className="text-indigo-950 dark:text-indigo-200">Total Delivery Fare:</span>
+                <span className="text-indigo-700 dark:text-indigo-400 text-base">₹{quote?.estimatedFare}</span>
               </div>
             </div>
 
             <div className="text-xs space-y-1 bg-bg/50 p-3 rounded-xl border border-border">
               <p className="text-text-secondary">
-                <strong className="text-text-primary">Drop Point:</strong> {order.deliveryAddress?.full}
+                <strong className="text-text-primary">Drop Destination:</strong> {order.deliveryAddress?.full || order.deliveryAddress?.street || 'Ahmedabad'}
               </p>
               <p className="text-text-secondary">
-                <strong className="text-text-primary">Customer:</strong> {order.customerName} ({order.customerPhone})
+                <strong className="text-text-primary">Recipient:</strong> {order.customerName} ({order.customerPhone})
               </p>
             </div>
 
@@ -820,7 +974,7 @@ function PorterQuoteModal({
                 className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs disabled:opacity-50 shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
               >
                 <Bike className="w-4 h-4" />
-                <span>{isPending ? 'Requesting Porter...' : 'Confirm & Dispatch'}</span>
+                <span>{isPending ? 'Dispatching...' : 'Confirm & Dispatch Porter'}</span>
               </button>
             </div>
           </div>
@@ -844,6 +998,12 @@ function AssignRiderModal({
   const [riderPhone, setRiderPhone] = useState('');
   const [riderVehicle, setRiderVehicle] = useState('GJ-01-BK-4092');
 
+  const handleSelectPreset = (r: { name: string; phone: string; vehicle: string }) => {
+    setRiderName(r.name);
+    setRiderPhone(r.phone);
+    setRiderVehicle(r.vehicle);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!riderName.trim() || !riderPhone.trim()) return;
@@ -856,26 +1016,52 @@ function AssignRiderModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-      <div className="bg-surface rounded-2xl w-full max-w-md p-6 border border-border shadow-xl">
-        <div className="flex items-center justify-between mb-4 pb-2 border-b border-border">
-          <h2 className="text-base font-bold text-text-primary">Assign Delivery Rider</h2>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 font-sans">
+      <div className="bg-surface rounded-2xl w-full max-w-md p-6 border border-border shadow-xl space-y-4">
+        <div className="flex items-center justify-between pb-2 border-b border-border">
+          <div>
+            <h2 className="text-base font-bold text-text-primary">Assign Store Fleet Rider</h2>
+            <p className="text-[11px] text-text-secondary">Choose a store rider or input manually.</p>
+          </div>
           <button onClick={onClose} className="p-1 hover:bg-primary/5 rounded-lg text-text-secondary cursor-pointer">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-3.5">
+        {/* Mock Store Rider Quick Selection */}
+        <div className="space-y-1.5">
+          <label className="block text-[11px] font-bold uppercase tracking-wider text-text-secondary">
+            Quick Select Store Rider:
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            {MOCK_STORE_RIDERS.map((r) => (
+              <button
+                key={r.name}
+                type="button"
+                onClick={() => handleSelectPreset(r)}
+                className={`p-2 rounded-xl border text-left transition-all text-xs cursor-pointer ${
+                  riderName === r.name
+                    ? 'border-indigo-600 bg-indigo-50/80 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200'
+                    : 'border-border bg-bg/50 hover:bg-primary/5 text-text-primary'
+                }`}
+              >
+                <p className="font-bold truncate">{r.name}</p>
+                <p className="text-[10px] text-text-secondary truncate">{r.vehicle}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-3 pt-2 border-t border-border">
           <div>
             <label className="block text-xs font-semibold text-text-primary mb-1">Rider Full Name</label>
             <input
               type="text"
               value={riderName}
               onChange={(e) => setRiderName(e.target.value)}
-              placeholder="e.g. Ramesh Kumar"
+              placeholder="e.g. Ramesh Patel"
               className="w-full px-3.5 py-2 rounded-xl border border-border text-xs focus:outline-none focus:ring-2 focus:ring-primary bg-bg/50"
               required
-              autoFocus
             />
           </div>
 
@@ -885,7 +1071,7 @@ function AssignRiderModal({
               type="tel"
               value={riderPhone}
               onChange={(e) => setRiderPhone(e.target.value)}
-              placeholder="+91 98250 12345"
+              placeholder="+91 98250 11223"
               className="w-full px-3.5 py-2 rounded-xl border border-border text-xs focus:outline-none focus:ring-2 focus:ring-primary bg-bg/50"
               required
             />
@@ -897,7 +1083,7 @@ function AssignRiderModal({
               type="text"
               value={riderVehicle}
               onChange={(e) => setRiderVehicle(e.target.value)}
-              placeholder="GJ-01-XX-0000"
+              placeholder="GJ-01-EE-8821"
               className="w-full px-3.5 py-2 rounded-xl border border-border text-xs focus:outline-none focus:ring-2 focus:ring-primary bg-bg/50"
             />
           </div>

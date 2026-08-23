@@ -3,6 +3,7 @@ import type { UserRole } from '@/types';
 import {
   LayoutDashboard,
   ClipboardList,
+  Bike,
   Users,
   Ticket,
   UtensilsCrossed,
@@ -34,11 +35,18 @@ const navItems: NavItem[] = [
     roles: ['brand_owner', 'regional_manager', 'branch_owner'],
   },
   {
+    label: 'Delivery Queue',
+    icon: Bike,
+    path: '/delivery-queue',
+    roles: ['brand_owner', 'regional_manager', 'branch_owner'],
+  },
+  {
     label: 'Customers',
     icon: Users,
     path: '/customers',
     roles: ['brand_owner', 'regional_manager', 'branch_owner'],
   },
+
   {
     label: 'Tickets',
     icon: Ticket,

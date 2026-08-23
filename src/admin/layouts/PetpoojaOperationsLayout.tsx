@@ -10,6 +10,7 @@ import {
   HeartPulse,
   AlertTriangle,
   X,
+  Bike,
 } from "lucide-react";
 import { appConfig } from "@/core/config/env";
 import { petpoojaGateway, type GatewayAlert } from "@/core/integrations/petpooja";
@@ -32,6 +33,11 @@ export const PetpoojaOperationsLayout: React.FC<{ children?: React.ReactNode }> 
       to: "/admin/petpooja",
       exact: true,
       icon: LayoutDashboard,
+    },
+    {
+      label: "Delivery Queue",
+      to: "/admin/delivery-queue",
+      icon: Bike,
     },
     {
       label: "Connected Stores",
