@@ -1,0 +1,57 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function getUserBranches() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.branchIds;
+    }
+
+    function hasRole(roles) {
+      return isAuthenticated() && getUserRole() in roles;
+    }
+
+    function hasAccessToBranch(branchId) {
+      return hasRole(['brand_owner']) ||
+        (hasRole(['regional_manager', 'branch_owner']) && branchId in getUserBranches());
+    }
+
+    match /customers/{customerId} {
+      allow read, write: if isAuthenticated() && request.auth.uid == customerId;
+    }
+
+    match /orders/{orderId} {
+      allow read: if isAuthenticated() && resource.data.customerId == request.auth.uid;
+      allow create: if isAuthenticated() && request.auth.uid == request.resource.data.customerId;
+      allow read, write: if hasRole(['branch_owner', 'regional_manager', 'brand_owner']) &&
+        hasAccessToBranch(resource.data.branchId);
+    }
+
+    match /tickets/{ticketId} {
+      allow read, write: if isAuthenticated() && resource.data.customerId == request.auth.uid;
+      allow read, write: if hasRole(['branch_owner', 'regional_manager', 'brand_owner']) &&
+        hasAccessToBranch(resource.data.branchId);
+    }
+
+    match /branches/{branchId} {
+      allow read: if isAuthenticated();
+      allow write: if hasRole(['brand_owner']);
+    }
+
+    match /menu/{branchId}/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    match /users/{userId} {
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    }
+  }
+}
