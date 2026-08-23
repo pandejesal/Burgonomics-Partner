@@ -75,6 +75,13 @@ export interface Order {
   petpoojaOrderId?: string;
   porterOrderId?: string;
   deliveryStatus?: 'dispatched' | 'no_riders_available' | 'manually_assigned';
+  riderName?: string;
+  riderPhone?: string;
+  riderVehicleNumber?: string;
+  riderTrackingUrl?: string;
+  kotPrinted?: boolean;
+  kotPrintedAt?: Timestamp;
+  cancellationReason?: string;
   specialInstructions?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -148,5 +155,20 @@ export interface MenuItem {
   available: boolean;
   veg: boolean;
   petpoojaItemId: string;
-  lastSyncedAt: Timestamp;
+  lastSyncedAt?: Timestamp;
 }
+
+// Notification types
+export type NotificationType = 'order' | 'ticket' | 'system';
+
+export interface Notification {
+  id: string;
+  userId: string;
+  title: string;
+  message: string;
+  type: NotificationType;
+  read: boolean;
+  readAt?: Timestamp;
+  createdAt: Timestamp;
+}
+

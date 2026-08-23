@@ -11,11 +11,22 @@ import { TicketDetailPage } from '@/pages/TicketDetailPage';
 import { MenuPage } from '@/pages/MenuPage';
 import { AnalyticsPage } from '@/pages/AnalyticsPage';
 import { BranchesPage } from '@/pages/BranchesPage';
+import { UsersPage } from '@/pages/UsersPage';
+import { NotificationsPage } from '@/pages/NotificationsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 
-const queryClient = new QueryClient();
+import { AdminRoutes } from '@/pages/admin/AdminRoutes';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 30, // 30 seconds
+      retry: 1,
+    },
+  },
+});
 
 function App() {
   return (
@@ -25,7 +36,10 @@ function App() {
           {/* Public routes */}
           <Route path="/login" element={<LoginPage />} />
 
-          {/* Protected routes */}
+          {/* Admin Portal (44 pages) */}
+          <Route path="/admin/*" element={<AdminRoutes />} />
+
+          {/* Protected partner routes */}
           <Route element={<ProtectedRoute />}>
             <Route element={<AppLayout />}>
               <Route path="/dashboard" element={<DashboardPage />} />
@@ -36,6 +50,8 @@ function App() {
               <Route path="/tickets" element={<TicketsPage />} />
               <Route path="/tickets/:id" element={<TicketDetailPage />} />
               <Route path="/menu" element={<MenuPage />} />
+              <Route path="/notifications" element={<NotificationsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
 
               {/* Brand owner only */}
               <Route
@@ -46,6 +62,8 @@ function App() {
                   </ProtectedRoute>
                 }
               />
+
+              {/* Brand owner & Regional Manager */}
               <Route
                 path="/analytics"
                 element={
@@ -55,10 +73,10 @@ function App() {
                 }
               />
               <Route
-                path="/settings"
+                path="/users"
                 element={
-                  <ProtectedRoute allowedRoles={['brand_owner']}>
-                    <SettingsPage />
+                  <ProtectedRoute allowedRoles={['brand_owner', 'regional_manager']}>
+                    <UsersPage />
                   </ProtectedRoute>
                 }
               />

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
+import { useAppStore } from '@/stores/appStore';
 import { db } from '@/config/firebase';
 import {
   collection,
@@ -20,29 +21,38 @@ interface UseTicketsParams {
 
 export function useTickets(params: UseTicketsParams = {}) {
   const { user } = useAuth();
+  const { selectedBranchId } = useAppStore();
   const queryClient = useQueryClient();
 
-  const { data: tickets, isLoading, error } = useQuery<Ticket[]>({
-    queryKey: ['tickets', user?.id, params],
+  const { data: tickets = [], isLoading, error } = useQuery<Ticket[]>({
+    queryKey: ['tickets', user?.id, user?.role, selectedBranchId, params],
     queryFn: async () => {
       if (!user) throw new Error('Not authenticated');
 
       let branchIds: string[] = [];
 
-      if (user.role === 'brand_owner') {
-        const branchesSnap = await getDocs(collection(db, 'branches'));
-        branchIds = branchesSnap.docs.map((d) => d.id);
-      } else if (user.role === 'regional_manager') {
-        const branchesSnap = await getDocs(
-          query(collection(db, 'branches'), where('city', 'in', user.cityIds))
-        );
-        branchIds = branchesSnap.docs.map((d) => d.id);
+      if (selectedBranchId) {
+        branchIds = [selectedBranchId];
       } else {
-        branchIds = user.branchIds;
+        if (user.role === 'brand_owner') {
+          const branchesSnap = await getDocs(collection(db, 'branches'));
+          branchIds = branchesSnap.docs.map((d) => d.id);
+        } else if (user.role === 'regional_manager') {
+          const branchesSnap = await getDocs(
+            query(collection(db, 'branches'), where('city', 'in', user.cityIds || ['Ahmedabad', 'Surat']))
+          );
+          branchIds = branchesSnap.docs.map((d) => d.id);
+        } else {
+          branchIds = user.branchIds || [];
+        }
+      }
+
+      if (branchIds.length === 0) {
+        branchIds = ['default-branch'];
       }
 
       const constraints: any[] = [
-        where('branchId', 'in', branchIds),
+        where('branchId', 'in', branchIds.slice(0, 10)),
         orderBy('createdAt', 'desc'),
       ];
 
@@ -50,14 +60,19 @@ export function useTickets(params: UseTicketsParams = {}) {
         constraints.unshift(where('status', '==', params.status));
       }
 
-      const ticketsSnap = await getDocs(
-        query(collection(db, 'tickets'), ...constraints)
-      );
+      try {
+        const ticketsSnap = await getDocs(
+          query(collection(db, 'tickets'), ...constraints)
+        );
 
-      return ticketsSnap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-      })) as Ticket[];
+        return ticketsSnap.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+        })) as Ticket[];
+      } catch (err) {
+        console.warn('Error fetching tickets:', err);
+        return [];
+      }
     },
     enabled: !!user,
   });

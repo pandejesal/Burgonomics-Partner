@@ -8,6 +8,7 @@ import {
   UtensilsCrossed,
   Building2,
   BarChart3,
+  UserCheck,
   Settings,
   type LucideIcon,
 } from 'lucide-react';
@@ -63,10 +64,16 @@ const navItems: NavItem[] = [
     roles: ['brand_owner', 'regional_manager'],
   },
   {
+    label: 'Team Members',
+    icon: UserCheck,
+    path: '/users',
+    roles: ['brand_owner', 'regional_manager'],
+  },
+  {
     label: 'Settings',
     icon: Settings,
     path: '/settings',
-    roles: ['brand_owner'],
+    roles: ['brand_owner', 'regional_manager', 'branch_owner'],
   },
 ];
 
