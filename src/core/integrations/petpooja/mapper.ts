@@ -61,14 +61,26 @@ export interface PetpoojaSaveOrderPayload {
   };
 }
 
-export function mapOrderToPetpoojaSaveOrder(order: any, store?: any): PetpoojaSaveOrderPayload {
+export interface PetpoojaCredentials {
+  appKey?: string;
+  appSecret?: string;
+  accessToken?: string;
+}
+
+export function mapOrderToPetpoojaSaveOrder(
+  order: any,
+  store?: any,
+  creds?: PetpoojaCredentials,
+): PetpoojaSaveOrderPayload {
   const isCod = order.paymentMethod === "cod" || order.paymentMethod === "COD";
   const restId = store?.petpoojaRestId || `rest_${order.storeId || order.branchId || "001"}`;
 
   return {
-    app_key: "BURGO_MOCK_KEY",
-    app_secret: "BURGO_MOCK_SECRET",
-    access_token: "BURGO_MOCK_ACCESS_TOKEN",
+    // Secrets are NEVER hardcoded here. The server proxy injects live
+    // credentials; empty strings mean "fill in server-side".
+    app_key: creds?.appKey || "",
+    app_secret: creds?.appSecret || "",
+    access_token: creds?.accessToken || "",
     res_name: store?.name || "Burgonomics Express",
     address: store?.address || "Connaught Place, New Delhi",
     Contact_information: store?.phone || "+91 11 4151 8899",

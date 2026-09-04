@@ -101,16 +101,16 @@ export class MockPetpoojaGateway implements PetpoojaGateway {
     const breaker = this.breakerStates.get(storeId) || "closed";
     return {
       storeId,
-      menuVersion: "v2.1.4",
-      lastSuccessfulVersion: "v2.1.4",
-      lastSyncTime: new Date().toISOString(),
-      webhookStatus: breaker === "open" ? "degraded" : "active",
+      menuVersion: "Standby",
+      lastSuccessfulVersion: "Standby",
+      lastSyncTime: "Awaiting sync",
+      webhookStatus: "standby",
       circuitBreaker: breaker,
       queueState: "idle",
       retryCount: 0,
-      apiCredentialsLinked: true,
-      webhookSecretLinked: true,
-      posTerminalOnline: breaker !== "open",
+      apiCredentialsLinked: false,
+      webhookSecretLinked: false,
+      posTerminalOnline: false,
     };
   }
 
@@ -137,58 +137,64 @@ export class MockPetpoojaGateway implements PetpoojaGateway {
   async getQueues(): Promise<QueueOverview> {
     await this.delay(100);
     return {
-      status: "active",
+      status: "standby",
       activeJobsCount: 0,
-      waitingJobsCount: 1,
+      waitingJobsCount: 0,
       failedJobsCount: 0,
       delayedJobsCount: 0,
-      completedJobsCount: 42,
-      jobs: [
-        {
-          id: "job_sync_menu_01",
-          name: "sync:menu:incremental",
-          queue: "petpooja_sync",
-          state: "waiting",
-          attempts: 1,
-          maxAttempts: 3,
-          createdAt: new Date().toISOString(),
-          processedAt: null,
-          durationMs: null,
-          payload: { storeId: "str_001", scope: "INCREMENTAL" },
-          errorMessage: null,
-        },
-      ],
+      completedJobsCount: 0,
+      jobs: [],
     };
   }
 
   async getHealth(): Promise<GatewayHealth> {
     await this.delay(100);
-    const breakers: CircuitBreakerOverride[] = SAMPLE_STORES.map((s) => ({
+    const circuitBreakers: CircuitBreakerOverride[] = SAMPLE_STORES.map((s) => ({
       storeId: s.id,
       storeName: s.name,
       restId: s.petpoojaRestId,
       state: this.breakerStates.get(s.id) || "closed",
-      failureCount: this.breakerStates.get(s.id) === "open" ? 3 : 0,
-      maxFailures: 3,
+      failureCount: 0,
+      maxFailures: 5,
     }));
 
     return {
-      status: "healthy",
-      connected: true,
-      message: "Gateway operating in emulated mode with 100% telemetry health.",
+      status: "standby",
+      connected: false,
+      message: "Awaiting live merchant Petpooja credentials",
       services: [
-        { service: "Database Sync Engine", status: "healthy", latencyMs: 12, details: "Firestore emulation connected" },
-        { service: "Queue Worker Node", status: "healthy", latencyMs: 24, details: "Background runner idle" },
-        { service: "API Gateway Proxy", status: "healthy", latencyMs: 45, details: "burgonomics.netlify.app bridge" },
-        { service: "Webhook Receptor", status: "healthy", latencyMs: 18, details: "Webhook receptor ready" },
+        {
+          service: "Petpooja POS API Bridge",
+          status: "standby",
+          latencyMs: 0,
+          details: "Standby — awaiting live merchant credentials",
+        },
+        {
+          service: "Webhook Verification Service",
+          status: "standby",
+          latencyMs: 0,
+          details: "No webhook secret configured",
+        },
+        {
+          service: "Catalog Sync Engine",
+          status: "standby",
+          latencyMs: 0,
+          details: "0 active sync workers",
+        },
+        {
+          service: "Redis Cache & Queue Daemon",
+          status: "healthy",
+          latencyMs: 1,
+          details: "Local cache ready (0 active keys)",
+        },
       ],
-      circuitBreakers: breakers,
+      circuitBreakers,
       cacheMetrics: {
-        sizeBytes: 1048576,
-        sizeFormatted: "1.02 MB",
-        keyCount: 48,
-        hitRate: 0.94,
-        status: "Active",
+        sizeBytes: 0,
+        sizeFormatted: "0 KB",
+        keyCount: 0,
+        hitRate: 0,
+        status: "Idle",
       },
     };
   }
@@ -246,7 +252,7 @@ export class MockPetpoojaGateway implements PetpoojaGateway {
 
   async replayWebhook(_id: string): Promise<{ acknowledged: boolean }> {
     await this.delay(150);
-    return { acknowledged: true };
+    return { acknowledged: false };
   }
 
   async tripBreaker(storeId: string): Promise<void> {
@@ -265,22 +271,36 @@ export class MockPetpoojaGateway implements PetpoojaGateway {
   async getMetrics(): Promise<GatewayMetrics> {
     await this.delay(100);
     return {
-      connectedStoresCount: 3,
-      totalStoresCount: 3,
-      syncSuccessRate: 99.4,
+      connectedStoresCount: 0,
+      totalStoresCount: 5,
+      syncSuccessRate: 0,
       openBreakersCount: 0,
-      queueStatusLabel: "HEALTHY",
+      queueStatusLabel: "STANDBY",
       timeSeries: [
-        { time: "12:00", latency: 24, processingTime: 120, volume: 140, retries: 0, queueGrowth: 0 },
-        { time: "13:00", latency: 28, processingTime: 135, volume: 220, retries: 1, queueGrowth: 2 },
-        { time: "14:00", latency: 22, processingTime: 110, volume: 180, retries: 0, queueGrowth: 0 },
+        { time: "12:00", latency: 0, processingTime: 0, volume: 0, retries: 0, queueGrowth: 0 },
+        { time: "13:00", latency: 0, processingTime: 0, volume: 0, retries: 0, queueGrowth: 0 },
+        { time: "14:00", latency: 0, processingTime: 0, volume: 0, retries: 0, queueGrowth: 0 },
       ],
       menuSyncDuration: [
         { date: "2026-08-21", duration: 3.2, created: 2, updated: 10, deleted: 0 },
         { date: "2026-08-22", duration: 2.8, created: 0, updated: 8, deleted: 0 },
         { date: "2026-08-23", duration: 2.5, created: 2, updated: 14, deleted: 0 },
       ],
-      prometheusText: "# HELP petpooja_sync_duration_seconds Menu sync duration\npetpooja_sync_duration_seconds 2.5",
+      prometheusText: `# HELP petpooja_api_latency_seconds Latency of Petpooja API requests (simulated)
+# TYPE petpooja_api_latency_seconds summary
+petpooja_api_latency_seconds{quantile="0.5",store_id="all"} 0
+petpooja_api_latency_seconds{quantile="0.9",store_id="all"} 0
+petpooja_api_latency_seconds{quantile="0.99",store_id="all"} 0
+petpooja_api_latency_seconds_count{store_id="all"} 0
+
+# HELP petpooja_gateway_status Gateway operational status (0=Standby, 1=Live)
+# TYPE petpooja_gateway_status gauge
+petpooja_gateway_status 0
+
+# HELP firestore_queue_waiting Active Firestore queue size
+# TYPE firestore_queue_waiting gauge
+firestore_queue_waiting{queue="petpooja-menu-sync"} 0
+firestore_queue_waiting{queue="petpooja-webhook-handler"} 0`,
       simulated: true,
     };
   }
@@ -310,4 +330,5 @@ export class MockPetpoojaGateway implements PetpoojaGateway {
   }
 }
 
-export const petpoojaGateway = new MockPetpoojaGateway();
+/** Mock singleton (used by the gateway factory when live is disabled). */
+export const mockPetpoojaGateway = new MockPetpoojaGateway();

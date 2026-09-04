@@ -163,7 +163,7 @@ export interface GatewayMetrics {
     deleted: number;
   }>;
   prometheusText: string;
-  simulated: true;
+  simulated: boolean;
 }
 
 export interface GatewayAlert {

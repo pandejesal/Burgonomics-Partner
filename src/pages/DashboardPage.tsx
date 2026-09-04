@@ -1,87 +1,141 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import { useAuthStore } from '@/stores/authStore';
+import { useAppStore } from '@/stores/appStore';
+import { useOrders } from '@/hooks/useOrders';
+import { useBranches } from '@/hooks/useBranches';
 import {
-  ClipboardList,
-  DollarSign,
-  Users,
-  Ticket,
-  TrendingUp,
-  ShoppingBag,
-} from 'lucide-react';
-import { useDashboardStats } from '@/hooks/useDashboardStats';
-import { StatsCard } from '@/components/dashboard/StatsCard';
+  LiveStatsGrid,
+  BranchSwitcher,
+  ActiveOrdersPulse,
+  QuickActionsBar,
+  type DashboardMetrics,
+} from '@/features/dashboard';
 import { RecentOrders } from '@/components/dashboard/RecentOrders';
-import { QuickActions } from '@/components/dashboard/QuickActions';
 import { Spinner } from '@/components/ui/Spinner';
 
 export function DashboardPage() {
-  const { data: stats, isLoading, error } = useDashboardStats();
+  const { user } = useAuthStore();
+  const { selectedBranchId, setSelectedBranchId } = useAppStore();
+  const { orders = [], isLoading: isOrdersLoading } = useOrders();
+  const { branches = [], isLoading: isBranchesLoading } = useBranches();
 
-  if (isLoading) {
+  const isSuperadmin = user?.role === 'brand_owner' || user?.role === 'developer';
+
+  const [activeBranchId, setActiveBranchId] = useState<string>(
+    isSuperadmin ? selectedBranchId || 'all' : user?.branchIds?.[0] || 'branch_cg_road'
+  );
+
+  // Single source of truth: header outlet switcher writes to appStore,
+  // dashboard card mirrors it so the two selectors never drift apart.
+  useEffect(() => {
+    if (!isSuperadmin) return;
+    const storeVal = selectedBranchId || 'all';
+    setActiveBranchId((prev) => (prev !== storeVal ? storeVal : prev));
+  }, [selectedBranchId, isSuperadmin]);
+
+  // Filter orders by branch if selected
+  const branchOrders = useMemo(() => {
+    if (activeBranchId === 'all') return orders;
+    return orders.filter((o) => o.branchId === activeBranchId);
+  }, [orders, activeBranchId]);
+
+  // Compute live metrics scoped to today (Asia/Kolkata local date)
+  const metrics: DashboardMetrics = useMemo(() => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const todayOrders = branchOrders.filter((o) => {
+      const orderDate = (o.createdAt as any)?.toDate
+        ? (o.createdAt as any).toDate()
+        : (o.createdAt as any)?.toMillis
+        ? new Date((o.createdAt as any).toMillis())
+        : typeof o.createdAt === 'string' || typeof o.createdAt === 'number'
+        ? new Date(o.createdAt)
+        : new Date();
+      return orderDate >= todayStart;
+    });
+
+    const paidOrders = todayOrders.filter(
+      (o) => o.paymentStatus === 'completed' || (o.paymentStatus as string) === 'PAID'
+    );
+
+    const revenue = paidOrders.reduce((sum, o) => sum + (o.total || o.subtotal || 0), 0);
+    const ordersCount = todayOrders.length;
+    const aov = ordersCount > 0 ? Math.round(revenue / ordersCount) : 0;
+
+    const inKitchen = branchOrders.filter(
+      (o) =>
+        o.status === 'preparing' ||
+        (o.status as string) === 'in_progress' ||
+        o.status === 'accepted'
+    ).length;
+
+    const inTransit = branchOrders.filter(
+      (o) =>
+        o.status === 'out_for_delivery' ||
+        (o.status as string) === 'in_transit' ||
+        (o.status as string) === 'dispatched'
+    ).length;
+
+    return {
+      todayRevenue: revenue,
+      todayOrdersCount: ordersCount,
+      activeKitchenCount: inKitchen,
+      inTransitCount: inTransit,
+      averageOrderValue: aov,
+    };
+  }, [branchOrders]);
+
+  const pendingKots = useMemo(() => {
+    return branchOrders.filter((o) => o.status === 'pending' || (o.status as string) === 'new')
+      .length;
+  }, [branchOrders]);
+
+  if (isOrdersLoading || isBranchesLoading) {
     return (
-      <div className="flex items-center justify-center h-64">
+      <div className="flex items-center justify-center h-64 text-neutral-400">
         <Spinner size="lg" />
       </div>
     );
   }
 
-  if (error) {
-    return (
-      <div className="text-center text-red-500 p-6">
-        Error loading dashboard: {(error as Error).message}
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-6">
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatsCard
-          title="Total Orders"
-          value={stats?.totalOrders || 0}
-          icon={ClipboardList}
-          color="primary"
-        />
-        <StatsCard
-          title="Revenue"
-          value={stats?.totalRevenue || 0}
-          icon={DollarSign}
-          color="secondary"
-        />
-        <StatsCard
-          title="Customers"
-          value={stats?.totalCustomers || 0}
-          icon={Users}
-          color="accent"
-        />
-        <StatsCard
-          title="Open Tickets"
-          value={stats?.openTickets || 0}
-          icon={Ticket}
-          color="red"
-        />
+    <div className="space-y-6 max-w-6xl mx-auto pb-16 select-none">
+      {/* 1. Branch Switcher & Online/Offline Master Switch */}
+      <BranchSwitcher
+        branches={branches}
+        selectedBranchId={activeBranchId}
+        isSuperadmin={isSuperadmin}
+        onSelectBranch={(id) => {
+          setActiveBranchId(id);
+          setSelectedBranchId(id);
+        }}
+        onToggleStoreStatus={async (branchId, isAccepting) => {
+          // Future: Firestore branch update
+        }}
+      />
+
+      {/* 2. Active Orders / KDS Pulse Alert */}
+      <ActiveOrdersPulse
+        pendingKotCount={pendingKots}
+        inPrepCount={metrics.activeKitchenCount}
+      />
+
+      {/* 3. Live Stats KPI Grid */}
+      <LiveStatsGrid metrics={metrics} />
+
+      {/* 4. Quick Actions Touch Shortcuts */}
+      <QuickActionsBar />
+
+      {/* 5. Live Recent Orders Feed */}
+      <div className="space-y-3">
+        <h2 className="text-sm font-black text-white uppercase tracking-wider">
+          Live Orders Stream ({branchOrders.slice(0, 10).length})
+        </h2>
+        <RecentOrders orders={branchOrders.slice(0, 10)} />
       </div>
-
-      {/* Today's Stats */}
-      <div className="grid grid-cols-2 gap-4">
-        <StatsCard
-          title="Orders Today"
-          value={stats?.ordersToday || 0}
-          icon={ShoppingBag}
-          color="primary"
-        />
-        <StatsCard
-          title="Revenue Today"
-          value={stats?.revenueToday || 0}
-          icon={TrendingUp}
-          color="secondary"
-        />
-      </div>
-
-      {/* Quick Actions */}
-      <QuickActions />
-
-      {/* Recent Orders */}
-      <RecentOrders orders={stats?.recentOrders || []} />
     </div>
   );
 }
+
+export default DashboardPage;

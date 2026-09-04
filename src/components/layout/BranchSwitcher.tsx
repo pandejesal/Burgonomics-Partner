@@ -1,215 +1,173 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
-import { useAuth } from '@/hooks/useAuth';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { useAuthStore } from '@/stores/authStore';
 import { useBranches } from '@/hooks/useBranches';
 import { useAppStore } from '@/stores/appStore';
-import { Building2, ChevronDown, Check, Search, Store } from 'lucide-react';
+import { Building2, ChevronDown, Check, Search, Store, Globe, MapPin } from 'lucide-react';
 
 export function BranchSwitcher() {
-  const { user } = useAuth();
+  const { user } = useAuthStore();
   const { branches } = useBranches();
-  const { selectedBranchId, setSelectedBranchId } = useAppStore();
+  const { selectedCity, setSelectedCity, selectedBranchId, setSelectedBranchId } = useAppStore();
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdown on outside click or escape
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsOpen(false);
       }
     }
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        setIsOpen(false);
-      }
-    }
     document.addEventListener('mousedown', handleClickOutside);
-    document.addEventListener('keydown', handleEscape);
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      document.removeEventListener('keydown', handleEscape);
-    };
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Filter branches accessible to current user
-  const accessibleBranches = useMemo(() => {
-    if (!user) return [];
-    if (user.role === 'brand_owner') {
-      return branches;
-    }
-    if (user.role === 'regional_manager') {
-      const cityList = user.cityIds?.length ? user.cityIds : ['Ahmedabad', 'Surat'];
-      return branches.filter((b) => cityList.includes(b.city));
-    }
-    // branch_owner
-    const userBranchIds = user.branchIds?.length ? user.branchIds : [];
-    return branches.filter((b) => userBranchIds.includes(b.id));
-  }, [branches, user]);
+  const isGlobalRole =
+    user?.role === 'brand_owner' ||
+    user?.role === 'developer' ||
+    user?.role === 'support' ||
+    user?.role === 'regional_manager';
 
-  // Selected branch object
-  const activeBranch = useMemo(() => {
-    if (!selectedBranchId) return null;
-    return accessibleBranches.find((b) => b.id === selectedBranchId) || null;
-  }, [accessibleBranches, selectedBranchId]);
-
-  // Filtered branches by search query
-  const filteredBranches = useMemo(() => {
-    if (!search.trim()) return accessibleBranches;
-    const query = search.toLowerCase();
-    return accessibleBranches.filter(
-      (b) => b.name.toLowerCase().includes(query) || b.city.toLowerCase().includes(query)
-    );
-  }, [accessibleBranches, search]);
-
-  // Group by City
-  const branchesByCity = useMemo(() => {
-    const groups: Record<string, typeof accessibleBranches> = {};
-    filteredBranches.forEach((b) => {
-      const city = b.city || 'Other Outlets';
-      if (!groups[city]) groups[city] = [];
-      groups[city].push(b);
+  const cities = useMemo(() => {
+    const set = new Set<string>();
+    branches.forEach((b) => {
+      if (b.city) set.add(b.city);
     });
-    return groups;
-  }, [filteredBranches]);
+    return Array.from(set);
+  }, [branches]);
 
-  // If user is a branch owner with only 1 assigned branch, show a locked chip
-  if (user?.role === 'branch_owner') {
-    const branchName = activeBranch?.name || accessibleBranches[0]?.name || 'My Outlet';
+  const activeBranch = useMemo(() => {
+    if (!selectedBranchId || selectedBranchId === 'all') return null;
+    return branches.find((b) => b.id === selectedBranchId) || null;
+  }, [branches, selectedBranchId]);
+
+  if (!isGlobalRole && user?.role === 'branch_owner') {
     return (
-      <div className="flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 text-primary border border-primary/20 rounded-xl text-xs font-semibold">
-        <Store className="w-3.5 h-3.5 text-primary" />
-        <span className="truncate max-w-[150px] sm:max-w-[200px]">{branchName}</span>
+      <div className="flex items-center space-x-2 px-3 py-1.5 bg-surface border border-border rounded-xl text-xs text-white">
+        <Store className="w-3.5 h-3.5 text-accent-light" />
+        <span className="font-semibold">{user.branchIds?.[0] ? 'My Outlet' : 'Branch Scope'}</span>
       </div>
     );
   }
 
   return (
     <div className="relative" ref={dropdownRef}>
-      {/* Trigger Button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-1.5 bg-bg/80 hover:bg-bg text-text-primary border border-border rounded-xl text-xs font-medium transition-colors cursor-pointer shadow-2xs"
-        aria-expanded={isOpen}
+        className="flex min-w-0 max-w-[42vw] sm:max-w-none items-center space-x-2 px-3 py-1.5 bg-surface hover:bg-[#1A351F] border border-border rounded-xl text-xs text-white transition-colors cursor-pointer"
       >
-        <Building2 className="w-4 h-4 text-primary shrink-0" />
-        <span className="font-semibold text-text-primary truncate max-w-[140px] sm:max-w-[180px]">
-          {activeBranch ? activeBranch.name : 'All Outlets (Aggregated)'}
-        </span>
-        <ChevronDown
-          className={`w-3.5 h-3.5 text-text-secondary transition-transform duration-200 ${
-            isOpen ? 'rotate-180' : ''
-          }`}
-        />
+        {activeBranch ? (
+          <>
+            <Store className="w-3.5 h-3.5 shrink-0 text-accent-light" />
+            <span className="font-semibold truncate max-w-[110px] sm:max-w-[140px]">{activeBranch.name}</span>
+          </>
+        ) : selectedCity !== 'all' ? (
+          <>
+            <MapPin className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
+            <span className="font-semibold truncate">City: {selectedCity}</span>
+          </>
+        ) : (
+          <>
+            <Globe className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
+            <span className="font-semibold truncate">All Outlets</span>
+          </>
+        )}
+        <ChevronDown className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
       </button>
 
-      {/* Dropdown Menu */}
       {isOpen && (
-        <div className="absolute left-0 mt-1.5 w-72 bg-surface rounded-2xl border border-border shadow-xl z-50 overflow-hidden flex flex-col max-h-[380px] animate-in fade-in slide-in-from-top-2 duration-150">
-          {/* Search bar inside dropdown */}
-          <div className="p-2.5 border-b border-border bg-bg/40">
+        <div className="absolute left-0 top-full mt-2 w-72 bg-surface border border-border rounded-2xl shadow-2xl z-50 overflow-hidden text-xs text-white">
+          <div className="p-2 border-b border-border">
             <div className="relative">
-              <Search className="w-3.5 h-3.5 text-text-secondary absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-2.5 top-2.5" />
               <input
                 type="text"
+                placeholder="Filter outlets or cities..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Filter outlets by name or city..."
-                className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-border text-xs focus:outline-none focus:ring-1 focus:ring-primary bg-surface"
-                autoFocus
+                className="w-full pl-8 pr-3 py-1.5 bg-bg border border-border rounded-lg text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-accent"
               />
             </div>
           </div>
 
-          {/* List items */}
-          <div className="overflow-y-auto p-1.5 space-y-1 divide-y divide-border/40">
-            {/* Option: All Outlets */}
+          <div className="max-h-64 overflow-y-auto p-1.5 space-y-1 divide-y divide-[#1E3A24]">
+            {/* All Outlets Option */}
             <button
               onClick={() => {
+                setSelectedCity('all');
                 setSelectedBranchId(null);
                 setIsOpen(false);
               }}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer text-left ${
-                selectedBranchId === null
-                  ? 'bg-primary text-white shadow-2xs'
-                  : 'text-text-primary hover:bg-primary/5'
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-surface-hover transition-colors text-left ${
+                selectedCity === 'all' && !selectedBranchId ? 'bg-surface-hover text-accent-light font-bold' : 'text-zinc-200'
               }`}
             >
-              <div className="flex items-center gap-2">
-                <Building2 className="w-3.5 h-3.5 shrink-0" />
-                <div>
-                  <p className="leading-tight">All Outlets (Aggregated)</p>
-                  <p
-                    className={`text-[10px] ${
-                      selectedBranchId === null ? 'text-white/80' : 'text-text-secondary'
-                    }`}
-                  >
-                    {accessibleBranches.length} active stores
-                  </p>
-                </div>
+              <div className="flex items-center space-x-2">
+                <Globe className="w-4 h-4 text-emerald-400" />
+                <span>All Outlets (Total Brand)</span>
               </div>
-              {selectedBranchId === null && <Check className="w-4 h-4 shrink-0" />}
+              {selectedCity === 'all' && !selectedBranchId && <Check className="w-4 h-4" />}
             </button>
 
-            {/* City Groups */}
-            {Object.entries(branchesByCity).map(([city, cityBranches]) => (
-              <div key={city} className="pt-1.5 space-y-1">
-                <p className="px-3 pt-1 text-[10px] font-bold text-text-secondary uppercase tracking-wider">
-                  {city}
-                </p>
-                {cityBranches.map((branch) => {
-                  const isSelected = selectedBranchId === branch.id;
+            {/* City Options */}
+            <div className="pt-1">
+              <div className="px-3 py-1 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                Filter by City
+              </div>
+              {cities.map((city) => (
+                <button
+                  key={city}
+                  onClick={() => {
+                    setSelectedCity(city);
+                    setSelectedBranchId(null);
+                    setIsOpen(false);
+                  }}
+                  className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg hover:bg-surface-hover transition-colors text-left ${
+                    selectedCity === city && !selectedBranchId ? 'bg-surface-hover text-emerald-400 font-bold' : 'text-zinc-300'
+                  }`}
+                >
+                  <div className="flex items-center space-x-2">
+                    <MapPin className="w-3.5 h-3.5 text-zinc-400" />
+                    <span>{city} (All Outlets)</span>
+                  </div>
+                  {selectedCity === city && !selectedBranchId && <Check className="w-4 h-4" />}
+                </button>
+              ))}
+            </div>
 
-                  return (
-                    <button
-                      key={branch.id}
-                      onClick={() => {
-                        setSelectedBranchId(branch.id);
-                        setIsOpen(false);
-                      }}
-                      className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors cursor-pointer text-left ${
-                        isSelected
-                          ? 'bg-primary text-white font-semibold shadow-2xs'
-                          : 'text-text-primary hover:bg-primary/5'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span
-                          className={`w-2 h-2 rounded-full shrink-0 ${
-                            branch.active ? 'bg-green-500' : 'bg-red-400'
-                          }`}
-                          title={branch.active ? 'Store Active' : 'Store Offline'}
-                        />
-                        <div className="truncate">
-                          <p className="truncate leading-tight font-medium">
-                            {branch.name}
-                          </p>
-                          <p
-                            className={`text-[10px] truncate ${
-                              isSelected ? 'text-white/80' : 'text-text-secondary'
-                            }`}
-                          >
-                            {branch.address}
-                          </p>
-                        </div>
+            {/* Specific Branches */}
+            <div className="pt-1">
+              <div className="px-3 py-1 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                Specific Outlet
+              </div>
+              {branches
+                .filter((b) => !search || b.name.toLowerCase().includes(search.toLowerCase()))
+                .map((b) => (
+                  <button
+                    key={b.id}
+                    onClick={() => {
+                      setSelectedCity(b.city);
+                      setSelectedBranchId(b.id);
+                      setIsOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg hover:bg-surface-hover transition-colors text-left ${
+                      selectedBranchId === b.id ? 'bg-surface-hover text-accent-light font-bold' : 'text-zinc-300'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-2">
+                      <Store className="w-3.5 h-3.5 text-accent-light" />
+                      <div className="truncate">
+                        <div>{b.name}</div>
+                        <div className="text-[10px] text-zinc-500">{b.city}</div>
                       </div>
-                      {isSelected && <Check className="w-4 h-4 shrink-0 ml-2" />}
-                    </button>
-                  );
-                })}
-              </div>
-            ))}
-
-            {filteredBranches.length === 0 && (
-              <div className="py-6 text-center text-text-secondary text-xs">
-                No matching outlets found
-              </div>
-            )}
+                    </div>
+                    {selectedBranchId === b.id && <Check className="w-4 h-4" />}
+                  </button>
+                ))}
+            </div>
           </div>
         </div>
       )}
     </div>
   );
 }
-
-export default BranchSwitcher;

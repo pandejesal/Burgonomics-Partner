@@ -220,14 +220,12 @@ export function PetpoojaStoresPage() {
                       {/* Webhook badge */}
                       <span
                         className={`px-2 py-0.5 rounded-md ${
-                          state.webhookStatus === "active"
+                          state.webhookSecretLinked
                             ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/10 dark:text-emerald-400"
-                            : state.webhookStatus === "degraded"
-                              ? "bg-amber-50 text-amber-700 dark:bg-amber-950/10 dark:text-amber-400"
-                              : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                            : "bg-amber-50 text-amber-700 dark:bg-amber-950/10 dark:text-amber-400"
                         }`}
                       >
-                        WEBHOOK: {state.webhookStatus}
+                        WEBHOOK: {state.webhookSecretLinked ? "ACTIVE" : "STANDBY"}
                       </span>
 
                       {/* Circuit breaker state */}
@@ -248,7 +246,7 @@ export function PetpoojaStoresPage() {
                         className={`px-2 py-0.5 rounded-md flex items-center gap-1 ${
                           state.posTerminalOnline
                             ? "bg-emerald-100 text-emerald-800"
-                            : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+                            : "bg-amber-50 text-amber-700 dark:bg-amber-950/10 dark:text-amber-400"
                         }`}
                       >
                         <Wifi size={8} />
@@ -285,8 +283,14 @@ export function PetpoojaStoresPage() {
             title={selectedStore.name}
             subtitle={`Integrated with POS node terminal ${selectedStore.petpoojaRestId}`}
             extra={
-              <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase font-mono bg-amber-500/10 text-amber-800 dark:text-amber-300">
-                GATEWAY STANDBY
+              <span
+                className={`px-3 py-1 rounded-full text-[10px] font-black uppercase font-mono ${
+                  selectedState.apiCredentialsLinked
+                    ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-300"
+                    : "bg-amber-500/10 text-amber-800 dark:text-amber-300"
+                }`}
+              >
+                {selectedState.apiCredentialsLinked ? "GATEWAY LIVE" : "GATEWAY STANDBY"}
               </span>
             }
           >

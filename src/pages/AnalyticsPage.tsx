@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAnalytics } from '@/hooks/useAnalytics';
+import { exportToCsv } from '@/utils/exportCsv';
 import { RevenueChart } from '@/components/analytics/RevenueChart';
 import { TopItems } from '@/components/analytics/TopItems';
 import { BranchComparison } from '@/components/analytics/BranchComparison';
@@ -30,20 +31,38 @@ export function AnalyticsPage() {
           </p>
         </div>
 
-        <div className="flex gap-1.5 p-1 bg-surface rounded-xl border border-border">
-          {(['week', 'month', 'year'] as const).map((p) => (
-            <button
-              key={p}
-              onClick={() => setPeriod(p)}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                period === p
-                  ? 'bg-primary text-white shadow-xs'
-                  : 'text-text-secondary hover:text-text-primary'
-              }`}
-            >
-              {p === 'week' ? 'This Week' : p === 'month' ? 'This Month' : 'Past Year'}
-            </button>
-          ))}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              exportToCsv('Burgonomics_Sales_Analytics', (analytics?.branchStats || []) as any[], [
+                { header: 'Branch Name', accessor: (b: any) => b.branchName },
+                { header: 'City', accessor: (b: any) => b.city || 'N/A' },
+                { header: 'Total Orders', accessor: (b: any) => b.orderCount },
+                { header: 'Total Revenue (INR)', accessor: (b: any) => b.revenue },
+                { header: 'Average Order Value (INR)', accessor: (b: any) => Math.round(b.averageOrderValue || 0) },
+              ]);
+            }}
+            className="flex items-center gap-2 px-3.5 py-2 bg-[#D95D0F] hover:bg-[#b84d0b] text-white rounded-xl font-semibold text-xs transition-colors shadow-sm cursor-pointer"
+          >
+            <TrendingUp className="w-3.5 h-3.5" />
+            <span>Export Analytics (.csv)</span>
+          </button>
+
+          <div className="flex gap-1.5 p-1 bg-surface rounded-xl border border-border">
+            {(['week', 'month', 'year'] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => setPeriod(p)}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                  period === p
+                    ? 'bg-primary text-white shadow-xs'
+                    : 'text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                {p === 'week' ? 'This Week' : p === 'month' ? 'This Month' : 'Past Year'}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

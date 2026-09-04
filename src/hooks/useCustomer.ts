@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { db } from '@/config/firebase';
 import { doc, getDoc, collection, query, where, getDocs, orderBy } from 'firebase/firestore';
 import type { Customer, Order } from '@/types';
+import { normalizeOrderDoc } from '@/utils/orderContract';
 
 interface CustomerWithOrders extends Customer {
   orders: Order[];
@@ -34,10 +35,9 @@ export function useCustomer(customerId: string) {
         )
       );
 
-      const orders = ordersSnap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-      })) as Order[];
+      const orders = ordersSnap.docs.map((d) =>
+        normalizeOrderDoc(d.id, d.data() as Record<string, any>)
+      );
 
       return {
         ...customerData,

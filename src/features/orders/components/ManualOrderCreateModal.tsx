@@ -1,0 +1,419 @@
+import React, { useState } from 'react';
+import {
+  X,
+  Plus,
+  Minus,
+  Trash2,
+  CheckCircle2,
+  Printer,
+  CreditCard,
+  Banknote,
+  QrCode,
+  ShoppingBag,
+  UtensilsCrossed,
+  Bike,
+} from 'lucide-react';
+import { useAuthStore } from '@/stores/authStore';
+import { useAppStore } from '@/stores/appStore';
+import { db } from '@/config/firebase';
+import { doc, setDoc, Timestamp } from 'firebase/firestore';
+import type { Order, OrderStatus, OrderType, OrderItem } from '@/types';
+import { toDeliveryStatusMeta } from '@/utils/orderContract';
+
+interface ManualOrderCreateModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onOrderCreated?: (order: Order) => void;
+}
+
+const MENU_ITEMS = [
+  { id: 'itm_paneer_makhani', name: 'Paneer Makhani Burst Burger', price: 199, petpoojaId: 'PP-BRG-103' },
+  { id: 'itm_cheese_lava', name: 'Cheese Lava Monster Burger', price: 249, petpoojaId: 'PP-BRG-104' },
+  { id: 'itm_classic_crunch', name: 'Classic Veggie Crunch Burger', price: 129, petpoojaId: 'PP-BRG-101' },
+  { id: 'itm_truffle_smash', name: 'Double Truffle Smash Burger', price: 349, petpoojaId: 'PP-BRG-107' },
+  { id: 'itm_peri_peri_fries', name: 'Peri-Peri Crinkle Fries', price: 99, petpoojaId: 'PP-SDE-301' },
+  { id: 'itm_cheesy_dip', name: 'Signature Garlic Herb Dip', price: 49, petpoojaId: 'PP-DIP-401' },
+  { id: 'itm_iced_tea', name: 'Peach Passion Iced Tea', price: 89, petpoojaId: 'PP-BEV-501' },
+];
+
+export function ManualOrderCreateModal({
+  isOpen,
+  onClose,
+  onOrderCreated,
+}: ManualOrderCreateModalProps) {
+  const { user } = useAuthStore();
+  const { selectedBranchId } = useAppStore();
+
+  const [orderType, setOrderType] = useState<OrderType>('takeaway');
+  const [tableNumber, setTableNumber] = useState('');
+  const [customerName, setCustomerName] = useState('Walk-in Customer');
+  const [customerPhone, setCustomerPhone] = useState('+91 ');
+  const [specialInstructions, setSpecialInstructions] = useState('');
+
+  const [selectedItems, setSelectedItems] = useState<
+    Array<{ item: (typeof MENU_ITEMS)[0]; quantity: number; notes?: string }>
+  >([
+    { item: MENU_ITEMS[0], quantity: 1 },
+    { item: MENU_ITEMS[4], quantity: 1 },
+  ]);
+
+  const [paymentMethod, setPaymentMethod] = useState<'cod' | 'upi' | 'razorpay'>('cod');
+  const [cashTendered, setCashTendered] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  if (!isOpen) return null;
+
+  const subtotal = selectedItems.reduce((acc, curr) => acc + curr.item.price * curr.quantity, 0);
+  const tax = Math.round(subtotal * 0.05); // 5% GST
+  const packagingFee = orderType === 'takeaway' ? 15 : 0;
+  const total = subtotal + tax + packagingFee;
+
+  const tenderedNumber = parseFloat(cashTendered) || 0;
+  const changeDue = Math.max(0, tenderedNumber - total);
+
+  const handleAddItem = (item: (typeof MENU_ITEMS)[0]) => {
+    setSelectedItems((prev) => {
+      const existing = prev.find((i) => i.item.id === item.id);
+      if (existing) {
+        return prev.map((i) => (i.item.id === item.id ? { ...i, quantity: i.quantity + 1 } : i));
+      }
+      return [...prev, { item, quantity: 1 }];
+    });
+  };
+
+  const handleUpdateQty = (itemId: string, delta: number) => {
+    setSelectedItems((prev) =>
+      prev
+        .map((i) => {
+          if (i.item.id === itemId) {
+            const nextQty = i.quantity + delta;
+            return nextQty > 0 ? { ...i, quantity: nextQty } : null;
+          }
+          return i;
+        })
+        .filter(Boolean) as Array<{ item: (typeof MENU_ITEMS)[0]; quantity: number; notes?: string }>
+    );
+  };
+
+  const handleCreateOrder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (selectedItems.length === 0) return;
+
+    setIsSubmitting(true);
+
+    const orderId = `ord_pos_${Date.now().toString().slice(-6)}`;
+    const branchId = selectedBranchId || user?.branchIds?.[0] || 'branch_surat_01';
+
+    const orderItems: OrderItem[] = selectedItems.map((i) => ({
+      itemId: i.item.id,
+      petpoojaItemId: i.item.petpoojaId,
+      name: i.item.name,
+      quantity: i.quantity,
+      price: i.item.price,
+      specialInstructions: i.notes,
+    }));
+
+    const newOrder: Order = {
+      id: orderId,
+      customerId: 'cust_walkin',
+      customerName: customerName || 'Walk-in Customer',
+      customerPhone: customerPhone || '+91 9999999999',
+      branchId,
+      branchName: branchId.includes('surat') ? 'Surat Adajan' : 'Ahmedabad SG Highway',
+      city: branchId.includes('surat') ? 'Surat' : 'Ahmedabad',
+      items: orderItems,
+      subtotal,
+      tax,
+      deliveryFee: 0,
+      total,
+      orderType,
+      tableNumber: orderType === 'dinein' ? tableNumber || '01' : undefined,
+      // Delivery-compatible object form (see orderContract); readers normalize.
+      status: toDeliveryStatusMeta('pending') as unknown as OrderStatus,
+      paymentMethod,
+      paymentStatus: 'completed',
+      petpoojaOrderId: `PP-${orderId}`,
+      petpoojaSyncStatus: 'synced',
+      kotPrinted: true,
+      specialInstructions,
+      createdAt: Timestamp.now(),
+      updatedAt: Timestamp.now(),
+    };
+
+    try {
+      const orderRef = doc(db, 'orders', orderId);
+      await setDoc(orderRef, newOrder);
+    } catch (err) {
+      console.warn('Simulated order in local memory:', err);
+    }
+
+    setIsSubmitting(false);
+    onOrderCreated?.(newOrder);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
+      <div className="bg-[#0F0F0F] border border-neutral-800 rounded-3xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+        {/* Header */}
+        <div className="p-4 sm:p-5 bg-neutral-900/90 border-b border-neutral-800 flex items-center justify-between">
+          <div>
+            <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+              <span>+ New Walk-in Counter Order</span>
+              <span className="text-[10px] px-2 py-0.5 rounded bg-[#0E4825] text-emerald-300 font-bold uppercase">
+                Instant Billing
+              </span>
+            </h2>
+            <p className="text-xs text-neutral-400">Fast cashier tender & Petpooja KOT generation</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-2 text-neutral-400 hover:text-white rounded-xl hover:bg-neutral-800 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Scrollable Content */}
+        <form onSubmit={handleCreateOrder} className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 text-xs sm:text-sm">
+          {/* Channel Selector */}
+          <div>
+            <label className="block text-xs font-bold uppercase text-neutral-400 mb-1.5">
+              Fulfillment Mode
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => setOrderType('takeaway')}
+                className={`py-2 px-3 rounded-xl border font-bold flex items-center justify-center gap-1.5 transition-colors ${
+                  orderType === 'takeaway'
+                    ? 'bg-emerald-700 text-white border-emerald-500 shadow-xs'
+                    : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white'
+                }`}
+              >
+                <ShoppingBag className="w-4 h-4" />
+                <span>Takeaway</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setOrderType('dinein')}
+                className={`py-2 px-3 rounded-xl border font-bold flex items-center justify-center gap-1.5 transition-colors ${
+                  orderType === 'dinein'
+                    ? 'bg-cyan-700 text-white border-cyan-500 shadow-xs'
+                    : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white'
+                }`}
+              >
+                <UtensilsCrossed className="w-4 h-4" />
+                <span>Dine-In</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setOrderType('delivery')}
+                className={`py-2 px-3 rounded-xl border font-bold flex items-center justify-center gap-1.5 transition-colors ${
+                  orderType === 'delivery'
+                    ? 'bg-orange-600 text-white border-orange-500 shadow-xs'
+                    : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white'
+                }`}
+              >
+                <Bike className="w-4 h-4" />
+                <span>Delivery</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Customer info */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-neutral-400 mb-1">Customer Name</label>
+              <input
+                type="text"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-700 text-white text-xs font-semibold focus:outline-none focus:border-[#FF6600]"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-neutral-400 mb-1">
+                {orderType === 'dinein' ? 'Table Number' : 'Phone Number'}
+              </label>
+              {orderType === 'dinein' ? (
+                <input
+                  type="text"
+                  placeholder="e.g. Table 04"
+                  value={tableNumber}
+                  onChange={(e) => setTableNumber(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-700 text-white text-xs font-semibold focus:outline-none focus:border-[#FF6600]"
+                  required
+                />
+              ) : (
+                <input
+                  type="tel"
+                  value={customerPhone}
+                  onChange={(e) => setCustomerPhone(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-700 text-white text-xs font-semibold focus:outline-none focus:border-[#FF6600]"
+                />
+              )}
+            </div>
+          </div>
+
+          {/* Quick Menu Item Picker */}
+          <div>
+            <label className="block text-xs font-bold uppercase text-neutral-400 mb-1.5">
+              Add Items from Menu
+            </label>
+            <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-1">
+              {MENU_ITEMS.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => handleAddItem(item)}
+                  className="px-2.5 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-white text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <span>{item.name}</span>
+                  <span className="font-bold text-[#FF6600]">₹{item.price}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Selected items order cart */}
+          <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-3 space-y-2">
+            <span className="text-[11px] uppercase font-bold text-neutral-500 block">
+              Cart Items ({selectedItems.length})
+            </span>
+            {selectedItems.map(({ item, quantity }, idx) => (
+              <div key={idx} className="flex items-center justify-between gap-2 py-1 border-b border-neutral-900">
+                <div className="min-w-0 flex-1">
+                  <p className="font-bold text-white text-xs truncate">{item.name}</p>
+                  <p className="text-[11px] text-neutral-400">₹{item.price} each</p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleUpdateQty(item.id, -1)}
+                    className="p-1 rounded bg-neutral-800 hover:bg-neutral-700 text-white"
+                  >
+                    <Minus className="w-3 h-3" />
+                  </button>
+                  <span className="font-mono font-bold text-white text-xs px-1">{quantity}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleUpdateQty(item.id, 1)}
+                    className="p-1 rounded bg-neutral-800 hover:bg-neutral-700 text-white"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Payment Method & Tender Mode */}
+          <div>
+            <label className="block text-xs font-bold uppercase text-neutral-400 mb-1.5">
+              Payment Tender
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => setPaymentMethod('cod')}
+                className={`py-2 px-3 rounded-xl border font-bold flex items-center justify-center gap-1.5 ${
+                  paymentMethod === 'cod'
+                    ? 'bg-emerald-700 text-white border-emerald-500'
+                    : 'bg-neutral-900 border-neutral-800 text-neutral-400'
+                }`}
+              >
+                <Banknote className="w-4 h-4" />
+                <span>Cash</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPaymentMethod('upi')}
+                className={`py-2 px-3 rounded-xl border font-bold flex items-center justify-center gap-1.5 ${
+                  paymentMethod === 'upi'
+                    ? 'bg-purple-700 text-white border-purple-500'
+                    : 'bg-neutral-900 border-neutral-800 text-neutral-400'
+                }`}
+              >
+                <QrCode className="w-4 h-4" />
+                <span>UPI QR</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPaymentMethod('razorpay')}
+                className={`py-2 px-3 rounded-xl border font-bold flex items-center justify-center gap-1.5 ${
+                  paymentMethod === 'razorpay'
+                    ? 'bg-blue-700 text-white border-blue-500'
+                    : 'bg-neutral-900 border-neutral-800 text-neutral-400'
+                }`}
+              >
+                <CreditCard className="w-4 h-4" />
+                <span>Card Machine</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Cash Change Calculator */}
+          {paymentMethod === 'cod' && (
+            <div className="p-3 rounded-xl bg-neutral-950 border border-neutral-800 flex items-center justify-between gap-3">
+              <div>
+                <label className="block text-[11px] font-bold text-neutral-400">Cash Received (₹)</label>
+                <input
+                  type="number"
+                  placeholder={String(total)}
+                  value={cashTendered}
+                  onChange={(e) => setCashTendered(e.target.value)}
+                  className="w-28 px-2 py-1 rounded bg-neutral-900 border border-neutral-700 text-white font-mono text-xs font-bold"
+                />
+              </div>
+              <div className="text-right">
+                <span className="text-[11px] font-bold text-neutral-400 block">Change to Return</span>
+                <span className="font-mono text-base font-black text-emerald-400">₹{changeDue}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Pricing Math Summary */}
+          <div className="p-3 rounded-xl bg-neutral-950 border border-neutral-800 space-y-1 text-xs text-neutral-400">
+            <div className="flex justify-between">
+              <span>Subtotal</span>
+              <span className="font-mono text-white">₹{subtotal}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>GST (5%)</span>
+              <span className="font-mono text-white">₹{tax}</span>
+            </div>
+            {packagingFee > 0 && (
+              <div className="flex justify-between">
+                <span>Store Packaging</span>
+                <span className="font-mono text-white">₹{packagingFee}</span>
+              </div>
+            )}
+            <div className="flex justify-between pt-1.5 border-t border-neutral-800 text-sm font-black text-white">
+              <span>Total Bill</span>
+              <span className="font-mono text-[#FF6600]">₹{total}</span>
+            </div>
+          </div>
+
+          {/* Submit button */}
+          <button
+            type="submit"
+            disabled={selectedItems.length === 0 || isSubmitting}
+            className="w-full h-12 rounded-xl bg-[#0E4825] hover:bg-[#135d30] text-emerald-300 font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer disabled:opacity-50"
+          >
+            <Printer className="w-4 h-4" />
+            <span>{isSubmitting ? 'Creating Order...' : `Place & Print KOT (₹${total})`}</span>
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+export default ManualOrderCreateModal;

@@ -45,9 +45,16 @@ export function PetpoojaDashboardPage() {
     refetchInterval: refreshInterval * 1000,
   });
 
+  const { data: queues, refetch: refetchQueues } = useQuery({
+    queryKey: ["petpooja-gateway-queues"],
+    queryFn: () => petpoojaGateway.getQueues(),
+    refetchInterval: refreshInterval * 1000,
+  });
+
   const handleManualRefresh = () => {
     refetchHealth();
     refetchMetrics();
+    refetchQueues();
     setLastRefreshed(new Date().toLocaleTimeString());
   };
 
@@ -61,6 +68,7 @@ export function PetpoojaDashboardPage() {
   const timeSeriesData = metrics?.timeSeries || [];
   const menuSyncDurationData = metrics?.menuSyncDuration || [];
   const prometheusText = metrics?.prometheusText || "";
+  const gatewayConnected = health?.connected === true;
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -82,7 +90,13 @@ export function PetpoojaDashboardPage() {
       {/* Standby sync row */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-[#1A1A1A] border border-gray-100 dark:border-gray-800/80 rounded-[20px] p-4 shadow-sm">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-700 dark:text-amber-400">
+          <div
+            className={`flex h-10 w-10 items-center justify-center rounded-2xl ${
+              gatewayConnected
+                ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                : "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+            }`}
+          >
             <Activity size={18} className="animate-pulse" />
           </div>
           <div>
@@ -90,9 +104,15 @@ export function PetpoojaDashboardPage() {
               Gateway Daemon State
             </span>
             <div className="flex items-center gap-2 mt-0.5">
-              <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
+              <span
+                className={`inline-block h-2 w-2 rounded-full ${
+                  gatewayConnected ? "bg-emerald-500" : "bg-amber-500"
+                }`}
+              />
               <span className="text-xs font-bold text-gray-800 dark:text-gray-200">
-                STANDBY • Awaiting live merchant credentials
+                {gatewayConnected
+                  ? "LIVE • Gateway connected"
+                  : "STANDBY • Awaiting live merchant credentials"}
               </span>
             </div>
           </div>
@@ -124,10 +144,10 @@ export function PetpoojaDashboardPage() {
         <motion.div variants={itemVariants}>
           <StatCard
             title="Gateway Status"
-            value="Standby"
+            value={gatewayConnected ? "Healthy" : "Standby"}
             icon={CheckCircle}
-            subtext="Mock interface active"
-            trend={{ value: 100, label: "Simulated readiness", isPositive: true }}
+            subtext={health?.message || "Mock interface active"}
+            trend={{ value: 0, label: "Live link rate", isPositive: false }}
           />
         </motion.div>
 
@@ -143,10 +163,10 @@ export function PetpoojaDashboardPage() {
 
         <motion.div variants={itemVariants}>
           <StatCard
-            title="BullMQ Queue Health"
-            value="Standby"
+            title="Queue Health"
+            value={metrics?.queueStatusLabel || "STANDBY"}
             icon={Zap}
-            subtext="0 pending, 0 failed, 0 DLQ"
+            subtext={`${queues?.waitingJobsCount ?? 0} pending, ${queues?.failedJobsCount ?? 0} failed, 0 DLQ`}
             trend={{ value: 0, label: "Idle queue latency", isPositive: true }}
           />
         </motion.div>

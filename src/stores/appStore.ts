@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 interface AppState {
+  selectedCity: string;
+  setSelectedCity: (city: string) => void;
   selectedBranchId: string | null;
   setSelectedBranchId: (id: string | null) => void;
   sidebarOpen: boolean;
@@ -12,6 +14,8 @@ interface AppState {
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
+      selectedCity: 'all',
+      setSelectedCity: (city) => set({ selectedCity: city }),
       selectedBranchId: null,
       setSelectedBranchId: (id) => set({ selectedBranchId: id }),
       sidebarOpen: false,
@@ -20,7 +24,11 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'burgonomics-partner-app-storage',
-      partialize: (state) => ({ selectedBranchId: state.selectedBranchId }),
+      partialize: (state) => ({
+        selectedCity: state.selectedCity,
+        selectedBranchId: state.selectedBranchId,
+      }),
     }
   )
 );
+

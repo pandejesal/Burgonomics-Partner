@@ -14,7 +14,17 @@ import type { MenuItem, MenuCategory } from '@/types';
 import {
   syncPetpoojaMenuForBranch,
   checkAndAutoSyncMenu,
+  BURGONOMICS_DEFAULT_CATEGORIES,
+  BURGONOMICS_63_ITEMS,
 } from '@/services/petpoojaSync';
+
+/**
+ * Seed catalog is DEV-only (Runbook §8). Production with an empty/errored
+ * menu backend shows an empty menu — never 63 invented items.
+ */
+const ALLOW_SEED_CATALOG = import.meta.env.DEV;
+const SEED_CATEGORIES: MenuCategory[] = ALLOW_SEED_CATALOG ? BURGONOMICS_DEFAULT_CATEGORIES : [];
+const SEED_ITEMS: MenuItem[] = ALLOW_SEED_CATALOG ? (BURGONOMICS_63_ITEMS as MenuItem[]) : [];
 
 export function useMenu() {
   const { user } = useAuth();
@@ -24,10 +34,10 @@ export function useMenu() {
   const branchId = selectedBranchId || user?.branchIds?.[0] || 'store-ahmedabad-prahladnagar';
 
   // Query categories
-  const { data: categories = [], isLoading: categoriesLoading } = useQuery<MenuCategory[]>({
+  const { data: categories = SEED_CATEGORIES, isLoading: categoriesLoading } = useQuery<MenuCategory[]>({
     queryKey: ['menuCategories', branchId],
     queryFn: async () => {
-      if (!branchId) return [];
+      if (!branchId) return SEED_CATEGORIES;
 
       try {
         const catsSnap = await getDocs(
@@ -35,12 +45,18 @@ export function useMenu() {
         );
 
         if (catsSnap.empty) {
-          // Trigger initial seed if empty
-          await syncPetpoojaMenuForBranch(branchId);
-          const freshSnap = await getDocs(collection(db, 'menu', branchId, 'categories'));
-          return freshSnap.docs
-            .map((d) => ({ id: d.id, ...d.data() }))
-            .sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)) as MenuCategory[];
+          try {
+            await syncPetpoojaMenuForBranch(branchId);
+            const freshSnap = await getDocs(collection(db, 'menu', branchId, 'categories'));
+            if (!freshSnap.empty) {
+              return freshSnap.docs
+                .map((d) => ({ id: d.id, ...d.data() }))
+                .sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)) as MenuCategory[];
+            }
+          } catch {
+            // sync denied — fall through to seeds (dev) / empty (prod)
+          }
+          return SEED_CATEGORIES;
         }
 
         return catsSnap.docs
@@ -51,17 +67,17 @@ export function useMenu() {
           .sort((a: any, b: any) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)) as MenuCategory[];
       } catch (err) {
         console.warn('Error loading menu categories:', err);
-        return [];
+        return SEED_CATEGORIES;
       }
     },
     enabled: !!branchId,
   });
 
   // Query items
-  const { data: items = [], isLoading: itemsLoading } = useQuery<MenuItem[]>({
+  const { data: items = SEED_ITEMS, isLoading: itemsLoading } = useQuery<MenuItem[]>({
     queryKey: ['menuItems', branchId],
     queryFn: async () => {
-      if (!branchId) return [];
+      if (!branchId) return SEED_ITEMS;
 
       try {
         const itemsSnap = await getDocs(
@@ -69,9 +85,16 @@ export function useMenu() {
         );
 
         if (itemsSnap.empty) {
-          await syncPetpoojaMenuForBranch(branchId);
-          const freshItems = await getDocs(collection(db, 'menu', branchId, 'items'));
-          return freshItems.docs.map((d) => ({ id: d.id, ...d.data() })) as MenuItem[];
+          try {
+            await syncPetpoojaMenuForBranch(branchId);
+            const freshItems = await getDocs(collection(db, 'menu', branchId, 'items'));
+            if (!freshItems.empty) {
+              return freshItems.docs.map((d) => ({ id: d.id, ...d.data() })) as MenuItem[];
+            }
+          } catch {
+            // sync denied — fall through to seeds (dev) / empty (prod)
+          }
+          return SEED_ITEMS;
         }
 
         return itemsSnap.docs.map((d) => ({
@@ -80,7 +103,7 @@ export function useMenu() {
         })) as MenuItem[];
       } catch (err) {
         console.warn('Error loading menu items:', err);
-        return [];
+        return SEED_ITEMS;
       }
     },
     enabled: !!branchId,

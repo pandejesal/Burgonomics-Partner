@@ -163,7 +163,6 @@ export function AdminRoutes() {
           <Route path="webhooks" element={<PetpoojaWebhooksPage />} />
           <Route path="queues" element={<PetpoojaQueuesPage />} />
           <Route path="health" element={<PetpoojaHealthPage />} />
-          <Route path="delivery-queue" element={<DeliveryQueuePage />} />
         </Route>
 
         {/* Delivery Queue (Mounted under PetpoojaOperationsLayout) */}

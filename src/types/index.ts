@@ -1,7 +1,13 @@
 import type { Timestamp } from 'firebase/firestore';
 
 // User types
-export type UserRole = 'brand_owner' | 'regional_manager' | 'branch_owner';
+export type UserRole =
+  | 'brand_owner'
+  | 'developer'
+  | 'support'
+  | 'regional_manager'
+  | 'branch_owner'
+  | 'branch_staff';
 
 export interface User {
   id: string;
@@ -11,11 +17,15 @@ export interface User {
   branchIds: string[];
   cityIds: string[];
   phone: string;
+  avatar?: string;
   fcmToken?: string;
   createdAt: Timestamp;
 }
 
-// Branch types
+// Branch & Future Store types
+export type BranchStatus = 'active' | 'inactive' | 'coming_soon';
+export type AcceptingOrdersStatus = 'open' | 'busy' | 'closed';
+
 export interface Branch {
   id: string;
   name: string;
@@ -23,15 +33,39 @@ export interface Branch {
   address: string;
   phone: string;
   active: boolean;
+  status?: BranchStatus;
+  acceptingOrdersStatus?: AcceptingOrdersStatus;
+  prepTimeMinutes?: number;
+  deliveryRadiusKm?: number;
+  announcementBanner?: string;
+  expectedLaunchDate?: string;
+  bannerImage?: string;
+  petpoojaStoreId?: string;
+  allowComingSoonSubscribers?: boolean;
+  subscribersCount?: number;
   coordinates: {
     lat: number;
     lng: number;
   };
-  operatingHours: {
+  operatingHours?: {
     open: string;
     close: string;
   };
   createdAt: Timestamp;
+  updatedAt?: Timestamp;
+}
+
+export interface FutureStoreInput {
+  name: string;
+  city: string;
+  address: string;
+  phone: string;
+  expectedLaunchDate: string;
+  bannerImage?: string;
+  petpoojaStoreId?: string;
+  allowComingSoonSubscribers: boolean;
+  lat: number;
+  lng: number;
 }
 
 // Order types
@@ -61,6 +95,8 @@ export interface Order {
   customerName: string;
   customerPhone: string;
   branchId: string;
+  branchName?: string;
+  city?: string;
   items: OrderItem[];
   subtotal: number;
   tax: number;
@@ -73,6 +109,7 @@ export interface Order {
   paymentMethod: 'razorpay' | 'cod' | 'upi';
   paymentStatus: 'pending' | 'completed' | 'failed';
   petpoojaOrderId?: string;
+  petpoojaSyncStatus?: 'synced' | 'failed' | 'pending' | 'not_applicable';
   porterOrderId?: string;
   deliveryStatus?: 'dispatched' | 'no_riders_available' | 'manually_assigned';
   riderName?: string;
@@ -87,7 +124,7 @@ export interface Order {
   updatedAt: Timestamp;
 }
 
-// Customer types
+// Customer CRM types
 export interface Address {
   id: string;
   label: string;
@@ -105,34 +142,97 @@ export interface Customer {
   photoUrl?: string;
   addresses: Address[];
   loyaltyPoints: number;
+  totalOrders?: number;
+  totalSpend?: number;
+  averageOrderValue?: number;
+  favoriteBranchId?: string;
+  favoriteBranchName?: string;
+  favoriteCity?: string;
+  segment?: 'VIP' | 'Regular' | 'New' | 'At-Risk';
+  lastOrderDate?: Timestamp | string;
   createdAt: Timestamp;
 }
 
-// Ticket types
-export type TicketType =
-  | 'wrong_item'
-  | 'late_delivery'
-  | 'quality'
-  | 'payment'
-  | 'maintenance'
-  | 'supply'
-  | 'equipment'
+// Chat types
+export type ChatType = 'branch_channel' | 'direct_dm';
+
+export interface ChatMessage {
+  id: string;
+  chatId: string;
+  senderId: string;
+  senderName: string;
+  senderRole: UserRole;
+  senderAvatar?: string;
+  text: string;
+  imageUrl?: string;
+  createdAt: Timestamp;
+  readBy?: string[];
+}
+
+export interface ChatThread {
+  id: string;
+  type: ChatType;
+  title: string;
+  branchId?: string;
+  branchName?: string;
+  participantIds: string[];
+  participantNames: Record<string, string>;
+  lastMessageText?: string;
+  lastMessageSender?: string;
+  lastMessageAt?: Timestamp;
+  unreadCount?: number;
+  createdAt: Timestamp;
+}
+
+// Ticket & Issue types
+export type TicketCategory =
+  | 'pos_sync'
+  | 'app_bug'
+  | 'hardware_printer'
+  | 'inventory_stock'
+  | 'customer_escalation'
+  | 'payment_refund'
   | 'other';
 
+export type TicketPriority = 'urgent' | 'high' | 'medium' | 'low';
 export type TicketStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
+
+export type TicketType = TicketCategory;
+
+export interface TicketComment {
+  id: string;
+  authorId: string;
+  authorName: string;
+  authorRole: UserRole;
+  text: string;
+  createdAt: Timestamp;
+}
 
 export interface Ticket {
   id: string;
+  ticketNumber?: string;
+  title: string;
   customerId?: string;
   branchId: string;
-  raisedBy: 'customer' | 'branch_owner';
-  type: TicketType;
+  branchName?: string;
+  city?: string;
+  raisedById: string;
+  raisedByName: string;
+  raisedByRole: UserRole;
+  category: TicketCategory;
+  priority: TicketPriority;
   message: string;
   orderId?: string;
   status: TicketStatus;
   assignedTo?: string;
+  assignedToName?: string;
+  resolvedById?: string;
+  resolvedByName?: string;
+  resolvedAt?: Timestamp;
   resolution?: string;
+  resolutionNotes?: string;
   attachments?: string[];
+  comments?: TicketComment[];
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -159,7 +259,7 @@ export interface MenuItem {
 }
 
 // Notification types
-export type NotificationType = 'order' | 'ticket' | 'system';
+export type NotificationType = 'order' | 'ticket' | 'chat' | 'system';
 
 export interface Notification {
   id: string;
@@ -167,6 +267,7 @@ export interface Notification {
   title: string;
   message: string;
   type: NotificationType;
+  targetId?: string;
   read: boolean;
   readAt?: Timestamp;
   createdAt: Timestamp;

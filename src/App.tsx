@@ -17,8 +17,8 @@ import { SettingsPage } from '@/pages/SettingsPage';
 import { DeliveryQueuePage } from '@/pages/DeliveryQueuePage';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
-
 import { AdminRoutes } from '@/pages/admin/AdminRoutes';
+import { ChatPage } from '@/pages/ChatPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -49,28 +49,37 @@ function App() {
               <Route path="/delivery-queue" element={<DeliveryQueuePage />} />
               <Route path="/customers" element={<CustomersPage />} />
               <Route path="/customers/:id" element={<CustomerDetailPage />} />
+              <Route path="/chat" element={<ChatPage />} />
               <Route path="/tickets" element={<TicketsPage />} />
               <Route path="/tickets/:id" element={<TicketDetailPage />} />
               <Route path="/menu" element={<MenuPage />} />
               <Route path="/notifications" element={<NotificationsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
 
-
-              {/* Brand owner only */}
+              {/* Brand owner, Developer, Support & Regional Manager */}
               <Route
                 path="/branches"
                 element={
-                  <ProtectedRoute allowedRoles={['brand_owner']}>
+                  <ProtectedRoute
+                    allowedRoles={['brand_owner', 'developer', 'support', 'regional_manager']}
+                  >
                     <BranchesPage />
                   </ProtectedRoute>
                 }
               />
 
-              {/* Brand owner & Regional Manager */}
               <Route
                 path="/analytics"
                 element={
-                  <ProtectedRoute allowedRoles={['brand_owner', 'regional_manager']}>
+                  <ProtectedRoute
+                    allowedRoles={[
+                      'brand_owner',
+                      'developer',
+                      'support',
+                      'regional_manager',
+                      'branch_owner',
+                    ]}
+                  >
                     <AnalyticsPage />
                   </ProtectedRoute>
                 }
@@ -78,7 +87,9 @@ function App() {
               <Route
                 path="/users"
                 element={
-                  <ProtectedRoute allowedRoles={['brand_owner', 'regional_manager']}>
+                  <ProtectedRoute
+                    allowedRoles={['brand_owner', 'developer', 'support', 'regional_manager']}
+                  >
                     <UsersPage />
                   </ProtectedRoute>
                 }

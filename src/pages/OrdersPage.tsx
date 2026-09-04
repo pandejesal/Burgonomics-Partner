@@ -1,128 +1,164 @@
-import { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useOrders } from '@/hooks/useOrders';
-import type { OrderStatus } from '@/types';
-import { Badge } from '@/components/ui/Badge';
-import { Spinner } from '@/components/ui/Spinner';
-import { Search } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
-
-const statusFilters: { value: OrderStatus | 'all'; label: string }[] = [
-  { value: 'all', label: 'All Orders' },
-  { value: 'pending', label: 'Pending' },
-  { value: 'accepted', label: 'Accepted' },
-  { value: 'preparing', label: 'Preparing' },
-  { value: 'ready', label: 'Ready' },
-  { value: 'out_for_delivery', label: 'Out for Delivery' },
-  { value: 'delivered', label: 'Delivered' },
-  { value: 'cancelled', label: 'Cancelled' },
-];
-
-const statusColors: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-800',
-  accepted: 'bg-blue-100 text-blue-800',
-  preparing: 'bg-purple-100 text-purple-800',
-  ready: 'bg-green-100 text-green-800',
-  out_for_delivery: 'bg-indigo-100 text-indigo-800',
-  delivered: 'bg-green-100 text-green-800',
-  cancelled: 'bg-red-100 text-red-800',
-};
+import { useAuthStore } from '@/stores/authStore';
+import { exportToCsv } from '@/utils/exportCsv';
+import {
+  OrderFiltersBar,
+  OrderTableList,
+  ManualOrderCreateModal,
+} from '@/features/orders';
+import {
+  ChefHat,
+  Download,
+  Printer,
+  Sparkles,
+} from 'lucide-react';
+import { toast } from 'sonner';
+import type { Order, OrderStatus, OrderType } from '@/types';
 
 export function OrdersPage() {
+  const { user } = useAuthStore();
+
+  const [channelFilter, setChannelFilter] = useState<OrderType | 'all'>('all');
   const [statusFilter, setStatusFilter] = useState<OrderStatus | 'all'>('all');
+  const [dateRange, setDateRange] = useState<'today' | 'week' | 'month' | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
-  const { orders, isLoading } = useOrders({ status: statusFilter });
+  const { orders = [], isLoading, updateOrderStatus } = useOrders({
+    status: statusFilter,
+    dateRange,
+  });
 
-  const filteredOrders = orders?.filter(
-    (order) =>
-      order.customerName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.id.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Filtered orders computation
+  const filteredOrders = useMemo(() => {
+    return orders.filter((o) => {
+      // 1. Channel Filter
+      if (channelFilter !== 'all' && o.orderType !== channelFilter) {
+        return false;
+      }
+
+      // 2. Status Filter
+      if (statusFilter !== 'all' && o.status !== statusFilter) {
+        return false;
+      }
+
+      // 3. Search query
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const shortCode = (o as any).shortCode || (o as any).orderNumber || o.id;
+        const matchesId = shortCode.toLowerCase().includes(q) || o.id.toLowerCase().includes(q);
+        const matchesCustomer = (o.customerName || '').toLowerCase().includes(q);
+        const matchesPhone = (o.customerPhone || '').includes(q);
+        const matchesBranch = (o.branchName || '').toLowerCase().includes(q);
+
+        if (!matchesId && !matchesCustomer && !matchesPhone && !matchesBranch) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [orders, channelFilter, statusFilter, searchQuery]);
+
+  const handleExportCsv = () => {
+    exportToCsv('Burgonomics_Live_Orders_Report', filteredOrders, [
+      { header: 'Order ID', accessor: (o) => (o as any).shortCode || o.id },
+      { header: 'Customer Name', accessor: (o) => o.customerName },
+      { header: 'Customer Phone', accessor: (o) => o.customerPhone },
+      { header: 'Branch', accessor: (o) => o.branchName || o.branchId },
+      { header: 'City', accessor: (o) => o.city || 'N/A' },
+      { header: 'Order Type', accessor: (o) => o.orderType },
+      { header: 'Status', accessor: (o) => o.status },
+      { header: 'Payment Method', accessor: (o) => o.paymentMethod },
+      { header: 'Payment Status', accessor: (o) => o.paymentStatus },
+      { header: 'Subtotal (INR)', accessor: (o) => o.subtotal },
+      { header: 'Tax (INR)', accessor: (o) => o.tax },
+      { header: 'Delivery Fee (INR)', accessor: (o) => o.deliveryFee },
+      { header: 'Total (INR)', accessor: (o) => o.total },
+      { header: 'Petpooja POS ID', accessor: (o) => o.petpoojaOrderId || 'N/A' },
+      { header: 'Petpooja Sync', accessor: (o) => o.petpoojaSyncStatus || 'synced' },
+    ]);
+  };
+
+  const handlePrintKot = (order: Order) => {
+    toast.success(`Printing 80mm Thermal KOT for #${order.id.slice(0, 6).toUpperCase()}...`);
+  };
+
+  const handleDispatchPorter = (orderId: string) => {
+    toast.success(`Initiating Porter Rider dispatch for #${orderId.slice(0, 6).toUpperCase()}...`);
+  };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row gap-4">
-        <h1 className="text-2xl font-bold text-text-primary">Orders</h1>
+    <div className="space-y-6 pb-12">
+      {/* Top Operations Header */}
+      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-white tracking-wide flex items-center gap-2.5">
+            <span>Live Orders & Petpooja Billing</span>
+            <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#0E4825] border border-emerald-500/40 text-emerald-300 font-bold">
+              Realtime Synced
+            </span>
+          </h1>
+          <p className="text-xs text-neutral-400">
+            Real-time customer order stream synchronized with Petpooja POS & Kitchen Makeline
+          </p>
+        </div>
 
-        <div className="flex-1 flex gap-4">
-          {/* Search */}
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-secondary" />
-            <input
-              type="text"
-              placeholder="Search orders..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 rounded-xl border border-border focus:outline-none focus:ring-2 focus:ring-primary"
-            />
-          </div>
-
-          {/* Status Filter */}
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as OrderStatus | 'all')}
-            className="px-4 py-2 rounded-xl border border-border focus:outline-none focus:ring-2 focus:ring-primary"
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <Link
+            to="/kds"
+            className="flex items-center gap-2 px-4 py-2.5 bg-[#0E4825] hover:bg-[#135d30] text-emerald-300 border border-emerald-500/40 rounded-xl font-bold text-xs transition-colors shadow-sm cursor-pointer"
           >
-            {statusFilters.map((filter) => (
-              <option key={filter.value} value={filter.value}>
-                {filter.label}
-              </option>
-            ))}
-          </select>
+            <ChefHat className="w-4 h-4 text-emerald-300" />
+            <span>Open Kitchen KDS</span>
+          </Link>
+
+          <button
+            type="button"
+            onClick={handleExportCsv}
+            className="flex items-center gap-2 px-4 py-2.5 bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-300 hover:text-white rounded-xl font-semibold text-xs transition-colors shadow-xs cursor-pointer"
+          >
+            <Download className="w-4 h-4" />
+            <span>Export CSV</span>
+          </button>
         </div>
       </div>
 
-      {isLoading ? (
-        <div className="flex justify-center py-12">
-          <Spinner size="lg" />
-        </div>
-      ) : !filteredOrders?.length ? (
-        <div className="text-center py-12 text-text-secondary">
-          No orders found
-        </div>
-      ) : (
-        <div className="bg-surface rounded-2xl border border-border divide-y divide-border">
-          {filteredOrders.map((order) => (
-            <Link
-              key={order.id}
-              to={`/orders/${order.id}`}
-              className="flex items-center justify-between p-4 hover:bg-primary/5 transition-colors"
-            >
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
-                  <span className="text-primary font-medium">
-                    {order.customerName?.charAt(0) || '?'}
-                  </span>
-                </div>
-                <div>
-                  <p className="font-medium text-text-primary">
-                    {order.customerName}
-                  </p>
-                  <p className="text-sm text-text-secondary">
-                    #{order.id.slice(-6)} • {order.orderType}
-                  </p>
-                  <p className="text-xs text-text-secondary">
-                    {order.createdAt &&
-                      formatDistanceToNow(order.createdAt.toDate(), {
-                        addSuffix: true,
-                      })}
-                  </p>
-                </div>
-              </div>
+      {/* Multi-Filter & Search Bar */}
+      <OrderFiltersBar
+        channelFilter={channelFilter}
+        onChannelChange={setChannelFilter}
+        statusFilter={statusFilter}
+        onStatusChange={setStatusFilter}
+        dateRange={dateRange}
+        onDateRangeChange={setDateRange}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        onOpenCreateModal={() => setIsCreateModalOpen(true)}
+        totalCount={orders.length}
+        filteredCount={filteredOrders.length}
+      />
 
-              <div className="text-right">
-                <p className="font-semibold text-text-primary">
-                  ₹{order.total?.toLocaleString()}
-                </p>
-                <Badge className={statusColors[order.status]}>
-                  {order.status}
-                </Badge>
-              </div>
-            </Link>
-          ))}
-        </div>
-      )}
+      {/* High-Contrast Data Table List */}
+      <OrderTableList
+        orders={filteredOrders}
+        isLoading={isLoading}
+        onPrintKot={handlePrintKot}
+        onDispatchPorter={handleDispatchPorter}
+      />
+
+      {/* Walk-in Order Creation Modal */}
+      <ManualOrderCreateModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onOrderCreated={(order) => {
+          toast.success(`Order #${order.id.slice(0, 6).toUpperCase()} created & KOT dispatched!`);
+        }}
+      />
     </div>
   );
 }
+
+export default OrdersPage;
