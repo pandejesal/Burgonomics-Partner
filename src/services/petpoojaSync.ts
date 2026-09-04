@@ -4,6 +4,8 @@ import {
   doc,
   writeBatch,
   getDocs,
+  query,
+  where,
   Timestamp,
 } from 'firebase/firestore';
 import type { MenuCategory, MenuItem } from '@/types';
@@ -869,11 +871,13 @@ export async function syncPetpoojaMenuForBranch(branchId: string): Promise<{
 }
 
 /**
- * Check if the branch menu requires an hourly sync.
+ * Check if the branch menu requires an hourly sync (canonical `products`).
  */
 export async function checkAndAutoSyncMenu(branchId: string): Promise<boolean> {
   try {
-    const itemsSnap = await getDocs(collection(db, 'menu', branchId, 'items'));
+    const itemsSnap = await getDocs(
+      query(collection(db, 'products'), where('branchId', '==', branchId))
+    );
 
     if (itemsSnap.empty) {
       await syncPetpoojaMenuForBranch(branchId);

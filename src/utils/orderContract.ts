@@ -29,9 +29,8 @@ import {
  * writes go out in Delivery's `{code,label,kind,terminal}` object form so
  * customer-side tracking keeps working after a kitchen bump.
  * Store↔branch identity resolves via storeBranchRegistry.
- *
- * Out of scope (separate break): the `petpooja_products` vs
- * `menu/{branchId}/items` menu paths.
+ * (Menu pipeline is unified separately on the canonical `products`
+ * collection — see Runbook §5/§9.)
  */
 
 /** Delivery UPPERCASE code (or legacy lowercase) → Partner status. */
