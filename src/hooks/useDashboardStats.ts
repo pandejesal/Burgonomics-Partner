@@ -13,6 +13,8 @@ interface DashboardStats {
   ordersToday: number;
   revenueToday: number;
   recentOrders: any[];
+  /** Data sources that failed — figures may be partial. Never silent. */
+  warnings: string[];
 }
 
 const DEFAULT_RECENT_ORDERS = [
@@ -69,6 +71,7 @@ export function useDashboardStats() {
       let orders: any[] = [];
       let customers: any[] = [];
       let tickets: any[] = [];
+      const warnings: string[] = [];
 
       try {
         // Normalize: delivery-app docs share this collection with a nested shape.
@@ -101,6 +104,7 @@ export function useDashboardStats() {
         }
       } catch (err) {
         console.warn('Using resilient orders fallback:', err);
+        warnings.push('Order data failed to load.');
       }
 
       try {
@@ -108,6 +112,7 @@ export function useDashboardStats() {
         customers = customersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
       } catch (err) {
         console.warn('Using resilient customers fallback:', err);
+        warnings.push('Customer data failed to load.');
       }
 
       try {
@@ -119,6 +124,7 @@ export function useDashboardStats() {
         tickets = ticketsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
       } catch (err) {
         console.warn('Using resilient tickets fallback:', err);
+        warnings.push('Ticket data failed to load.');
       }
 
       // Filter by city if selected
@@ -152,6 +158,7 @@ export function useDashboardStats() {
         ordersToday,
         revenueToday,
         recentOrders,
+        warnings,
       };
     },
   });

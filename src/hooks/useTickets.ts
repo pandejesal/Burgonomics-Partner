@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/authStore';
 import { useAppStore } from '@/stores/appStore';
@@ -17,24 +18,28 @@ import type { Ticket, TicketStatus, TicketType } from '@/types';
 
 interface UseTicketsParams {
   status?: TicketStatus | 'all';
+  tier?: 'all' | 'branch' | 'brand_support' | 'developer_team' | 'resolved';
 }
 
 export function useTickets(params: UseTicketsParams = {}) {
   const { user } = useAuthStore();
   const { selectedBranchId } = useAppStore();
   const queryClient = useQueryClient();
+  // Sources that failed this fetch — surfaced in UI, never console-only.
+  const warningsRef = useRef<string[]>([]);
 
   const { data: tickets = [], isLoading, error } = useQuery({
     queryKey: ['tickets', user?.id, user?.role, selectedBranchId, params],
     queryFn: async (): Promise<Ticket[]> => {
       if (!user) throw new Error('Not authenticated');
+      warningsRef.current = [];
 
       let branchIds: string[] = [];
 
-      if (selectedBranchId) {
+      if (selectedBranchId && selectedBranchId !== 'all') {
         branchIds = [selectedBranchId];
       } else {
-        if (user.role === 'brand_owner') {
+        if (['brand_owner', 'developer', 'support'].includes(user.role)) {
           const branchesSnap = await getDocs(collection(db, 'branches'));
           branchIds = branchesSnap.docs.map((d) => d.id);
         } else if (user.role === 'regional_manager') {
@@ -48,68 +53,198 @@ export function useTickets(params: UseTicketsParams = {}) {
       }
 
       if (branchIds.length === 0) {
-        branchIds = ['default-branch'];
+        branchIds = ['branch_surat_01', 'branch_ahmedabad_01'];
       }
 
-      const constraints: any[] = [
-        where('branchId', 'in', branchIds.slice(0, 10)),
-        orderBy('createdAt', 'desc'),
-      ];
+      const list: Ticket[] = [];
 
-      if (params.status && params.status !== 'all') {
-        constraints.unshift(where('status', '==', params.status));
-      }
-
+      // 1. Fetch from support_tickets collection (Primary)
       try {
-        const ticketsSnap = await getDocs(
-          query(collection(db, 'tickets'), ...constraints)
+        const supportConstraints: any[] = [
+          where('branchId', 'in', branchIds.slice(0, 10)),
+          orderBy('createdAt', 'desc'),
+        ];
+        if (params.status && params.status !== 'all') {
+          supportConstraints.unshift(where('status', '==', params.status));
+        }
+
+        const supportSnap = await getDocs(
+          query(collection(db, 'support_tickets'), ...supportConstraints)
         );
 
-        return ticketsSnap.docs.map((d) => ({
-          id: d.id,
-          ...d.data(),
-        })) as Ticket[];
+        supportSnap.forEach((d) => {
+          const data = d.data();
+          list.push({
+            id: d.id,
+            ticketNumber: data.ticketNumber || d.id,
+            title: data.subject || data.title || 'Customer Support Incident',
+            branchId: data.branchId,
+            branchName: data.branchName || data.branchId,
+            category: data.category || 'customer_escalation',
+            priority: data.priority || 'medium',
+            message: data.description || data.message || '',
+            orderId: data.orderId,
+            status: data.status || 'open',
+            raisedById: data.customerId || data.raisedById || 'customer',
+            raisedByName: data.customerName || data.raisedByName || 'Customer',
+            raisedByRole: 'customer',
+            assignedTo: data.assignedTo || { tier: 'branch' },
+            attachments: data.attachments || [],
+            resolution: data.resolution?.notes || data.resolution || '',
+            createdAt: data.createdAt || Timestamp.now(),
+            updatedAt: data.updatedAt || Timestamp.now(),
+          } as any);
+        });
       } catch (err) {
-        console.warn('Error fetching tickets, returning defaults:', err);
-        return [
-          {
-            id: 'tkt_001',
-            ticketNumber: 'TKT-2026-001',
-            title: 'Petpooja menu pricing sync discrepancy on Double Truffle',
-            branchId: 'branch_surat_01',
-            branchName: 'Surat Adajan',
-            city: 'Surat',
-            category: 'pos_sync',
-            priority: 'high',
-            message: 'Price in Petpooja shows ₹349 but delivery app displayed ₹319 before sync.',
-            status: 'open',
-            raisedById: 'user_branch_01',
-            raisedByName: 'Sanjay Patel',
-            raisedByRole: 'branch_owner',
-            createdAt: Timestamp.now(),
-            updatedAt: Timestamp.now(),
-          },
-          {
-            id: 'tkt_002',
-            ticketNumber: 'TKT-2026-002',
-            title: 'Kitchen KOT thermal printer roll jammed',
-            branchId: 'branch_ahmedabad_01',
-            branchName: 'Ahmedabad SG Highway',
-            city: 'Ahmedabad',
-            category: 'hardware_printer',
-            priority: 'urgent',
-            message: 'Thermal printer 2 in burger station needs replacement roll or driver reset.',
-            status: 'resolved',
-            resolution: 'Thermal printer restarted and new 80mm roll loaded. Test print successful.',
-            resolvedByName: 'Alex (Lead Dev)',
-            raisedById: 'user_staff_01',
-            raisedByName: 'Ramesh (Kitchen)',
-            raisedByRole: 'branch_staff',
-            createdAt: Timestamp.now(),
-            updatedAt: Timestamp.now(),
-          },
-        ];
+        console.warn('[useTickets] support_tickets fetch fallback:', err);
+        warningsRef.current.push('Support tickets could not be loaded.');
       }
+
+      // 2. Fetch from legacy tickets collection
+      try {
+        const ticketConstraints: any[] = [
+          where('branchId', 'in', branchIds.slice(0, 10)),
+          orderBy('createdAt', 'desc'),
+        ];
+        if (params.status && params.status !== 'all') {
+          ticketConstraints.unshift(where('status', '==', params.status));
+        }
+
+        const ticketsSnap = await getDocs(
+          query(collection(db, 'tickets'), ...ticketConstraints)
+        );
+
+        ticketsSnap.forEach((d) => {
+          if (!list.some((existing) => existing.id === d.id)) {
+            list.push({
+              id: d.id,
+              ...d.data(),
+            } as any);
+          }
+        });
+      } catch (err) {
+        console.warn('[useTickets] tickets collection fetch fallback:', err);
+        warningsRef.current.push('Legacy tickets could not be loaded.');
+      }
+
+      if (list.length > 0) {
+        let filtered = list;
+        if (params.tier && params.tier !== 'all') {
+          if (params.tier === 'resolved') {
+            filtered = filtered.filter((t) => t.status === 'resolved' || t.status === 'closed');
+          } else {
+            filtered = filtered.filter((t) => (t as any).assignedTo?.tier === params.tier && t.status !== 'resolved' && t.status !== 'closed');
+          }
+        }
+        return filtered;
+      }
+
+      // Dev-only fallback dataset (Runbook §8). Production with an empty
+      // ticket backend shows zero tickets — these invented customer complaints
+      // and payment disputes must never reach staff screens.
+      if (!import.meta.env.DEV) return [];
+
+      // Fallback rich 3-tier dataset with live timestamps
+      const nowMillis = Date.now();
+      const seventyFiveMinsAgo = Timestamp.fromMillis(nowMillis - 75 * 60 * 1000);
+      const thirtyMinsAgo = Timestamp.fromMillis(nowMillis - 30 * 60 * 1000);
+      const twoHoursAgo = Timestamp.fromMillis(nowMillis - 120 * 60 * 1000);
+      const tenMinsAgo = Timestamp.fromMillis(nowMillis - 10 * 60 * 1000);
+
+      const defaultTickets: Ticket[] = [
+        {
+          id: 'tkt_001',
+          ticketNumber: 'TICK-2026-8942',
+          title: 'Missing Peri-Peri Fries in Delivery Order #ord_901',
+          branchId: 'branch_surat_01',
+          branchName: 'Surat Adajan',
+          city: 'Surat',
+          category: 'wrong_item' as any,
+          priority: 'high',
+          message: 'Customer received 2x Paneer Burgers but the Peri-Peri Fries was not included in the bag. Requesting ₹99 refund or credit.',
+          orderId: 'ord_901',
+          status: 'open',
+          raisedById: 'cust_01',
+          raisedByName: 'Aarav Mehta',
+          raisedByRole: 'customer',
+          assignedTo: { tier: 'branch' } as any,
+          createdAt: seventyFiveMinsAgo, // 75 mins ago -> triggers >60m Inactivity Warning!
+          updatedAt: seventyFiveMinsAgo,
+        },
+        {
+          id: 'tkt_002',
+          ticketNumber: 'TICK-2026-7731',
+          title: 'Franchise Delivery Radius Border Dispute - Customer Claim',
+          branchId: 'branch_ahmedabad_01',
+          branchName: 'Ahmedabad SG Highway',
+          city: 'Ahmedabad',
+          category: 'customer_escalation' as any,
+          priority: 'medium',
+          message: 'Customer address on Bopal border was rejected by automated Porter geofence. Requesting Brand Support exception approval for ₹150 Goodwill credit.',
+          status: 'in_progress',
+          raisedById: 'user_branch_01',
+          raisedByName: 'Sanjay Patel (Branch Owner)',
+          raisedByRole: 'branch_owner',
+          assignedTo: { tier: 'brand_support' } as any,
+          createdAt: thirtyMinsAgo,
+          updatedAt: thirtyMinsAgo,
+        },
+        {
+          id: 'tkt_003',
+          ticketNumber: 'TICK-2026-9904',
+          title: 'Razorpay UPI Webhook Timeout & POS Double-Deduction',
+          branchId: 'branch_surat_01',
+          branchName: 'Surat Adajan',
+          city: 'Surat',
+          category: 'payment_refund' as any,
+          priority: 'urgent',
+          message: 'UPI payment of ₹552 succeeded in Razorpay dashboard (pay_Rzp99214) but Cloud Function verifyPayment timed out. POS KOT did not print.',
+          orderId: 'ord_903',
+          status: 'open',
+          raisedById: 'user_branch_01',
+          raisedByName: 'Sanjay Patel (Branch Owner)',
+          raisedByRole: 'branch_owner',
+          assignedTo: { tier: 'developer_team' } as any,
+          createdAt: tenMinsAgo,
+          updatedAt: tenMinsAgo,
+        },
+        {
+          id: 'tkt_004',
+          ticketNumber: 'TICK-2026-6112',
+          title: 'Burger packaging torn during transit - Replacement Issued',
+          branchId: 'branch_ahmedabad_01',
+          branchName: 'Ahmedabad SG Highway',
+          city: 'Ahmedabad',
+          category: 'app_bug' as any,
+          priority: 'low',
+          message: 'Customer reported burger box seal opened. Store dispatched replacement box via store fleet rider Ramesh.',
+          orderId: 'ord_904',
+          status: 'resolved',
+          resolution: 'Issued immediate replacement order and credited ₹50 goodwill Grill Coins.',
+          resolvedByName: 'Alex (Lead Dev)',
+          raisedById: 'cust_04',
+          raisedByName: 'Neha Kothari',
+          raisedByRole: 'customer',
+          assignedTo: { tier: 'branch' } as any,
+          createdAt: twoHoursAgo,
+          updatedAt: twoHoursAgo,
+        },
+      ];
+
+      let filtered = defaultTickets;
+      if (params.tier && params.tier !== 'all') {
+        if (params.tier === 'resolved') {
+          filtered = filtered.filter((t) => t.status === 'resolved' || t.status === 'closed');
+        } else {
+          filtered = filtered.filter((t) => (t as any).assignedTo?.tier === params.tier && t.status !== 'resolved' && t.status !== 'closed');
+        }
+      }
+
+      if (['branch_owner', 'branch_staff'].includes(user?.role || '') && user?.branchIds?.length) {
+        filtered = filtered.filter((t) => t.branchId === user.branchIds[0]);
+      }
+
+      return filtered;
     },
     enabled: !!user,
   });
@@ -117,14 +252,31 @@ export function useTickets(params: UseTicketsParams = {}) {
   const createTicket = useMutation({
     mutationFn: async (ticketData: {
       branchId: string;
-      type: TicketType;
+      category?: string;
+      type?: TicketType;
       message: string;
+      title?: string;
       orderId?: string;
+      priority?: 'urgent' | 'high' | 'medium' | 'low';
+      targetTier?: 'branch' | 'brand_support' | 'developer_team';
     }) => {
-      return addDoc(collection(db, 'tickets'), {
-        ...ticketData,
-        raisedBy: 'branch_owner',
+      const year = new Date().getFullYear();
+      const rand = Math.floor(1000 + Math.random() * 9000);
+      const ticketNumber = `TICK-${year}-${rand}`;
+
+      return addDoc(collection(db, 'support_tickets'), {
+        ticketNumber,
+        subject: ticketData.title || ticketData.message.slice(0, 50),
+        description: ticketData.message,
+        category: ticketData.category || ticketData.type || 'general_inquiry',
+        branchId: ticketData.branchId,
+        orderId: ticketData.orderId || null,
+        customerId: user?.id || 'staff',
+        customerName: user?.name || 'Store Staff',
         status: 'open',
+        priority: ticketData.priority || 'medium',
+        assignedTo: { tier: ticketData.targetTier || 'branch' },
+        branchReminderSent: false,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
       });
@@ -139,22 +291,35 @@ export function useTickets(params: UseTicketsParams = {}) {
       ticketId,
       status,
       resolution,
+      assignedToTier,
     }: {
       ticketId: string;
       status: TicketStatus;
       resolution?: string;
+      assignedToTier?: 'branch' | 'brand_support' | 'developer_team';
     }) => {
-      const ticketRef = doc(db, 'tickets', ticketId);
-      await updateDoc(ticketRef, {
+      let docRef = doc(db, 'support_tickets', ticketId);
+      const updateData: Record<string, any> = {
         status,
         resolution,
         updatedAt: Timestamp.now(),
-      });
+      };
+
+      if (assignedToTier) {
+        updateData['assignedTo.tier'] = assignedToTier;
+      }
+
+      try {
+        await updateDoc(docRef, updateData);
+      } catch {
+        docRef = doc(db, 'tickets', ticketId);
+        await updateDoc(docRef, updateData);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tickets'] });
     },
   });
 
-  return { tickets, isLoading, error, createTicket, updateTicket };
+  return { tickets, isLoading, error, warnings: warningsRef.current, createTicket, updateTicket };
 }

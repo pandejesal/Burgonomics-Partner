@@ -60,6 +60,13 @@ export function ManualOrderCreateModal({
   const [paymentMethod, setPaymentMethod] = useState<'cod' | 'upi' | 'razorpay'>('cod');
   const [cashTendered, setCashTendered] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+
+  /** Normalized +91XXXXXXXXXX or null. Riders/KOT need a real number — never a fake default. */
+  const normalizedPhone = (raw: string): string | null => {
+    const digits = raw.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
+    return digits.length === 10 ? `+91 ${digits.slice(0, 5)} ${digits.slice(5)}` : null;
+  };
 
   if (!isOpen) return null;
 
@@ -99,6 +106,14 @@ export function ManualOrderCreateModal({
     e.preventDefault();
     if (selectedItems.length === 0) return;
 
+    // Delivery orders MUST carry a real customer phone (rider contact + KOT).
+    const phone = normalizedPhone(customerPhone);
+    if (orderType === 'delivery' && !phone) {
+      setPhoneError('Enter a valid 10-digit mobile number — the rider needs it.');
+      return;
+    }
+    setPhoneError(null);
+
     setIsSubmitting(true);
 
     const orderId = `ord_pos_${Date.now().toString().slice(-6)}`;
@@ -117,7 +132,7 @@ export function ManualOrderCreateModal({
       id: orderId,
       customerId: 'cust_walkin',
       customerName: customerName || 'Walk-in Customer',
-      customerPhone: customerPhone || '+91 9999999999',
+      customerPhone: phone || customerPhone.trim(),
       branchId,
       branchName: branchId.includes('surat') ? 'Surat Adajan' : 'Ahmedabad SG Highway',
       city: branchId.includes('surat') ? 'Surat' : 'Ahmedabad',
@@ -251,12 +266,24 @@ export function ManualOrderCreateModal({
                   required
                 />
               ) : (
-                <input
-                  type="tel"
-                  value={customerPhone}
-                  onChange={(e) => setCustomerPhone(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-700 text-white text-xs font-semibold focus:outline-none focus:border-[#FF6600]"
-                />
+                <>
+                  <input
+                    type="tel"
+                    placeholder="+91 98765 43210"
+                    value={customerPhone}
+                    onChange={(e) => {
+                      setCustomerPhone(e.target.value);
+                      if (phoneError) setPhoneError(null);
+                    }}
+                    className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-700 text-white text-xs font-semibold focus:outline-none focus:border-[#FF6600]"
+                    required={orderType === 'delivery'}
+                  />
+                  {phoneError && (
+                    <p role="alert" className="mt-1 text-[11px] font-bold text-rose-400">
+                      {phoneError}
+                    </p>
+                  )}
+                </>
               )}
             </div>
           </div>

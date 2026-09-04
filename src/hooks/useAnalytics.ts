@@ -83,6 +83,8 @@ export interface AnalyticsResult {
   hourlyRush: HourlyRushData[];
   fulfillmentBreakdown: ChannelStat[];
   logistics: LogisticsSummary;
+  /** Data sources that failed — numbers below may be partial. Never silent. */
+  warnings: string[];
 }
 
 export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
@@ -94,6 +96,7 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
     queryFn: async (): Promise<AnalyticsResult> => {
       if (!user) throw new Error('Not authenticated');
 
+      const warnings: string[] = [];
       let branchIds: string[] = [];
       const branchMeta: Record<string, { name: string; city: string; accountId: string }> = {
         branch_surat_01: {
@@ -142,6 +145,7 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         }
       } catch (err) {
         console.warn('Error querying branches for analytics:', err);
+        warnings.push('Branch list failed to load — scoped to default outlets.');
       }
 
       if (branchIds.length === 0) {
@@ -198,6 +202,7 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
             }
           } catch (err) {
             console.warn('Alias store order fetch failed, using direct results:', err);
+            warnings.push('Linked delivery stores could not be loaded.');
           }
         }
         orders = rawDocs
@@ -205,6 +210,7 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
           .filter((o: any) => !branchIds.length || (o.branchId && branchIds.includes(o.branchId)));
       } catch (err) {
         console.warn('Error querying orders for analytics:', err);
+        warnings.push('Order data failed to load — figures below are incomplete.');
       }
 
       // Dev-only benchmark seed model (Runbook §8) — production with sparse
@@ -412,6 +418,7 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         period,
         totalRevenue,
         totalOrders,
+        warnings,
         averageOrderValue: Math.round(averageOrderValue),
         brandRoyaltyEarned,
         netBranchPayoutTotal,

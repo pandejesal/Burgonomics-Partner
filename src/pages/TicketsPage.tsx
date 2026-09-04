@@ -1,297 +1,271 @@
-import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useMemo } from 'react';
 import { useTickets } from '@/hooks/useTickets';
 import { useAuthStore } from '@/stores/authStore';
 import { RaiseTicketModal } from '@/components/tickets/RaiseTicketModal';
+import {
+  TicketQueueTable,
+  TicketResolutionModal,
+  type TicketResolutionPayload,
+} from '@/features/tickets';
 import {
   ShieldAlert,
   Plus,
   Search,
   CheckCircle2,
   Clock,
-  ArrowRight,
   Filter,
+  Flame,
   AlertTriangle,
-  FileText,
-  User,
-  Store,
+  Layers,
 } from 'lucide-react';
-import type { Ticket, TicketCategory, TicketPriority, TicketStatus } from '@/types';
+import type { Ticket } from '@/types';
+import { DataWarningBanner } from '@/components/ui/DataWarningBanner';
 
 export function TicketsPage() {
   const { user } = useAuthStore();
-  const [statusFilter, setStatusFilter] = useState<TicketStatus | 'all'>('all');
+  const [activeTierTab, setActiveTierTab] = useState<
+    'all' | 'L1_STORE' | 'L2_REGIONAL' | 'L3_EXECUTIVE' | 'resolved'
+  >('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [showRaiseModal, setShowRaiseModal] = useState(false);
+  const [resolvingTicket, setResolvingTicket] = useState<Ticket | null>(null);
 
-  const { tickets, isLoading, createTicket, updateTicket } = useTickets({
-    status: statusFilter,
+  const { tickets, isLoading, warnings, createTicket, updateTicket } = useTickets({
+    tier: activeTierTab === 'resolved' ? 'resolved' : 'all',
   });
 
   const handleRaiseTicket = async (ticketData: any) => {
     await createTicket.mutateAsync(ticketData);
   };
 
-  const handleQuickResolve = async (e: React.MouseEvent, ticketId: string) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const handleQuickEscalate = async (ticket: Ticket) => {
+    const currentLevel =
+      (ticket as any).escalationLevel ||
+      (ticket as any).assignedToTier ||
+      'L1_STORE';
+
+    const nextTier =
+      currentLevel === 'L1_STORE' || currentLevel === 'branch'
+        ? 'brand_support'
+        : 'developer_team';
+
+    const nextLevel =
+      currentLevel === 'L1_STORE' || currentLevel === 'branch'
+        ? 'L2_REGIONAL'
+        : 'L3_EXECUTIVE';
+
     await updateTicket.mutateAsync({
-      ticketId,
-      status: 'resolved',
-      resolution: `Resolved by ${user?.name || 'Support'} (${user?.role || 'team'})`,
+      ticketId: ticket.id,
+      status: 'in_progress',
+      assignedToTier: nextTier,
+      resolution: `Manual escalation to ${nextLevel} by ${user?.name || 'Staff'}.`,
     });
   };
 
-  const filteredTickets = tickets.filter((t) => {
-    const matchesStatus = statusFilter === 'all' || t.status === statusFilter;
-    const matchesCategory = categoryFilter === 'all' || t.category === categoryFilter;
-    const matchesSearch =
-      (t.title && t.title.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (t.message && t.message.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (t.branchName && t.branchName.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      t.id.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesStatus && matchesCategory && matchesSearch;
-  });
-
-  const getPriorityBadge = (priority: TicketPriority) => {
-    switch (priority) {
-      case 'urgent':
-        return (
-          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-950/80 text-rose-400 border border-rose-800/60">
-            🔴 Urgent
-          </span>
-        );
-      case 'high':
-        return (
-          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950/80 text-amber-400 border border-amber-800/60">
-            🟠 High
-          </span>
-        );
-      case 'medium':
-        return (
-          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-yellow-950/80 text-yellow-400 border border-yellow-800/60">
-            🟡 Medium
-          </span>
-        );
-      case 'low':
-        return (
-          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950/80 text-emerald-400 border border-emerald-800/60">
-            🟢 Low
-          </span>
-        );
-      default:
-        return null;
-    }
+  const handleConfirmResolution = async (payload: TicketResolutionPayload) => {
+    await updateTicket.mutateAsync({
+      ticketId: payload.ticketId,
+      status: 'resolved',
+      resolution: `${payload.action}: ${payload.notes}${
+        payload.grillCoinsAmount ? ` (Credited ${payload.grillCoinsAmount} Grill Coins)` : ''
+      }`,
+    });
   };
 
-  const getCategoryLabel = (cat: TicketCategory) => {
-    switch (cat) {
-      case 'pos_sync':
-        return 'POS / Petpooja';
-      case 'app_bug':
-        return 'App / System Bug';
-      case 'hardware_printer':
-        return 'Hardware / Printer';
-      case 'inventory_stock':
-        return 'Inventory Shortage';
-      case 'customer_escalation':
-        return 'Customer Escalation';
-      case 'payment_refund':
-        return 'Payment / Refund';
-      default:
-        return 'General Support';
-    }
-  };
+  const filteredTickets = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    return tickets.filter((t) => {
+      // 1. Tier Tab Filtering
+      const level =
+        (t as any).escalationLevel ||
+        (t as any).assignedToTier ||
+        (t as any).assignedTo?.tier ||
+        'L1_STORE';
+
+      const isResolved = t.status === 'resolved' || t.status === 'closed';
+
+      if (activeTierTab === 'resolved' && !isResolved) return false;
+      if (activeTierTab !== 'resolved' && activeTierTab !== 'all') {
+        if (isResolved) return false;
+        if (activeTierTab === 'L1_STORE' && level !== 'L1_STORE' && level !== 'branch') return false;
+        if (activeTierTab === 'L2_REGIONAL' && level !== 'L2_REGIONAL' && level !== 'brand_support')
+          return false;
+        if (
+          activeTierTab === 'L3_EXECUTIVE' &&
+          level !== 'L3_EXECUTIVE' &&
+          level !== 'developer_team'
+        )
+          return false;
+      }
+
+      // 2. Category Filter
+      if (categoryFilter !== 'all' && t.category !== categoryFilter) {
+        return false;
+      }
+
+      // 3. Search Query
+      if (q) {
+        const matchesTitle = (t.title || (t as any).subject || '').toLowerCase().includes(q);
+        const matchesDesc = (t.message || (t as any).description || '').toLowerCase().includes(q);
+        const matchesCustomer = (t.customerName || '').toLowerCase().includes(q);
+        const matchesPhone = (t.customerPhone || '').includes(q);
+        const matchesNum = (t.ticketNumber || t.id).toLowerCase().includes(q);
+
+        if (!matchesTitle && !matchesDesc && !matchesCustomer && !matchesPhone && !matchesNum) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [tickets, activeTierTab, categoryFilter, searchQuery]);
+
+  const openCount = tickets.filter((t) => t.status === 'open' || t.status === 'in_progress').length;
+  const l2Count = tickets.filter(
+    (t) =>
+      (t.status === 'open' || t.status === 'in_progress') &&
+      ((t as any).escalationLevel === 'L2_REGIONAL' || (t as any).assignedToTier === 'brand_support')
+  ).length;
+  const l3Count = tickets.filter(
+    (t) =>
+      (t.status === 'open' || t.status === 'in_progress') &&
+      ((t as any).escalationLevel === 'L3_EXECUTIVE' || (t as any).assignedToTier === 'developer_team')
+  ).length;
+  const resolvedCount = tickets.filter((t) => t.status === 'resolved' || t.status === 'closed').length;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-6xl mx-auto pb-16 select-none">
+      <DataWarningBanner warnings={warnings} />
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-wide">
-            Issue Resolution & Support Tickets
+          <h1 className="text-2xl font-black text-white tracking-wide flex items-center gap-2.5">
+            <span>Support Desk & 3-Tier SLA Console</span>
+            <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/40 text-emerald-400 font-bold">
+              Realtime Triage
+            </span>
           </h1>
-          <p className="text-xs text-zinc-400">
-            Branch incidents dispatched directly to Developer Team, Brand Owners & Support
+          <p className="text-xs text-neutral-400">
+            {user?.role === 'branch_owner'
+              ? 'Customer complaints & store-level ticket SLA management'
+              : 'Enterprise support desk with automated 3-tier SLA auto-escalator'}
           </p>
         </div>
 
         <button
+          type="button"
           onClick={() => setShowRaiseModal(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-[#D95D0F] hover:bg-[#b84d0b] text-white rounded-xl font-semibold text-xs transition-colors shadow-md cursor-pointer"
+          className="flex items-center gap-2 px-4 py-2.5 bg-[#FF6600] hover:bg-[#e05a00] text-white rounded-xl font-bold text-xs transition-colors shadow-md cursor-pointer"
         >
           <Plus className="w-4 h-4" />
-          <span>Raise Issue Ticket</span>
+          <span>Raise Internal Ticket</span>
         </button>
       </div>
 
-      {/* Filters Bar */}
-      <div className="bg-[#132A17] p-4 rounded-xl border border-[#234B2A] flex flex-col md:flex-row gap-3 items-center justify-between">
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-          {/* Status filter buttons */}
-          {(['all', 'open', 'in_progress', 'resolved'] as const).map((st) => (
-            <button
-              key={st}
-              onClick={() => setStatusFilter(st)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-colors ${
-                statusFilter === st
-                  ? 'bg-[#D95D0F] text-white'
-                  : 'bg-[#0D0F0D] text-zinc-400 hover:text-white border border-[#234B2A]'
-              }`}
-            >
-              {st === 'all' ? 'All Statuses' : st.replace('_', ' ')}
-            </button>
-          ))}
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-[#090909] border border-neutral-800 rounded-3xl p-4 space-y-1">
+          <div className="flex items-center justify-between text-neutral-400">
+            <span className="text-xs font-bold uppercase">Active Queue</span>
+            <Clock className="w-4 h-4 text-blue-400" />
+          </div>
+          <p className="text-2xl font-black text-white">{openCount}</p>
+          <p className="text-[11px] text-neutral-500">Unresolved customer tickets</p>
         </div>
 
-        <div className="flex items-center gap-3 w-full md:w-auto">
-          {/* Category Dropdown */}
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="px-3 py-2 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white focus:outline-none focus:border-[#D95D0F]"
-          >
-            <option value="all">All Categories</option>
-            <option value="pos_sync">POS / Petpooja</option>
-            <option value="app_bug">App Bugs</option>
-            <option value="hardware_printer">Hardware & Printers</option>
-            <option value="inventory_stock">Inventory</option>
-            <option value="customer_escalation">Customer Escalations</option>
-            <option value="payment_refund">Payments & Refunds</option>
-          </select>
-
-          {/* Search bar */}
-          <div className="relative flex-1 md:w-64">
-            <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-2.5" />
-            <input
-              type="text"
-              placeholder="Search tickets, branch, ID..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-[#D95D0F]"
-            />
+        <div className="bg-[#090909] border border-neutral-800 rounded-3xl p-4 space-y-1">
+          <div className="flex items-center justify-between text-neutral-400">
+            <span className="text-xs font-bold uppercase">L2 Regional Escalations</span>
+            <AlertTriangle className="w-4 h-4 text-amber-400" />
           </div>
+          <p className="text-2xl font-black text-amber-400">{l2Count}</p>
+          <p className="text-[11px] text-neutral-500">&gt;15m store SLA breach</p>
+        </div>
+
+        <div className="bg-[#090909] border border-neutral-800 rounded-3xl p-4 space-y-1">
+          <div className="flex items-center justify-between text-neutral-400">
+            <span className="text-xs font-bold uppercase">L3 Executive Alerts</span>
+            <Flame className="w-4 h-4 text-rose-400" />
+          </div>
+          <p className="text-2xl font-black text-rose-400">{l3Count}</p>
+          <p className="text-[11px] text-neutral-500">&gt;60m critical breach</p>
+        </div>
+
+        <div className="bg-[#090909] border border-neutral-800 rounded-3xl p-4 space-y-1">
+          <div className="flex items-center justify-between text-neutral-400">
+            <span className="text-xs font-bold uppercase">Resolved Total</span>
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          </div>
+          <p className="text-2xl font-black text-emerald-400">{resolvedCount}</p>
+          <p className="text-[11px] text-neutral-500">Completed support inquiries</p>
         </div>
       </div>
 
-      {/* Tickets List */}
-      {isLoading ? (
-        <div className="p-16 text-center text-zinc-400 text-xs">Loading incident tickets...</div>
-      ) : filteredTickets.length === 0 ? (
-        <div className="text-center py-16 bg-[#132A17] rounded-2xl border border-[#234B2A] p-8 space-y-3">
-          <CheckCircle2 className="w-12 h-12 mx-auto text-emerald-500" />
-          <h3 className="font-semibold text-white text-sm">All systems normal</h3>
-          <p className="text-xs text-zinc-400 max-w-sm mx-auto">
-            No incident tickets match the selected filters. Click "Raise Issue Ticket" above if an
-            issue occurs.
-          </p>
+      {/* Filter & Search Bar */}
+      <div className="p-4 rounded-3xl bg-neutral-900 border border-neutral-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shadow-md">
+        {/* Search */}
+        <div className="relative flex-1 max-w-md">
+          <Search className="w-4 h-4 text-neutral-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search Ticket #, Customer, Phone, or Problem..."
+            className="w-full pl-10 pr-4 py-2 rounded-xl bg-neutral-950 border border-neutral-700 text-white placeholder-neutral-500 text-xs font-medium focus:outline-none focus:border-[#FF6600]"
+          />
         </div>
-      ) : (
-        <div className="grid grid-cols-1 gap-3">
-          {filteredTickets.map((ticket) => {
-            const isResolved = ticket.status === 'resolved' || ticket.status === 'closed';
 
-            return (
-              <Link
-                key={ticket.id}
-                to={`/tickets/${ticket.id}`}
-                className="bg-[#132A17] hover:bg-[#16301B] border border-[#234B2A] hover:border-[#D95D0F]/50 rounded-xl p-4 transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 group"
-              >
-                <div className="flex items-start space-x-3.5 flex-1 min-w-0">
-                  <div
-                    className={`p-2.5 rounded-xl shrink-0 mt-0.5 ${
-                      isResolved
-                        ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/40'
-                        : 'bg-[#1E3A24] text-[#D95D0F] border border-[#234B2A]'
-                    }`}
-                  >
-                    <ShieldAlert className="w-5 h-5" />
-                  </div>
-
-                  <div className="space-y-1 min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-bold text-sm text-white group-hover:text-[#D95D0F] transition-colors truncate">
-                        {ticket.title || ticket.message.slice(0, 60)}
-                      </span>
-                      {getPriorityBadge(ticket.priority || 'medium')}
-                      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-[#1E3A24] text-zinc-300 border border-[#234B2A]">
-                        {getCategoryLabel(ticket.category)}
-                      </span>
-                    </div>
-
-                    <p className="text-xs text-zinc-300 line-clamp-2">{ticket.message}</p>
-
-                    <div className="flex flex-wrap items-center gap-3 text-[11px] text-zinc-400 pt-1">
-                      <span className="flex items-center gap-1 text-zinc-300">
-                        <Store className="w-3.5 h-3.5 text-[#D95D0F]" />
-                        <span>{ticket.branchName || ticket.branchId}</span>
-                      </span>
-
-                      <span>•</span>
-
-                      <span>
-                        Reported by{' '}
-                        <strong className="text-zinc-200">
-                          {ticket.raisedByName || ticket.raisedById || 'Branch Staff'}
-                        </strong>
-                      </span>
-
-                      <span>•</span>
-
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-3 h-3 text-zinc-500" />
-                        <span>
-                          {ticket.createdAt?.toDate
-                            ? ticket.createdAt.toDate().toLocaleDateString([], {
-                                month: 'short',
-                                day: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })
-                            : 'Recent'}
-                        </span>
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Right Action Button */}
-                <div className="flex items-center space-x-2 self-end sm:self-center shrink-0">
-                  {!isResolved ? (
-                    <button
-                      onClick={(e) => handleQuickResolve(e, ticket.id)}
-                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors flex items-center space-x-1.5 shadow-sm"
-                    >
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>Issue Resolved</span>
-                    </button>
-                  ) : (
-                    <span className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-emerald-950/80 text-emerald-400 border border-emerald-800/60 text-xs font-semibold">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>Resolved</span>
-                    </span>
-                  )}
-
-                  <div className="p-1.5 text-zinc-500 group-hover:text-white transition-colors">
-                    <ArrowRight className="w-4 h-4" />
-                  </div>
-                </div>
-              </Link>
-            );
-          })}
+        {/* Tier Tabs */}
+        <div className="flex items-center gap-1 p-1 rounded-2xl bg-neutral-950 border border-neutral-800 overflow-x-auto">
+          {[
+            { id: 'all', label: 'All Active' },
+            { id: 'L1_STORE', label: 'L1 Store' },
+            { id: 'L2_REGIONAL', label: 'L2 Regional' },
+            { id: 'L3_EXECUTIVE', label: 'L3 Executive' },
+            { id: 'resolved', label: 'Resolved' },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTierTab(tab.id as any)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 ${
+                activeTierTab === tab.id
+                  ? 'bg-[#0E4825] text-emerald-300 shadow-xs'
+                  : 'text-neutral-400 hover:text-white'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
-      )}
+      </div>
 
-      {/* Raise Ticket Modal */}
-      <RaiseTicketModal
-        isOpen={showRaiseModal}
-        onClose={() => setShowRaiseModal(false)}
-        onSubmit={handleRaiseTicket}
-        defaultBranchId={user?.branchIds?.[0] || 'branch_surat_01'}
-        defaultBranchName={user?.name ? `${user.name}'s Branch` : 'Surat Outlet'}
-        loading={createTicket.isPending}
+      {/* Ticket Queue Table */}
+      <TicketQueueTable
+        tickets={filteredTickets}
+        onOpenResolveModal={setResolvingTicket}
+        onQuickEscalate={handleQuickEscalate}
       />
+
+      {/* Resolve Ticket Modal */}
+      <TicketResolutionModal
+        ticket={resolvingTicket}
+        isOpen={!!resolvingTicket}
+        onClose={() => setResolvingTicket(null)}
+        onConfirmResolution={handleConfirmResolution}
+      />
+
+      {/* Internal Raise Ticket Modal */}
+      {showRaiseModal && (
+        <RaiseTicketModal
+          isOpen={showRaiseModal}
+          onClose={() => setShowRaiseModal(false)}
+          onSubmit={handleRaiseTicket}
+        />
+      )}
     </div>
   );
 }
+
+export default TicketsPage;
