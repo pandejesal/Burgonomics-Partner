@@ -1,20 +1,27 @@
-import { useState } from 'react';
-import { useMenu } from '@/hooks/useMenu';
-import { Spinner } from '@/components/ui/Spinner';
-import { Badge } from '@/components/ui/Badge';
+import React, { useState } from 'react';
+import { useBranchMenu } from '@/features/menu/hooks/useBranchMenu';
+import { useAuthStore } from '@/stores/authStore';
+import { MenuItemToggleRow } from '@/features/menu/components/MenuItemToggleRow';
+import { Instant86ingModal, type EightSixDuration } from '@/features/menu/components/Instant86ingModal';
+import { ComboBuilderDrawer } from '@/features/menu/components/ComboBuilderDrawer';
 import {
   UtensilsCrossed,
-  Eye,
-  EyeOff,
+  Search,
   RefreshCw,
   CheckCircle2,
   Clock,
+  Plus,
+  Filter,
+  Layers,
+  Sparkles,
+  ShieldCheck,
+  AlertTriangle,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import type { MenuItem } from '@/types';
 
 export function MenuPage() {
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [syncSuccess, setSyncSuccess] = useState(false);
+  const { user } = useAuthStore();
   const {
     categories,
     items,
@@ -22,22 +29,86 @@ export function MenuPage() {
     lastSyncedAt,
     toggleAvailability,
     syncPetpooja,
-  } = useMenu();
+    markItem86,
+    toggleCategoryAvailability,
+    createComboMeal,
+  } = useBranchMenu();
+
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [onlyJainFilter, setOnlyJainFilter] = useState<boolean>(false);
+  const [syncSuccess, setSyncSuccess] = useState(false);
+  const [eightSixTargetItem, setEightSixTargetItem] = useState<MenuItem | null>(null);
+  const [showComboDrawer, setShowComboDrawer] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const canEdit =
+    user?.role === 'brand_owner' ||
+    user?.role === 'developer' ||
+    user?.role === 'branch_owner';
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
 
   const handleManualSync = async () => {
     try {
       await syncPetpooja.mutateAsync();
       setSyncSuccess(true);
+      showToast('Catalog refreshed from Petpooja POS bridge');
       setTimeout(() => setSyncSuccess(false), 3000);
     } catch (err) {
       console.error('Petpooja sync failed:', err);
+      showToast('Menu sync failed — catalog unchanged. Check connection and retry.');
     }
   };
 
-  const filteredItems =
-    selectedCategory === 'all'
-      ? items
-      : items?.filter((item) => item.categoryId === selectedCategory);
+  const handleToggleStock = async (item: MenuItem) => {
+    const isCurrentlyAvailable = item.isAvailable ?? item.inStock ?? true;
+    if (isCurrentlyAvailable) {
+      // Opening 86ing modal to configure duration
+      setEightSixTargetItem(item);
+      return;
+    }
+    // Re-enable item immediately — toast only after the write lands.
+    try {
+      await toggleAvailability.mutateAsync({ itemId: item.id, isAvailable: true });
+      showToast(`${item.name} is now back IN STOCK on customer app & POS`);
+    } catch (err) {
+      console.error('Re-enable failed:', err);
+      showToast(`Could not re-enable ${item.name} — no changes were made.`);
+    }
+  };
+
+  const handleConfirm86 = async (itemId: string, duration: EightSixDuration, reason: string) => {
+    try {
+      await markItem86.mutateAsync({ itemId, duration, reason });
+      showToast('Item marked out of stock on customer app & POS');
+    } catch (err) {
+      console.error('86-ing failed:', err);
+      showToast('Could not update stock — no changes were made.');
+    }
+    const item = items?.find((i) => i.id === itemId);
+    showToast(`${item?.name || 'Item'} marked 86ed (${duration.replace('_', ' ')})`);
+  };
+
+  const filteredItems = (items || []).filter((item) => {
+    if (selectedCategory !== 'all' && item.categoryId !== selectedCategory) {
+      return false;
+    }
+    if (onlyJainFilter && !item.isJain) {
+      return false;
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const matchName = item.name?.toLowerCase().includes(q);
+      const matchCat = (item.category || item.categoryId)?.toLowerCase().includes(q);
+      const matchDesc = item.description?.toLowerCase().includes(q);
+      if (!matchName && !matchCat && !matchDesc) return false;
+    }
+    return true;
+  });
 
   const syncedAgo = (() => {
     try {
@@ -50,219 +121,184 @@ export function MenuPage() {
     }
   })();
 
+  const outOfStockCount = (items || []).filter(
+    (i) => i.isAvailable === false || i.inStock === false
+  ).length;
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 select-none text-white">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 px-4 py-3 bg-[#0E4825] border border-[#4ADE80] text-white rounded-xl shadow-2xl flex items-center gap-2.5 animate-in slide-in-from-bottom duration-200">
+          <CheckCircle2 className="w-4 h-4 text-[#4ADE80]" />
+          <span className="text-xs font-bold">{toastMessage}</span>
+        </div>
+      )}
+
       {/* Header with Title & Petpooja Sync Action */}
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
         <div>
           <div className="flex items-center gap-2.5">
-            <h1 className="text-2xl font-black text-text-primary tracking-tight">
+            <h1 className="text-2xl font-black text-white tracking-wide">
               Menu & Catalog Management
             </h1>
-            <Badge className="bg-purple-100 text-purple-800 border border-purple-200 text-[10px] font-bold uppercase">
-              Petpooja POS Live
-            </Badge>
+            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#0E4825] text-[#4ADE80] border border-[#4ADE80]/40 font-mono uppercase">
+              Petpooja Live
+            </span>
           </div>
-          <p className="text-xs text-text-secondary mt-0.5">
-            100% Pure Veg catalog synced hourly. Manage instant 86-ing & stock availability.
+          <p className="text-xs text-zinc-400 mt-0.5">
+            100% Pure Veg catalog synced with POS. Manage instant 86ing, category switches & combo meals.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          {lastSyncedAt && (
-            <div className="hidden md:flex items-center gap-1.5 text-xs text-text-secondary bg-surface px-3 py-1.5 rounded-xl border border-border">
-              <Clock className="w-3.5 h-3.5 text-purple-600" />
-              <span>Synced {syncedAgo}</span>
+        <div className="flex items-center gap-2.5">
+          {outOfStockCount > 0 && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-950/60 border border-amber-800 text-amber-300 text-xs font-bold">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+              <span>{outOfStockCount} Items 86ed</span>
             </div>
+          )}
+
+          {canEdit && (
+            <button
+              onClick={() => setShowComboDrawer(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#112415] hover:bg-[#16301B] text-zinc-200 hover:text-white border border-[#1E3A24] font-bold text-xs transition-colors cursor-pointer"
+            >
+              <Layers className="w-3.5 h-3.5 text-[#4ADE80]" />
+              <span>Combo Builder</span>
+            </button>
           )}
 
           <button
             onClick={handleManualSync}
             disabled={syncPetpooja.isPending}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs cursor-pointer ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-xs transition-all border cursor-pointer ${
               syncSuccess
-                ? 'bg-green-600 text-white'
-                : 'bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50'
+                ? 'bg-[#0E4825] text-[#4ADE80] border-[#4ADE80]'
+                : 'bg-[#0E4825] hover:bg-[#155e32] text-white border-[#4ADE80]/30 disabled:opacity-50'
             }`}
           >
             {syncSuccess ? (
               <>
-                <CheckCircle2 className="w-4 h-4" />
-                <span>63 Items Synced!</span>
+                <CheckCircle2 className="w-4 h-4 text-[#4ADE80]" />
+                <span>Catalog Synced!</span>
               </>
             ) : (
               <>
                 <RefreshCw
-                  className={`w-4 h-4 ${syncPetpooja.isPending ? 'animate-spin' : ''}`}
+                  className={`w-3.5 h-3.5 text-[#4ADE80] ${syncPetpooja.isPending ? 'animate-spin' : ''}`}
                 />
-                <span>
-                  {syncPetpooja.isPending
-                    ? 'Syncing Petpooja...'
-                    : 'Sync with Petpooja POS'}
-                </span>
+                <span>{syncPetpooja.isPending ? 'Syncing...' : 'Sync POS'}</span>
               </>
             )}
           </button>
         </div>
       </div>
 
-      {isLoading ? (
-        <div className="flex justify-center py-16">
-          <Spinner size="lg" />
+      {/* Search Bar & Filters */}
+      <div className="flex flex-col sm:flex-row gap-3 items-center justify-between bg-[#112415] p-3 rounded-2xl border border-[#1E3A24]">
+        <div className="relative w-full sm:w-80">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+          <input
+            type="text"
+            placeholder="Search items, ingredients, code..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-3 py-1.5 bg-[#0A0A0A] border border-[#1E3A24] rounded-xl text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#4ADE80]"
+          />
         </div>
-      ) : (
-        <>
-          {/* Category Tabs */}
-          <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
-            <button
-              onClick={() => setSelectedCategory('all')}
-              className={`px-4 py-2 rounded-xl whitespace-nowrap font-bold text-xs transition-colors cursor-pointer ${
-                selectedCategory === 'all'
-                  ? 'bg-primary text-white shadow-2xs'
-                  : 'bg-surface border border-border text-text-secondary hover:bg-primary/5 hover:text-text-primary'
-              }`}
-            >
-              All Items ({items?.length || 0})
-            </button>
-            {categories?.map((cat) => {
-              const count =
-                items?.filter((i) => i.categoryId === cat.id).length || 0;
-              return (
-                <button
-                  key={cat.id}
-                  onClick={() => setSelectedCategory(cat.id)}
-                  className={`px-4 py-2 rounded-xl whitespace-nowrap font-bold text-xs transition-colors cursor-pointer ${
-                    selectedCategory === cat.id
-                      ? 'bg-primary text-white shadow-2xs'
-                      : 'bg-surface border border-border text-text-secondary hover:bg-primary/5 hover:text-text-primary'
-                  }`}
-                >
-                  {cat.name} ({count})
-                </button>
-              );
-            })}
+
+        <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto">
+          <button
+            onClick={() => setOnlyJainFilter(!onlyJainFilter)}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer border ${
+              onlyJainFilter
+                ? 'bg-amber-950 text-amber-300 border-amber-800'
+                : 'bg-[#0A0A0A] text-zinc-400 border-[#1E3A24] hover:text-white'
+            }`}
+          >
+            Jain Friendly Only
+          </button>
+        </div>
+      </div>
+
+      {/* Category Tabs */}
+      <div className="flex items-center space-x-2 border-b border-[#1E3A24] pb-3 overflow-x-auto">
+        <button
+          onClick={() => setSelectedCategory('all')}
+          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+            selectedCategory === 'all'
+              ? 'bg-[#0E4825] text-white shadow-sm border border-[#4ADE80]/30'
+              : 'bg-[#112415] text-zinc-400 hover:text-white border border-[#1E3A24]'
+          }`}
+        >
+          All Items ({items?.length || 0})
+        </button>
+
+        {categories?.map((cat) => (
+          <button
+            key={cat.id}
+            onClick={() => setSelectedCategory(cat.id)}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+              selectedCategory === cat.id
+                ? 'bg-[#0E4825] text-white shadow-sm border border-[#4ADE80]/30'
+                : 'bg-[#112415] text-zinc-400 hover:text-white border border-[#1E3A24]'
+            }`}
+          >
+            {cat.name}
+          </button>
+        ))}
+      </div>
+
+      {/* Items List */}
+      <div className="space-y-3">
+        {isLoading ? (
+          <div className="p-16 text-center text-zinc-400 text-xs">Loading menu items...</div>
+        ) : filteredItems.length === 0 ? (
+          <div className="text-center py-16 bg-[#112415] rounded-2xl border border-[#1E3A24] p-8 space-y-2">
+            <UtensilsCrossed className="w-10 h-10 mx-auto text-zinc-600" />
+            <h3 className="font-bold text-white text-sm">No items matching filter</h3>
+            <p className="text-xs text-zinc-400">Try adjusting your search query or category filter</p>
           </div>
+        ) : (
+          filteredItems.map((item) => (
+            <MenuItemToggleRow
+              key={item.id}
+              item={item}
+              canEdit={canEdit}
+              onToggleStock={handleToggleStock}
+              disabledUntilText={
+                item.eightSixDuration === '2_hours'
+                  ? 'Until rush ends'
+                  : item.eightSixDuration === 'rest_of_day'
+                  ? 'Auto-renews 6 AM'
+                  : 'Disabled'
+              }
+            />
+          ))
+        )}
+      </div>
 
-          {/* Menu Items Grid */}
-          {!filteredItems?.length ? (
-            <div className="text-center py-16 bg-surface rounded-2xl border border-border">
-              <UtensilsCrossed className="w-12 h-12 mx-auto text-text-secondary mb-4 opacity-50" />
-              <h3 className="font-bold text-text-primary">No menu items found</h3>
-              <p className="text-xs text-text-secondary mt-1">
-                Click "Sync with Petpooja POS" above to load the full 63-item catalog.
-              </p>
-              <button
-                onClick={handleManualSync}
-                className="mt-4 px-4 py-2 bg-purple-600 text-white rounded-xl text-xs font-bold"
-              >
-                Sync 63 Items Now
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredItems.map((item) => (
-                <div
-                  key={item.id}
-                  className="bg-surface rounded-2xl border border-border overflow-hidden shadow-2xs hover:shadow-md transition-shadow flex flex-col justify-between"
-                >
-                  <div>
-                    {/* Image */}
-                    {item.image ? (
-                      <img
-                        src={item.image}
-                        alt={item.name}
-                        className="w-full h-44 object-cover"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = 'none';
-                        }}
-                      />
-                    ) : (
-                      <div className="w-full h-44 bg-primary/5 flex items-center justify-center">
-                        <UtensilsCrossed className="w-10 h-10 text-primary/40" />
-                      </div>
-                    )}
+      {/* 86ing Duration & Reason Modal */}
+      <Instant86ingModal
+        isOpen={!!eightSixTargetItem}
+        onClose={() => setEightSixTargetItem(null)}
+        item={eightSixTargetItem}
+        onConfirm86={handleConfirm86}
+        loading={markItem86.isPending}
+      />
 
-                    {/* Content */}
-                    <div className="p-4">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <h3 className="font-bold text-text-primary text-sm leading-snug">
-                              {item.name}
-                            </h3>
-                            {item.veg && (
-                              <span
-                                className="w-4 h-4 rounded-sm border border-green-600 flex items-center justify-center p-0.5 shrink-0"
-                                title="100% Pure Veg"
-                              >
-                                <span className="w-2 h-2 rounded-full bg-green-600" />
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-[10px] text-text-secondary font-mono mt-0.5">
-                            ID: {item.petpoojaItemId || item.id}
-                          </p>
-                          {item.description && (
-                            <p className="text-xs text-text-secondary mt-1.5 line-clamp-2 leading-relaxed">
-                              {item.description}
-                            </p>
-                          )}
-                        </div>
-                        <p className="font-black text-primary text-base whitespace-nowrap">
-                          ₹{item.price}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Actions Bar */}
-                  <div className="px-4 py-3 bg-bg/50 border-t border-border flex items-center justify-between">
-                    <Badge
-                      className={
-                        item.available
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-rose-100 text-rose-800'
-                      }
-                    >
-                      {item.available ? 'In Stock' : '86-ed / Out of Stock'}
-                    </Badge>
-
-                    <button
-                      onClick={() =>
-                        toggleAvailability.mutate({
-                          itemId: item.id,
-                          available: !item.available,
-                        })
-                      }
-                      disabled={toggleAvailability.isPending}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs transition-colors cursor-pointer ${
-                        item.available
-                          ? 'bg-rose-50 text-rose-600 hover:bg-rose-100'
-                          : 'bg-green-50 text-green-600 hover:bg-green-100'
-                      }`}
-                      title={
-                        item.available ? 'Mark Out of Stock' : 'Mark In Stock'
-                      }
-                    >
-                      {item.available ? (
-                        <>
-                          <EyeOff className="w-3.5 h-3.5" />
-                          <span>86 Item</span>
-                        </>
-                      ) : (
-                        <>
-                          <Eye className="w-3.5 h-3.5" />
-                          <span>Make Available</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
-      )}
+      {/* Combo Builder Drawer */}
+      <ComboBuilderDrawer
+        isOpen={showComboDrawer}
+        onClose={() => setShowComboDrawer(false)}
+        availableItems={items || []}
+        onCreateCombo={async (data) => {
+          await createComboMeal.mutateAsync(data);
+          showToast(`Combo meal "${data.name}" created at ₹${data.price}!`);
+        }}
+        loading={createComboMeal.isPending}
+      />
     </div>
   );
 }
