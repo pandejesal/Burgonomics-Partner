@@ -30,7 +30,13 @@ async function pushStock(
   itemId: string,
   inStock: boolean
 ) {
-  const petpoojaItemId = items?.find((i) => i.id === itemId)?.petpoojaItemId || itemId;
+  const petpoojaItemId = items?.find((i) => i.id === itemId)?.petpoojaItemId;
+  if (!petpoojaItemId) {
+    // Never push a Firestore doc id to the POS as an item id — the KOT side
+    // would 86 the wrong item (or nothing) with a success response.
+    console.warn(`[useBranchMenu] No petpoojaItemId for ${itemId} — POS push skipped`);
+    return;
+  }
   try {
     await partnerFunctionsApi.syncItemStock(branchId, petpoojaItemId, inStock);
   } catch (err) {
@@ -142,7 +148,15 @@ export function useBranchMenu() {
       snap.docs.forEach((d) => {
         batch.set(
           d.ref,
-          { inStock: isAvailable, updatedAt: Timestamp.now(), lastSyncedAt: Timestamp.now() },
+          {
+            inStock: isAvailable,
+            // Re-enabling clears stale 86 metadata (see toggleAvailability).
+            ...(isAvailable
+              ? { disabledUntil: null, eightSixDuration: null, eightSixReason: null }
+              : {}),
+            updatedAt: Timestamp.now(),
+            lastSyncedAt: Timestamp.now(),
+          },
           { merge: true }
         );
       });
@@ -179,6 +193,11 @@ export function useBranchMenu() {
         if (b?.petpoojaStoreId) restId = b.petpoojaStoreId;
       } catch {
         // restId stays null — combo still visible to Partner scoped views
+      }
+      if (!restId) {
+        console.warn(
+          `[useBranchMenu] Branch ${branchId} has no restId — combo ${comboId} will be invisible to the customer app until outlets are linked`
+        );
       }
 
       await setDoc(itemRef, {

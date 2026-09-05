@@ -162,11 +162,22 @@ export function useMenu() {
       const itemRef = doc(db, 'products', itemId);
       await updateDoc(itemRef, {
         inStock: available,
+        // Re-enabling must clear stale 86 metadata, or the item stays
+        // visually 86d while actually in stock.
+        ...(available
+          ? { disabledUntil: null, eightSixDuration: null, eightSixReason: null }
+          : {}),
         lastSyncedAt: Timestamp.now(),
       });
 
       const cached = queryClient.getQueryData<MenuItem[]>(['menuItems', branchId]);
-      const petpoojaItemId = cached?.find((i) => i.id === itemId)?.petpoojaItemId || itemId;
+      const petpoojaItemId = cached?.find((i) => i.id === itemId)?.petpoojaItemId;
+      if (!petpoojaItemId) {
+        // Never push a Firestore doc id to the POS as an item id — the KOT
+        // side would 86 the wrong item (or nothing) with a success response.
+        console.warn(`[useMenu] No petpoojaItemId for ${itemId} — POS push skipped`);
+        return;
+      }
       try {
         await partnerFunctionsApi.syncItemStock(branchId, petpoojaItemId, available);
       } catch (err) {
