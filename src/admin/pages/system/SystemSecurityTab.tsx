@@ -59,30 +59,32 @@ const INITIAL_SESSIONS: UserSession[] = [
   },
 ];
 
+// Demo placeholder rows (no backend backup job exists yet): sizes/statuses
+// are illustrative, NOT measured. See handleTriggerBackup.
 const INITIAL_BACKUPS = [
   {
     id: "backup_20260719_1000",
-    filename: "burgonomics_prod_snapshot_1000.sql.gz",
-    sizeMb: 242.5,
+    filename: "demo_placeholder_snapshot_1000.sql.gz",
+    sizeMb: 0,
     type: "auto",
     timestamp: "Today 10:00:00",
-    status: "healthy",
+    status: "demo",
   },
   {
     id: "backup_20260719_0600",
-    filename: "burgonomics_prod_snapshot_0600.sql.gz",
-    sizeMb: 242.1,
+    filename: "demo_placeholder_snapshot_0600.sql.gz",
+    sizeMb: 0,
     type: "auto",
     timestamp: "Today 06:00:00",
-    status: "healthy",
+    status: "demo",
   },
   {
     id: "backup_20260718_0000",
-    filename: "burgonomics_prod_snapshot_manual_release.sql.gz",
-    sizeMb: 238.9,
+    filename: "demo_placeholder_snapshot_manual_release.sql.gz",
+    sizeMb: 0,
     type: "manual",
     timestamp: "Yesterday 00:00:00",
-    status: "healthy",
+    status: "demo",
   },
 ];
 
@@ -131,23 +133,33 @@ export const SystemSecurityTab: React.FC = () => {
     }
   };
 
+  // Backup is a LOCAL run-log entry, not a durable copy: there is no pg_dump,
+  // no S3, no backend job behind this button. The old alert claimed all three
+  // and logged a random filename/size as "healthy" — a fake disaster-recovery
+  // story. Do not present this as a real backup until a server job exists.
   const handleTriggerBackup = () => {
     alert(
-      "Executing background pg_dump pipeline. Compressing SQL snapshot payload... Saved production state securely to durable S3 bucket.",
+      "Demo backup log (NOT a durable copy): no pg_dump ran and nothing was sent to S3. Wire a real backup job before relying on this list.",
     );
     const newBackup = {
       id: "backup_" + Date.now().toString().substring(5),
-      filename: `burgonomics_prod_manual_${Math.floor(Math.random() * 900) + 100}.sql.gz`,
-      sizeMb: 242.8,
+      filename: `local_backup_log_${new Date().toISOString().slice(0, 10)}.json`,
+      sizeMb: 0,
       type: "manual",
       timestamp: "Just now",
-      status: "healthy",
+      status: "demo",
     };
     setBackups((prev) => [newBackup, ...prev]);
   };
 
   const handleToggleMaintenance = () => {
-    const requiredPin = import.meta.env.VITE_ADMIN_MAINTENANCE_PIN || "2026";
+    // No Default PIN: the old `|| "2026"` fallback meant anyone who opened
+    // this console knew the safety PIN. Refuse until the operator sets one.
+    const requiredPin = import.meta.env.VITE_ADMIN_MAINTENANCE_PIN as string | undefined;
+    if (!requiredPin) {
+      alert("Maintenance lock is not configured (set VITE_ADMIN_MAINTENANCE_PIN). Refusing.");
+      return;
+    }
     if (isMaintenanceMode) {
       setIsMaintenanceMode(false);
       setMaintenancePin("");
@@ -326,7 +338,7 @@ export const SystemSecurityTab: React.FC = () => {
 
           <button
             onClick={handleTriggerBackup}
-            className="px-3 py-1.5 bg-[#0E4825] hover:bg-[#156d39] text-white text-[10px] font-black uppercase tracking-wider rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+            className="px-3 py-1.5 bg-primary hover:bg-[#156d39] text-white text-[10px] font-black uppercase tracking-wider rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Plus size={12} /> Force Database Snapshot
           </button>
