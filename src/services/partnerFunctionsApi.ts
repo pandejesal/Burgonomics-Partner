@@ -21,6 +21,14 @@ async function apiRequest<T>(endpoint: string, body: Record<string, any> = {}): 
     Accept: 'application/json',
   };
 
+  try {
+    const { getAppCheckToken } = await import('@/config/firebase');
+    const appCheckToken = await getAppCheckToken();
+    if (appCheckToken) headers['X-Firebase-AppCheck'] = appCheckToken;
+  } catch {
+    // Attestation unavailable — server runs monitor mode until enforced.
+  }
+
   const currentUser = auth.currentUser;
   if (currentUser) {
     try {
@@ -139,5 +147,16 @@ export const partnerFunctionsApi = {
    */
   async syncItemStock(branchId: string, itemId: string, inStock: boolean): Promise<{ success: boolean }> {
     return await apiRequest('/petpooja/pushStock', { branchId, itemId, inStock });
+  },
+
+  /**
+   * Subscribes this device token to FCM topics (e.g. branch_<id>_orders for
+   * KOT alerts). Topics can only be subscribed server-side.
+   */
+  async subscribeToTopics(
+    token: string,
+    topics: string[]
+  ): Promise<{ success: boolean; subscribed: string[] }> {
+    return await apiRequest('/notifications/subscribe', { token, topics });
   },
 };
