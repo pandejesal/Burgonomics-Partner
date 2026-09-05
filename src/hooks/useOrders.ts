@@ -7,6 +7,7 @@ import {
   query,
   where,
   orderBy,
+  limit,
   getDocs,
   doc,
   updateDoc,
@@ -47,13 +48,33 @@ export function useOrders(params: UseOrdersParams = {}) {
         const scopeBranchIds = resolveScopedBranchIds(user, selectedBranchId);
         if (!scopeBranchIds.length && !isGlobalRole(user?.role)) return [];
 
-        const ordersQuery = scopeBranchIds.length
-          ? query(
-              collection(db, 'orders'),
-              where('branchId', 'in', scopeBranchIds.slice(0, 10)),
-              orderBy('createdAt', 'desc'),
-            )
-          : query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
+        // Bounded reads: the old code downloaded the ENTIRE orders collection
+        // on every mount (5k docs ≈ 10MB + 5k billed reads). Latest-first with
+        // a cap covers Orders/Dashboard/KDS; dateRange narrows server-side
+        // (it was previously accepted in params and then ignored).
+        const rangeStart = (() => {
+          const now = new Date();
+          if (params.dateRange === 'today') {
+            return Timestamp.fromDate(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
+          }
+          if (params.dateRange === 'week') {
+            return Timestamp.fromDate(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000));
+          }
+          if (params.dateRange === 'month') {
+            return Timestamp.fromDate(new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000));
+          }
+          return null;
+        })();
+
+        const baseConstraints = [
+          ...(scopeBranchIds.length
+            ? [where('branchId', 'in', scopeBranchIds.slice(0, 10))]
+            : []),
+          ...(rangeStart ? [where('createdAt', '>=', rangeStart)] : []),
+          orderBy('createdAt', 'desc'),
+          limit(100),
+        ];
+        const ordersQuery = query(collection(db, 'orders'), ...baseConstraints);
 
         const ordersSnap = await getDocs(ordersQuery);
 

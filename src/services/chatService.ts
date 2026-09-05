@@ -5,6 +5,7 @@ import {
   query,
   where,
   orderBy,
+  limit,
   onSnapshot,
   addDoc,
   setDoc,
@@ -22,6 +23,17 @@ export interface SendMessageParams {
   senderRole: UserRole;
   text: string;
   imageUrl?: string;
+  orderReference?: {
+    orderId: string;
+    customerName: string;
+    total: number;
+    status: string;
+  };
+  ticketReference?: {
+    ticketId: string;
+    title: string;
+    priority: string;
+  };
   threadInfo?: {
     type: 'branch_channel' | 'direct_dm';
     title: string;
@@ -44,11 +56,16 @@ export const chatService = {
   ): Unsubscribe {
     const chatsRef = collection(db, 'chats');
 
-    // Brand Owner, Developer, Support see all threads; Branch Owner/Staff see branch channels + their DMs
+    // Brand Owner, Developer, Support see all threads; Branch Owner/Staff see branch channels + their DMs.
+    // Bounded: the old code subscribed with no limit (and client-sorted) —
+    // history grew the listener, bandwidth, and bill without bound. Scoped
+    // roles keep client-side sort deliberately: array-contains + orderBy on
+    // another field needs a composite index that is not deployed, and a
+    // missing index fails the listener to empty (worse than sorting 50).
     const q =
       userRole === 'brand_owner' || userRole === 'developer' || userRole === 'support'
-        ? query(chatsRef, orderBy('lastMessageAt', 'desc'))
-        : query(chatsRef, where('participantIds', 'array-contains', userId));
+        ? query(chatsRef, orderBy('lastMessageAt', 'desc'), limit(30))
+        : query(chatsRef, where('participantIds', 'array-contains', userId), limit(50));
 
     return onSnapshot(
       q,
@@ -57,6 +74,14 @@ export const chatService = {
           id: docSnap.id,
           ...docSnap.data(),
         })) as ChatThread[];
+
+        // Client-side sort by most recent message or creation timestamp
+        threads.sort((a, b) => {
+          const timeA = a.lastMessageAt?.toMillis?.() || a.createdAt?.toMillis?.() || 0;
+          const timeB = b.lastMessageAt?.toMillis?.() || b.createdAt?.toMillis?.() || 0;
+          return timeB - timeA;
+        });
+
         callback(threads);
       },
       (error) => {
@@ -74,15 +99,20 @@ export const chatService = {
     callback: (messages: ChatMessage[]) => void
   ): Unsubscribe {
     const messagesRef = collection(db, 'chats', chatId, 'messages');
-    const q = query(messagesRef, orderBy('createdAt', 'asc'));
+    // Latest 50 only: the old code subscribed to the thread's ENTIRE history
+    // and re-downloaded it on every new message. Descending + reverse keeps
+    // the UI's oldest-first order. ("Load older" pagination: follow-up.)
+    const q = query(messagesRef, orderBy('createdAt', 'desc'), limit(50));
 
     return onSnapshot(
       q,
       (snapshot) => {
-        const messages: ChatMessage[] = snapshot.docs.map((docSnap) => ({
-          id: docSnap.id,
-          ...docSnap.data(),
-        })) as ChatMessage[];
+        const messages: ChatMessage[] = snapshot.docs
+          .map((docSnap) => ({
+            id: docSnap.id,
+            ...docSnap.data(),
+          })) as ChatMessage[];
+        messages.reverse();
         callback(messages);
       },
       (error) => {
@@ -147,6 +177,8 @@ export const chatService = {
       senderRole: params.senderRole,
       text: params.text,
       imageUrl: params.imageUrl || null,
+      orderReference: params.orderReference || null,
+      ticketReference: params.ticketReference || null,
       createdAt: now,
       readBy: [params.senderId],
     });
@@ -165,6 +197,7 @@ export const chatService = {
     const chatId = `channel_${branchId}`;
     const chatDocRef = doc(db, 'chats', chatId);
 
+    const now = Timestamp.now();
     await setDoc(
       chatDocRef,
       {
@@ -181,7 +214,10 @@ export const chatService = {
           dev_team: 'Developer Team',
           support_team: 'Support Team',
         },
-        createdAt: Timestamp.now(),
+        lastMessageText: 'Operational channel initialized',
+        lastMessageSender: 'System',
+        lastMessageAt: now,
+        createdAt: now,
       },
       { merge: true }
     );
@@ -199,6 +235,7 @@ export const chatService = {
     const sortedIds = [userA.id, userB.id].sort();
     const chatId = `dm_${sortedIds[0]}_${sortedIds[1]}`;
     const chatDocRef = doc(db, 'chats', chatId);
+    const now = Timestamp.now();
 
     await setDoc(
       chatDocRef,
@@ -211,7 +248,10 @@ export const chatService = {
           [userA.id]: userA.name,
           [userB.id]: userB.name,
         },
-        createdAt: Timestamp.now(),
+        lastMessageText: 'Direct conversation initialized',
+        lastMessageSender: 'System',
+        lastMessageAt: now,
+        createdAt: now,
       },
       { merge: true }
     );

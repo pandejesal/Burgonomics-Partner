@@ -77,76 +77,95 @@ export function useDashboardStats() {
         };
       }
 
-      let orders: any[] = [];
-      let customers: any[] = [];
-      let tickets: any[] = [];
-      const warnings: string[] = [];
-
-      try {
-        // Normalize: delivery-app docs share this collection with a nested shape.
-        if (branchIds.length > 0) {
-          const ordersSnap = await getDocs(
-            query(collection(db, 'orders'), where('branchId', 'in', branchIds.slice(0, 10)))
-          );
-          const rawDocs = ordersSnap.docs.map((d) => ({
-            id: d.id,
-            data: d.data() as Record<string, any>,
-          }));
-          // Linked Delivery stores (registry; no extra reads when unmapped).
-          try {
-            const aliased = await fetchAliasedStoreOrders(db, branchIds);
-            const seen = new Set(rawDocs.map((d) => d.id));
-            for (const doc of aliased) {
-              if (!seen.has(doc.id)) {
-                seen.add(doc.id);
-                rawDocs.push(doc);
+      // Concurrent fan-out: the old code awaited orders → customers → tickets
+      // strictly serially, so first paint waited 3× p99. Same queries, same
+      // shapes — just fired together. (Read-count reduction needs aggregate
+      // queries + schema alignment; tracked as follow-up, not done here.)
+      const fetchOrders = async (): Promise<any[]> => {
+        try {
+          // Normalize: delivery-app docs share this collection with a nested shape.
+          if (branchIds.length > 0) {
+            const ordersSnap = await getDocs(
+              query(collection(db, 'orders'), where('branchId', 'in', branchIds.slice(0, 10)))
+            );
+            const rawDocs = ordersSnap.docs.map((d) => ({
+              id: d.id,
+              data: d.data() as Record<string, any>,
+            }));
+            // Linked Delivery stores (registry; no extra reads when unmapped).
+            try {
+              const aliased = await fetchAliasedStoreOrders(db, branchIds);
+              const seen = new Set(rawDocs.map((d) => d.id));
+              for (const doc of aliased) {
+                if (!seen.has(doc.id)) {
+                  seen.add(doc.id);
+                  rawDocs.push(doc);
+                }
               }
+              rawDocs.sort((a, b) => orderDocTimeMs(b.data) - orderDocTimeMs(a.data));
+            } catch (err) {
+              console.warn('Alias store order fetch failed, using direct results:', err);
             }
-            rawDocs.sort((a, b) => orderDocTimeMs(b.data) - orderDocTimeMs(a.data));
-          } catch (err) {
-            console.warn('Alias store order fetch failed, using direct results:', err);
+            return rawDocs.map((d) => normalizeOrderDoc(d.id, d.data));
           }
-          orders = rawDocs.map((d) => normalizeOrderDoc(d.id, d.data));
-        } else {
           const ordersSnap = await getDocs(collection(db, 'orders'));
-          orders = ordersSnap.docs.map((d) => normalizeOrderDoc(d.id, d.data() as Record<string, any>));
+          return ordersSnap.docs.map((d) => normalizeOrderDoc(d.id, d.data() as Record<string, any>));
+        } catch (err) {
+          console.warn('Using resilient orders fallback:', err);
+          warnings.push('Order data failed to load.');
+          return [];
         }
-      } catch (err) {
-        console.warn('Using resilient orders fallback:', err);
-        warnings.push('Order data failed to load.');
-      }
+      };
 
-      try {
-        const customersSnap = await getDocs(collection(db, 'customers'));
-        customers = customersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        // Scoped roles must not count (or list) customers of other outlets.
-        if (!isGlobalRole(user?.role)) {
-          customers = customers.filter(
-            (c) => c.favoriteBranchId && branchIds.includes(c.favoriteBranchId)
-          );
+      const fetchCustomers = async (): Promise<any[]> => {
+        try {
+          const customersSnap = await getDocs(collection(db, 'customers'));
+          let list: any[] = customersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          // Scoped roles must not count (or list) customers of other outlets.
+          if (!isGlobalRole(user?.role)) {
+            list = list.filter(
+              (c) => c.favoriteBranchId && branchIds.includes(c.favoriteBranchId)
+            );
+          }
+          return list;
+        } catch (err) {
+          console.warn('Using resilient customers fallback:', err);
+          warnings.push('Customer data failed to load.');
+          return [];
         }
-      } catch (err) {
-        console.warn('Using resilient customers fallback:', err);
-        warnings.push('Customer data failed to load.');
-      }
+      };
 
-      try {
-        const ticketsQuery =
-          branchIds.length > 0
-            ? query(collection(db, 'tickets'), where('branchId', 'in', branchIds.slice(0, 10)))
-            : query(collection(db, 'tickets'));
-        const ticketsSnap = await getDocs(ticketsQuery);
-        tickets = ticketsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      } catch (err) {
-        console.warn('Using resilient tickets fallback:', err);
-        warnings.push('Ticket data failed to load.');
-      }
+      const fetchTickets = async (): Promise<any[]> => {
+        try {
+          const ticketsQuery =
+            branchIds.length > 0
+              ? query(collection(db, 'tickets'), where('branchId', 'in', branchIds.slice(0, 10)))
+              : query(collection(db, 'tickets'));
+          const ticketsSnap = await getDocs(ticketsQuery);
+          return ticketsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        } catch (err) {
+          console.warn('Using resilient tickets fallback:', err);
+          warnings.push('Ticket data failed to load.');
+          return [];
+        }
+      };
+
+      const warnings: string[] = [];
+      const [fetchedOrders, fetchedCustomers, fetchedTickets] = await Promise.all([
+        fetchOrders(),
+        fetchCustomers(),
+        fetchTickets(),
+      ]);
 
       // Filter by city if selected
+      let orders = fetchedOrders;
+      let customers = fetchedCustomers;
+      let tickets = fetchedTickets;
       if (selectedCity && selectedCity !== 'all') {
-        orders = orders.filter((o) => o.city?.toLowerCase() === selectedCity.toLowerCase());
-        customers = customers.filter((c) => c.city?.toLowerCase() === selectedCity.toLowerCase());
-        tickets = tickets.filter((t) => t.city?.toLowerCase() === selectedCity.toLowerCase());
+        const city = selectedCity.toLowerCase();
+        orders = orders.filter((o) => o.city?.toLowerCase() === city);
+        customers = customers.filter((c) => c.city?.toLowerCase() === city);
+        tickets = tickets.filter((t) => t.city?.toLowerCase() === city);
       }
 
       // Dev-only demo numbers (Runbook §8) — production reports real zeros.

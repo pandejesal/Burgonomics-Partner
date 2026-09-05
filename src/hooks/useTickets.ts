@@ -56,75 +56,88 @@ export function useTickets(params: UseTicketsParams = {}) {
         branchIds = ['branch_surat_01', 'branch_ahmedabad_01'];
       }
 
-      const list: Ticket[] = [];
-
-      // 1. Fetch from support_tickets collection (Primary)
-      try {
-        const supportConstraints: any[] = [
+      // Dual-collection fetch, fired concurrently: the old code awaited
+      // support_tickets → tickets serially (2× latency). Dedup is Set-based
+      // (the old list.some() was O(n²) — ~4M comparisons at 2k+2k tickets).
+      const buildConstraints = (): any[] => {
+        const constraints: any[] = [
           where('branchId', 'in', branchIds.slice(0, 10)),
           orderBy('createdAt', 'desc'),
         ];
         if (params.status && params.status !== 'all') {
-          supportConstraints.unshift(where('status', '==', params.status));
+          constraints.unshift(where('status', '==', params.status));
         }
+        return constraints;
+      };
 
-        const supportSnap = await getDocs(
-          query(collection(db, 'support_tickets'), ...supportConstraints)
-        );
-
-        supportSnap.forEach((d) => {
-          const data = d.data();
-          list.push({
-            id: d.id,
-            ticketNumber: data.ticketNumber || d.id,
-            title: data.subject || data.title || 'Customer Support Incident',
-            branchId: data.branchId,
-            branchName: data.branchName || data.branchId,
-            category: data.category || 'customer_escalation',
-            priority: data.priority || 'medium',
-            message: data.description || data.message || '',
-            orderId: data.orderId,
-            status: data.status || 'open',
-            raisedById: data.customerId || data.raisedById || 'customer',
-            raisedByName: data.customerName || data.raisedByName || 'Customer',
-            raisedByRole: 'customer',
-            assignedTo: data.assignedTo || { tier: 'branch' },
-            attachments: data.attachments || [],
-            resolution: data.resolution?.notes || data.resolution || '',
-            createdAt: data.createdAt || Timestamp.now(),
-            updatedAt: data.updatedAt || Timestamp.now(),
-          } as any);
-        });
-      } catch (err) {
-        console.warn('[useTickets] support_tickets fetch fallback:', err);
-        warningsRef.current.push('Support tickets could not be loaded.');
-      }
-
-      // 2. Fetch from legacy tickets collection
-      try {
-        const ticketConstraints: any[] = [
-          where('branchId', 'in', branchIds.slice(0, 10)),
-          orderBy('createdAt', 'desc'),
-        ];
-        if (params.status && params.status !== 'all') {
-          ticketConstraints.unshift(where('status', '==', params.status));
+      const fetchSupportTickets = async (): Promise<Ticket[]> => {
+        try {
+          const supportSnap = await getDocs(
+            query(collection(db, 'support_tickets'), ...buildConstraints())
+          );
+          const out: Ticket[] = [];
+          supportSnap.forEach((d) => {
+            const data = d.data();
+            out.push({
+              id: d.id,
+              ticketNumber: data.ticketNumber || d.id,
+              title: data.subject || data.title || 'Customer Support Incident',
+              branchId: data.branchId,
+              branchName: data.branchName || data.branchId,
+              category: data.category || 'customer_escalation',
+              priority: data.priority || 'medium',
+              message: data.description || data.message || '',
+              orderId: data.orderId,
+              status: data.status || 'open',
+              raisedById: data.customerId || data.raisedById || 'customer',
+              raisedByName: data.customerName || data.raisedByName || 'Customer',
+              raisedByRole: 'customer',
+              assignedTo: data.assignedTo || { tier: 'branch' },
+              attachments: data.attachments || [],
+              resolution: data.resolution?.notes || data.resolution || '',
+              createdAt: data.createdAt || Timestamp.now(),
+              updatedAt: data.updatedAt || Timestamp.now(),
+            } as any);
+          });
+          return out;
+        } catch (err) {
+          console.warn('[useTickets] support_tickets fetch fallback:', err);
+          warningsRef.current.push('Support tickets could not be loaded.');
+          return [];
         }
+      };
 
-        const ticketsSnap = await getDocs(
-          query(collection(db, 'tickets'), ...ticketConstraints)
-        );
-
-        ticketsSnap.forEach((d) => {
-          if (!list.some((existing) => existing.id === d.id)) {
-            list.push({
+      const fetchLegacyTickets = async (): Promise<Ticket[]> => {
+        try {
+          const ticketsSnap = await getDocs(
+            query(collection(db, 'tickets'), ...buildConstraints())
+          );
+          const out: Ticket[] = [];
+          ticketsSnap.forEach((d) => {
+            out.push({
               id: d.id,
               ...d.data(),
             } as any);
-          }
-        });
-      } catch (err) {
-        console.warn('[useTickets] tickets collection fetch fallback:', err);
-        warningsRef.current.push('Legacy tickets could not be loaded.');
+          });
+          return out;
+        } catch (err) {
+          console.warn('[useTickets] tickets collection fetch fallback:', err);
+          warningsRef.current.push('Legacy tickets could not be loaded.');
+          return [];
+        }
+      };
+
+      const [supportList, legacyList] = await Promise.all([
+        fetchSupportTickets(),
+        fetchLegacyTickets(),
+      ]);
+      const list: Ticket[] = [...supportList];
+      const seenIds = new Set(supportList.map((t) => t.id));
+      for (const t of legacyList) {
+        if (!seenIds.has(t.id)) {
+          seenIds.add(t.id);
+          list.push(t);
+        }
       }
 
       if (list.length > 0) {
