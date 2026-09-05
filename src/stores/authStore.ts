@@ -28,7 +28,9 @@ const VALID_OPERATOR_ROLES: UserRole[] = [
   'branch_staff',
 ];
 
-async function resolveUserProfile(firebaseUser: FirebaseUser): Promise<User | null> {
+// Exported for tests: pins the fail-closed contract (unknown role → null →
+// denied login), which no caller may weaken without breaking the suite.
+export async function resolveUserProfile(firebaseUser: FirebaseUser): Promise<User | null> {
   try {
     // 1. Check admins collection (Primary administrative registry)
     const adminDocRef = doc(db, 'admins', firebaseUser.uid);

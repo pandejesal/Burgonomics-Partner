@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useTicket } from '@/hooks/useTicket';
 import { useAuthStore } from '@/stores/authStore';
+import { validatePartialRefundAmount } from '@/utils/refundValidation';
 import {
   ArrowLeft,
   ShieldAlert,
@@ -89,18 +90,11 @@ export function TicketDetailPage() {
     setTimeout(() => setCopiedPayload(false), 2000);
   };
 
-  // Partial-refund validation: the old `Number(input) || 50` silently turned
-  // typos/empties/negatives into ₹50 (or worse) and resolved the ticket.
-  // Invalid input blocks execution with an inline error — never a fake refund.
+  // Partial-refund validation lives in utils/refundValidation (unit-tested):
+  // invalid input blocks execution with an inline error — never a fake refund.
   const partialRefundError: string | null =
     activeActionTab === 'refund' && refundType === 'partial'
-      ? !/^\d+$/.test(refundAmountInput.trim())
-        ? 'Enter a whole-rupee amount (digits only).'
-        : Number(refundAmountInput) < 1
-          ? 'Refund amount must be at least ₹1.'
-          : Number(refundAmountInput) > 100000
-            ? 'Amount exceeds the ₹1,00,000 single-refund cap — split it or escalate.'
-            : null
+      ? validatePartialRefundAmount(refundAmountInput)
       : null;
 
   const handleExecuteAction = async () => {
