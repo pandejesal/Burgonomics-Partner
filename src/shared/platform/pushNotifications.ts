@@ -84,15 +84,23 @@ export async function initPushNotifications(user?: User | null): Promise<void> {
       console.log('[Push] Registered with FCM/APNs token:', token.value.slice(0, 12) + '...');
       setCachedToken(token.value);
 
-      // Subscribe to branch KOT topics so kitchen alerts actually arrive
-      // (server sends to branch_<id>_orders; nothing subscribes by default).
-      const branchIds = user?.branchIds?.length ? user.branchIds : [];
+      // Subscribe to branch topics so kitchen + ticket alerts arrive. Reads
+      // the CURRENT user from the store (not the init-time closure) so
+      // account switches re-subscribe correctly on token refresh.
+      let freshUser: User | null = user || null;
+      try {
+        const { useAuthStore } = await import('@/stores/authStore');
+        freshUser = useAuthStore.getState().user || user || null;
+      } catch {
+        // store unavailable — fall back to init-time user
+      }
+      const branchIds = freshUser?.branchIds?.length ? freshUser.branchIds : [];
       if (branchIds.length > 0) {
         try {
           const { partnerFunctionsApi } = await import('@/services/partnerFunctionsApi');
           await partnerFunctionsApi.subscribeToTopics(
             token.value,
-            branchIds.map((b) => `branch_${b}_orders`)
+            branchIds.flatMap((b) => [`branch_${b}_orders`, `branch_${b}_tickets`])
           );
         } catch (subErr) {
           console.warn('[Push] Branch topic subscription failed:', subErr);
@@ -138,20 +146,29 @@ export async function initPushNotifications(user?: User | null): Promise<void> {
 
       const data = notification?.data || {};
       const orderId = data.orderId || data.targetId;
+      const ticketId = data.ticketId;
       const title = notification?.title || '🔔 New Alert';
       const body = notification?.body || '';
+      const action = orderId
+        ? {
+            label: 'View Order',
+            onClick: () => {
+              window.location.href = `/orders/${orderId}`;
+            },
+          }
+        : ticketId
+          ? {
+              label: 'View Ticket',
+              onClick: () => {
+                window.location.href = `/tickets/${ticketId}`;
+              },
+            }
+          : undefined;
 
       toast(title, {
         description: body,
         duration: 8000,
-        action: orderId
-          ? {
-              label: 'View Order',
-              onClick: () => {
-                window.location.href = `/orders/${orderId}`;
-              },
-            }
-          : undefined,
+        action,
       });
     });
 
