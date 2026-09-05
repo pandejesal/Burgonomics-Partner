@@ -34,11 +34,13 @@ export const AdminProfilePage: React.FC = () => {
   );
 
   const [sessions, setSessions] = useState<any[]>([]);
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!admin?.id) return;
     const q = query(collection(db, "admins", admin.id, "sessions"), orderBy("lastSeen", "desc"));
     const unsubscribe = onSnapshot(q, async (snapshot) => {
+      setSessionsError(null);
       const activeSessionId = await secureStorage.get("admin_session_id");
       const loaded = snapshot.docs
         .filter((doc) => doc.data().active === true)
@@ -59,6 +61,9 @@ export const AdminProfilePage: React.FC = () => {
       // Sort so active session is first
       loaded.sort((a, b) => (a.active === b.active ? 0 : a.active ? -1 : 1));
       setSessions(loaded);
+    }, (err) => {
+      console.warn('[AdminProfile] sessions listener failed:', err);
+      setSessionsError('Could not load sessions. Check connection and permissions.');
     });
     return () => unsubscribe();
   }, [admin?.id]);
@@ -103,7 +108,7 @@ export const AdminProfilePage: React.FC = () => {
               {admin?.fullName}
             </span>
             <span className="block text-xs text-gray-400 mt-0.5">{admin?.email}</span>
-            <span className="inline-flex items-center gap-1 mt-2 text-[10px] font-black uppercase tracking-wider text-[#FF6600]">
+            <span className="inline-flex items-center gap-1 mt-2 text-[10px] font-black uppercase tracking-wider text-accent dark:text-accent-light">
               <ShieldCheck size={11} />
               <span>Session Secured</span>
             </span>
@@ -115,19 +120,19 @@ export const AdminProfilePage: React.FC = () => {
       <div className="flex border-b border-gray-100 dark:border-gray-800 gap-6 text-xs font-bold uppercase tracking-wider">
         <button
           onClick={() => setActiveTab("security")}
-          className={`pb-3 border-b-2 transition-all cursor-pointer ${activeTab === "security" ? "border-[#0E4825] text-[#0E4825] dark:text-emerald-400 dark:border-emerald-400" : "border-transparent text-gray-400 hover:text-gray-600"}`}
+          className={`pb-3 border-b-2 transition-all cursor-pointer ${activeTab === "security" ? "border-primary text-primary dark:text-emerald-400 dark:border-emerald-400" : "border-transparent text-gray-400 hover:text-gray-600"}`}
         >
           Security & MFA
         </button>
         <button
           onClick={() => setActiveTab("sessions")}
-          className={`pb-3 border-b-2 transition-all cursor-pointer ${activeTab === "sessions" ? "border-[#0E4825] text-[#0E4825] dark:text-emerald-400 dark:border-emerald-400" : "border-transparent text-gray-400 hover:text-gray-600"}`}
+          className={`pb-3 border-b-2 transition-all cursor-pointer ${activeTab === "sessions" ? "border-primary text-primary dark:text-emerald-400 dark:border-emerald-400" : "border-transparent text-gray-400 hover:text-gray-600"}`}
         >
           Active Sessions ({sessions.length})
         </button>
         <button
           onClick={() => setActiveTab("permissions")}
-          className={`pb-3 border-b-2 transition-all cursor-pointer ${activeTab === "permissions" ? "border-[#0E4825] text-[#0E4825] dark:text-emerald-400 dark:border-emerald-400" : "border-transparent text-gray-400 hover:text-gray-600"}`}
+          className={`pb-3 border-b-2 transition-all cursor-pointer ${activeTab === "permissions" ? "border-primary text-primary dark:text-emerald-400 dark:border-emerald-400" : "border-transparent text-gray-400 hover:text-gray-600"}`}
         >
           My Granted Permissions
         </button>
@@ -174,7 +179,7 @@ export const AdminProfilePage: React.FC = () => {
               <form onSubmit={handleChangePassword} className="space-y-4">
                 {pwdMessage && (
                   <div
-                    className={`p-4 rounded-xl text-xs font-semibold border flex items-center gap-2 ${pwdMessage.type === "success" ? "bg-green-50 border-green-100 text-[#0E4825]" : "bg-red-50 border-red-100 text-red-600"}`}
+                    className={`p-4 rounded-xl text-xs font-semibold border flex items-center gap-2 ${pwdMessage.type === "success" ? "bg-green-50 border-green-100 text-primary" : "bg-red-50 border-red-100 text-red-600"}`}
                   >
                     <CheckCircle size={16} />
                     <span>{pwdMessage.text}</span>
@@ -235,6 +240,11 @@ export const AdminProfilePage: React.FC = () => {
             title="Session Monitor"
             subtitle="All active devices authenticated to this administration profile"
           >
+            {sessionsError && (
+              <p role="alert" className="mb-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-bold text-amber-600 dark:text-amber-300">
+                {sessionsError}
+              </p>
+            )}
             <div className="divide-y divide-gray-100 dark:divide-gray-800/60 border border-gray-100 dark:border-gray-800 rounded-2xl overflow-hidden bg-white dark:bg-transparent">
               {sessions.map((sess) => (
                 <div
@@ -243,7 +253,7 @@ export const AdminProfilePage: React.FC = () => {
                 >
                   <div className="flex gap-4">
                     <div
-                      className={`flex h-10 w-10 items-center justify-center rounded-xl ${sess.active ? "bg-[#0E4825]/10 text-[#0E4825] dark:text-emerald-400" : "bg-gray-100 dark:bg-gray-900 text-gray-400"}`}
+                      className={`flex h-10 w-10 items-center justify-center rounded-xl ${sess.active ? "bg-primary/10 text-primary dark:text-emerald-400" : "bg-gray-100 dark:bg-gray-900 text-gray-400"}`}
                     >
                       <Smartphone size={18} />
                     </div>
@@ -293,7 +303,7 @@ export const AdminProfilePage: React.FC = () => {
               {permissions.map((p, idx) => (
                 <span
                   key={idx}
-                  className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-400 hover:bg-[#0E4825]/5 hover:text-[#0E4825] hover:border-[#0E4825]/20 transition-all cursor-default"
+                  className="px-3 py-1.5 rounded-xl text-xs font-mono font-bold bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-400 hover:bg-primary/5 hover:text-primary hover:border-primary/20 transition-all cursor-default"
                 >
                   {p}
                 </span>
