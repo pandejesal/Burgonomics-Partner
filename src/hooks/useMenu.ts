@@ -135,11 +135,15 @@ export function useMenu() {
   // Background staleness check (hourly auto-sync)
   useEffect(() => {
     if (!branchId) return;
-    checkAndAutoSyncMenu(branchId).then((didSync) => {
-      if (didSync) {
-        queryClient.invalidateQueries({ queryKey: ['menuItems', branchId] });
-      }
-    });
+    checkAndAutoSyncMenu(branchId)
+      .then((didSync) => {
+        if (didSync) {
+          queryClient.invalidateQueries({ queryKey: ['menuItems', branchId] });
+        }
+      })
+      .catch((err) => {
+        console.warn('[useMenu] Background menu auto-sync failed:', err);
+      });
   }, [branchId, queryClient]);
 
   // Toggle item 86-ing / availability on the canonical `products` doc, then

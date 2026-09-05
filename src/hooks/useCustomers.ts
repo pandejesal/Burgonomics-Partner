@@ -177,6 +177,9 @@ export function useCustomers() {
 
         return list;
       } catch (err) {
+        // Production must surface the error, not mask it with fake customers
+        // (Runbook §8). Dev keeps the rich seed CRM for offline work.
+        if (!import.meta.env.DEV) throw err;
         console.warn('Error fetching customers, returning rich seed CRM:', err);
         let list: Customer[] = [
           {

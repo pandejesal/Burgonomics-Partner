@@ -5,6 +5,15 @@ import { doc, getDoc, onSnapshot, updateDoc, Timestamp } from 'firebase/firestor
 import type { Order, OrderStatus } from '@/types';
 import { normalizeOrderDoc, toDeliveryStatusMeta, toPartnerStatus } from '@/utils/orderContract';
 import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
+import { toast } from 'sonner';
+
+function notifyMutationError(action: string) {
+  return (err: unknown) => {
+    const message = err instanceof Error ? err.message : 'Order update failed with no details.';
+    console.error(`[useOrder] ${action} failed:`, err);
+    toast.error(`${action} failed`, { description: message });
+  };
+}
 
 export function useOrder(orderId: string) {
   const queryClient = useQueryClient();
@@ -65,6 +74,7 @@ export function useOrder(orderId: string) {
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
       queryClient.invalidateQueries({ queryKey: ['orders'] });
     },
+    onError: notifyMutationError('Status update'),
   });
 
   const assignRider = useMutation({
@@ -93,6 +103,7 @@ export function useOrder(orderId: string) {
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
       queryClient.invalidateQueries({ queryKey: ['orders'] });
     },
+    onError: notifyMutationError('Rider assignment'),
   });
 
   const pushToPetpooja = useMutation({
@@ -103,6 +114,7 @@ export function useOrder(orderId: string) {
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
       queryClient.invalidateQueries({ queryKey: ['orders'] });
     },
+    onError: notifyMutationError('Petpooja KOT push'),
   });
 
   const autoDispatchPorter = useMutation({
@@ -113,6 +125,7 @@ export function useOrder(orderId: string) {
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
       queryClient.invalidateQueries({ queryKey: ['orders'] });
     },
+    onError: notifyMutationError('Porter dispatch'),
   });
 
   return {
