@@ -19,6 +19,7 @@ import {
   orderDocTimeMs,
   toDeliveryStatusMeta,
 } from '@/utils/orderContract';
+import { isGlobalRole, resolveScopedBranchIds } from '@/utils/branchScope';
 
 /**
  * Demo seeds are DEV-only (Runbook §8). Production shows real orders or an
@@ -40,12 +41,11 @@ export function useOrders(params: UseOrdersParams = {}) {
     queryKey: ['orders', user?.id, user?.role, selectedCity, selectedBranchId, params],
     queryFn: async (): Promise<Order[]> => {
       try {
-        const scopeBranchIds =
-          selectedBranchId && selectedBranchId !== 'all'
-            ? [selectedBranchId]
-            : user?.branchIds?.length
-              ? user.branchIds
-              : [];
+        // The UI selection is user-writable (localStorage) — scoped roles are
+        // clamped to their assigned branches; a scoped role with no branches
+        // sees nothing, never the global collection.
+        const scopeBranchIds = resolveScopedBranchIds(user, selectedBranchId);
+        if (!scopeBranchIds.length && !isGlobalRole(user?.role)) return [];
 
         const ordersQuery = scopeBranchIds.length
           ? query(

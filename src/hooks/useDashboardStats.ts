@@ -4,6 +4,7 @@ import { useAppStore } from '@/stores/appStore';
 import { db } from '@/config/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { fetchAliasedStoreOrders, normalizeOrderDoc, orderDocTimeMs } from '@/utils/orderContract';
+import { isGlobalRole, resolveScopedBranchIds } from '@/utils/branchScope';
 
 interface DashboardStats {
   totalOrders: number;
@@ -60,12 +61,20 @@ export function useDashboardStats() {
   return useQuery<DashboardStats>({
     queryKey: ['dashboard', user?.id, user?.role, selectedBranchId, selectedCity],
     queryFn: async () => {
-      let branchIds: string[] = [];
-
-      if (selectedBranchId) {
-        branchIds = [selectedBranchId];
-      } else if (user?.role === 'branch_owner') {
-        branchIds = user.branchIds || ['branch_surat_01'];
+      // Scoped roles are clamped to assigned branches (see branchScope); a
+      // scoped role with no branches gets zeros with NO collection reads.
+      const branchIds = resolveScopedBranchIds(user, selectedBranchId);
+      if (!branchIds.length && !isGlobalRole(user?.role)) {
+        return {
+          totalOrders: 0,
+          totalRevenue: 0,
+          totalCustomers: 0,
+          openTickets: 0,
+          ordersToday: 0,
+          revenueToday: 0,
+          recentOrders: [],
+          warnings: [] as string[],
+        };
       }
 
       let orders: any[] = [];
@@ -110,6 +119,12 @@ export function useDashboardStats() {
       try {
         const customersSnap = await getDocs(collection(db, 'customers'));
         customers = customersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        // Scoped roles must not count (or list) customers of other outlets.
+        if (!isGlobalRole(user?.role)) {
+          customers = customers.filter(
+            (c) => c.favoriteBranchId && branchIds.includes(c.favoriteBranchId)
+          );
+        }
       } catch (err) {
         console.warn('Using resilient customers fallback:', err);
         warnings.push('Customer data failed to load.');

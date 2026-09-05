@@ -4,6 +4,7 @@ import { useAppStore } from '@/stores/appStore';
 import { db } from '@/config/firebase';
 import { collection, query, getDocs, orderBy, Timestamp } from 'firebase/firestore';
 import type { Customer } from '@/types';
+import { isGlobalRole } from '@/utils/branchScope';
 
 export function useCustomers() {
   const { user } = useAuthStore();
@@ -158,11 +159,13 @@ export function useCustomers() {
           ];
         }
 
-        // Branch Owner Scoping: strictly own branch
-        if (user?.role === 'branch_owner' && user.branchIds?.length) {
-          const myBranchId = user.branchIds[0];
+        // Scoped-role scoping (branch_owner AND branch_staff): strictly
+        // assigned branches. Unknown-branch customers stay visible so no
+        // regular is silently dropped from the outlet's view.
+        if (!isGlobalRole(user?.role) && user?.branchIds?.length) {
+          const mine = user.branchIds;
           return list.filter(
-            (c) => !c.favoriteBranchId || c.favoriteBranchId === myBranchId
+            (c) => !c.favoriteBranchId || mine.includes(c.favoriteBranchId)
           );
         }
 
@@ -252,9 +255,9 @@ export function useCustomers() {
           },
         ];
 
-        if (user?.role === 'branch_owner' && user.branchIds?.length) {
-          const myBranchId = user.branchIds[0];
-          return list.filter((c) => !c.favoriteBranchId || c.favoriteBranchId === myBranchId);
+        if (!isGlobalRole(user?.role) && user?.branchIds?.length) {
+          const mine = user.branchIds;
+          return list.filter((c) => !c.favoriteBranchId || mine.includes(c.favoriteBranchId));
         }
 
         if (selectedCity && selectedCity !== 'all') {

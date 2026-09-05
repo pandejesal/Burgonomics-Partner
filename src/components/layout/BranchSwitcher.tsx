@@ -41,11 +41,15 @@ export function BranchSwitcher() {
     return branches.find((b) => b.id === selectedBranchId) || null;
   }, [branches, selectedBranchId]);
 
-  if (!isGlobalRole && user?.role === 'branch_owner') {
+  // Scoped roles (branch_owner AND branch_staff) get a locked badge — the
+  // global outlet picker must never render for sessions limited to assigned
+  // branches. Queries additionally clamp any persisted selection server-side
+  // of trust (see resolveScopedBranchIds).
+  if (!isGlobalRole) {
     return (
       <div className="flex items-center space-x-2 px-3 py-1.5 bg-surface border border-border rounded-xl text-xs text-white">
         <Store className="w-3.5 h-3.5 text-accent-light" />
-        <span className="font-semibold">{user.branchIds?.[0] ? 'My Outlet' : 'Branch Scope'}</span>
+        <span className="font-semibold">{user?.branchIds?.[0] ? 'My Outlet' : 'Branch Scope'}</span>
       </div>
     );
   }

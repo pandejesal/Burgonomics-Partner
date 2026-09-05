@@ -15,118 +15,213 @@ interface AuthState {
   loading: boolean;
   error: string | null;
   signIn: (email: string, password: string) => Promise<void>;
-  loginAsRole: (
-    role: UserRole,
-    branchIds?: string[],
-    name?: string,
-    email?: string
-  ) => void;
   signOut: () => Promise<void>;
   initialize: () => void;
 }
 
+const VALID_OPERATOR_ROLES: UserRole[] = [
+  'brand_owner',
+  'developer',
+  'support',
+  'regional_manager',
+  'branch_owner',
+  'branch_staff',
+];
+
+async function resolveUserProfile(firebaseUser: FirebaseUser): Promise<User | null> {
+  try {
+    // 1. Check admins collection (Primary administrative registry)
+    const adminDocRef = doc(db, 'admins', firebaseUser.uid);
+    const adminDocSnap = await getDoc(adminDocRef);
+
+    if (adminDocSnap.exists()) {
+      const data = adminDocSnap.data();
+      const rawRole = typeof data.role === 'object' ? data.role?.name : data.role;
+      // Fail closed: a missing or unrecognized role must NEVER resolve to a
+      // privileged role. Returning null denies login (signIn throws, bootstrap
+      // signs out) instead of silently escalating typos like 'Branch_Owner'
+      // — or 'customer' — to superadmin.
+      if (!VALID_OPERATOR_ROLES.includes(rawRole as UserRole)) {
+        console.warn(`[auth] Denying login: unrecognized operator role "${String(rawRole)}"`);
+        return null;
+      }
+      const role = rawRole as UserRole;
+
+      const branchIds: string[] = Array.isArray(data.branchIds)
+        ? data.branchIds
+        : data.assignedStoreId
+        ? [data.assignedStoreId]
+        : data.branchId
+        ? [data.branchId]
+        : [];
+
+      const cityIds: string[] = Array.isArray(data.cityIds)
+        ? data.cityIds
+        : data.city
+        ? [data.city]
+        : ['Surat', 'Ahmedabad'];
+
+      return {
+        id: firebaseUser.uid,
+        name: data.fullName || data.name || firebaseUser.email?.split('@')[0] || 'Administrator',
+        email: firebaseUser.email || data.email || '',
+        role,
+        branchIds,
+        cityIds,
+        phone: data.phone || '',
+        avatar: data.avatar || undefined,
+        createdAt: data.createdAt || Timestamp.now(),
+      };
+    }
+
+    // 2. Check users collection (Branch staff / operators)
+    const userDocRef = doc(db, 'users', firebaseUser.uid);
+    const userDocSnap = await getDoc(userDocRef);
+
+    if (userDocSnap.exists()) {
+      const data = userDocSnap.data();
+      const role = data.role as UserRole;
+
+      // Ensure user is an authorized operator, not a generic customer
+      if (role && VALID_OPERATOR_ROLES.includes(role) && role !== 'customer') {
+        const branchIds: string[] = Array.isArray(data.branchIds)
+          ? data.branchIds
+          : data.branchId
+          ? [data.branchId]
+          : [];
+
+        const cityIds: string[] = Array.isArray(data.cityIds)
+          ? data.cityIds
+          : data.city
+          ? [data.city]
+          : ['Surat'];
+
+        return {
+          id: firebaseUser.uid,
+          name: data.name || data.fullName || firebaseUser.email?.split('@')[0] || 'Operator',
+          email: firebaseUser.email || data.email || '',
+          role,
+          branchIds,
+          cityIds,
+          phone: data.phone || '',
+          avatar: data.avatar || undefined,
+          createdAt: data.createdAt || Timestamp.now(),
+        };
+      }
+    }
+
+    // 3. Check custom claims on token
+    const tokenResult = await firebaseUser.getIdTokenResult();
+    const tokenRole = tokenResult.claims.role as UserRole;
+    if (tokenRole && VALID_OPERATOR_ROLES.includes(tokenRole) && tokenRole !== 'customer') {
+      return {
+        id: firebaseUser.uid,
+        name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Operator',
+        email: firebaseUser.email || '',
+        role: tokenRole,
+        branchIds: (tokenResult.claims.branchIds as string[]) || [],
+        cityIds: (tokenResult.claims.cityIds as string[]) || ['Surat'],
+        phone: '',
+        createdAt: Timestamp.now(),
+      };
+    }
+
+    return null;
+  } catch (err) {
+    console.error('Error resolving operator profile from Firestore:', err);
+    return null;
+  }
+}
+
+// Module-level guard: useAuth() runs in several hooks, and without this
+// every mount stacked another onAuthStateChanged listener (duplicate
+// profile reads per sign-in event). Single registration per page load.
+let authListenerRegistered = false;
+
 export const useAuthStore = create<AuthState>((set) => ({
-  user: {
-    id: 'user_brand_01',
-    name: 'Yash (Brand Owner)',
-    email: 'yash@burgonomics.com',
-    role: 'brand_owner',
-    branchIds: ['branch_surat_01', 'branch_ahmedabad_01'],
-    cityIds: ['Surat', 'Ahmedabad', 'Vadodara', 'Mumbai'],
-    phone: '+91 98765 43210',
-    createdAt: Timestamp.now(),
-  },
+  user: null,
   firebaseUser: null,
-  loading: false,
+  loading: true,
   error: null,
 
   signIn: async (email: string, password: string) => {
     try {
       set({ error: null, loading: true });
-      const result = await signInWithEmailAndPassword(auth, email, password);
+      const result = await signInWithEmailAndPassword(auth, email.trim(), password);
 
-      // Load user profile from Firestore
-      const userDoc = await getDoc(doc(db, 'users', result.user.uid));
-      if (userDoc.exists()) {
-        set({
-          user: {
-            id: result.user.uid,
-            ...userDoc.data(),
-          } as User,
-          firebaseUser: result.user,
-          loading: false,
-        });
-      } else {
-        set({
-          user: {
-            id: result.user.uid,
-            name: email.split('@')[0],
-            email,
-            role: 'brand_owner',
-            branchIds: ['branch_surat_01'],
-            cityIds: ['Surat'],
-            phone: '+91 98765 00000',
-            createdAt: Timestamp.now(),
-          },
-          firebaseUser: result.user,
-          loading: false,
-        });
+      // Verify legitimate operator role from Firestore / Auth token
+      const profile = await resolveUserProfile(result.user);
+
+      if (!profile) {
+        await firebaseSignOut(auth);
+        throw new Error(
+          'Access Denied: Your account is not configured with operator privileges. Please contact Brand Administrator.'
+        );
       }
-    } catch (err) {
-      set({ error: (err as Error).message, loading: false });
+
+      set({
+        user: profile,
+        firebaseUser: result.user,
+        loading: false,
+        error: null,
+      });
+    } catch (err: any) {
+      let message = err.message || 'Authentication failed.';
+      if (
+        err.code === 'auth/invalid-credential' ||
+        err.code === 'auth/user-not-found' ||
+        err.code === 'auth/wrong-password' ||
+        err.code === 'auth/invalid-email'
+      ) {
+        message = 'Invalid email or password. Please verify your credentials.';
+      }
+      set({ error: message, loading: false, user: null, firebaseUser: null });
+      throw err;
     }
-  },
-
-  loginAsRole: (role: UserRole, branchIds = ['branch_surat_01'], name, email) => {
-    const roleNames: Record<UserRole, string> = {
-      brand_owner: 'Yash (Brand Owner)',
-      developer: 'Alex (Lead Dev Team)',
-      support: 'Priya (Support Desk)',
-      regional_manager: 'Vikram (Gujarat Manager)',
-      branch_owner: 'Sanjay (Surat Outlet Owner)',
-      branch_staff: 'Ramesh (Kitchen Chef)',
-    };
-
-    set({
-      user: {
-        id: `user_${role}_01`,
-        name: name || roleNames[role] || 'Operator',
-        email: email || `${role}@burgonomics.com`,
-        role,
-        branchIds,
-        cityIds: ['Surat', 'Ahmedabad'],
-        phone: '+91 98251 00000',
-        createdAt: Timestamp.now(),
-      },
-      loading: false,
-      error: null,
-    });
   },
 
   signOut: async () => {
     try {
       await firebaseSignOut(auth);
     } catch (err) {
-      console.warn('SignOut firebase notice:', err);
+      console.warn('SignOut error:', err);
     }
-    set({ user: null, firebaseUser: null });
+    set({ user: null, firebaseUser: null, error: null, loading: false });
   },
 
   initialize: () => {
-    // Keep initial role session or listen to firebase auth
+    if (authListenerRegistered) return;
+    authListenerRegistered = true;
     onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-        if (userDoc.exists()) {
+        // Force-refresh once per bootstrap so a revoked/downgraded role or
+        // disabled account takes effect immediately instead of lingering
+        // until the hourly token rotation.
+        try {
+          await firebaseUser.getIdToken(true);
+        } catch {
+          // Offline refresh failure — fall through to cached claims.
+        }
+        const profile = await resolveUserProfile(firebaseUser);
+        if (profile) {
           set({
-            user: {
-              id: firebaseUser.uid,
-              ...userDoc.data(),
-            } as User,
+            user: profile,
             firebaseUser,
             loading: false,
+            error: null,
+          });
+        } else {
+          // Account signed in but lacking partner/admin role
+          await firebaseSignOut(auth);
+          set({
+            user: null,
+            firebaseUser: null,
+            loading: false,
+            error: 'Session expired or account lacking operator permissions.',
           });
         }
+      } else {
+        set({ user: null, firebaseUser: null, loading: false });
       }
     });
   },
