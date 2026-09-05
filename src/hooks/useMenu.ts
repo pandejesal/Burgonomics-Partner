@@ -68,7 +68,9 @@ export function useMenu() {
   const { selectedBranchId } = useAppStore();
   const queryClient = useQueryClient();
 
-  const branchId = selectedBranchId || user?.branchIds?.[0] || 'store-ahmedabad-prahladnagar';
+  // Never default to a delivery store id — products are keyed by branchId and
+  // a store id matches nothing, yielding a permanently empty menu.
+  const branchId = selectedBranchId || user?.branchIds?.[0] || null;
 
   // Single canonical fetch: `products` where branchId matches. Categories are
   // derived from the items (no category collection — single source of truth).
@@ -85,9 +87,11 @@ export function useMenu() {
         if (itemsSnap.empty) {
           try {
             await syncPetpoojaMenuForBranch(branchId);
-            const freshItems = await getDocs(collection(db, 'menu', branchId, 'items'));
-            if (!freshItems.empty) {
-              return freshItems.docs.map((d) => ({ id: d.id, ...d.data() })) as MenuItem[];
+            const freshSnap = await getDocs(
+              query(collection(db, 'products'), where('branchId', '==', branchId))
+            );
+            if (!freshSnap.empty) {
+              return freshSnap.docs.map((d) => mapProductDoc(d.id, d.data() as Record<string, any>));
             }
           } catch {
             // sync denied — fall through to seeds (dev) / empty (prod)

@@ -321,6 +321,10 @@ firestore_queue_waiting{queue="petpooja-webhook-handler"} 0`,
 
   async pushOrder(orderId: string, customOrder?: any): Promise<PetpoojaOrderPushResult> {
     await this.delay(200);
+    // Mirror foundation semantics: empty pushes throw instead of faking a KOT.
+    if (!orderId && !customOrder) {
+      throw new Error("Order id is required to push an order.");
+    }
     const payload = mapOrderToPetpoojaSaveOrder(customOrder || { id: orderId });
     return {
       acknowledged: true,

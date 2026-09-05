@@ -4,6 +4,7 @@ import { db } from '@/config/firebase';
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   query,
   setDoc,
@@ -43,7 +44,9 @@ export function useBranchMenu() {
   const { selectedBranchId } = useAppStore();
   const { user } = useAuth();
 
-  const branchId = selectedBranchId || user?.branchIds?.[0] || 'store-ahmedabad-prahladnagar';
+  // Never default to a delivery store id — products are keyed by branchId and
+  // a store id matches nothing, yielding permanently empty menus and writes.
+  const branchId = selectedBranchId || user?.branchIds?.[0] || null;
 
   const toggleAvailability = useMutation({
     mutationFn: async ({
@@ -56,6 +59,7 @@ export function useBranchMenu() {
       isAvailable?: boolean;
     }) => {
       const activeState = available !== undefined ? available : isAvailable ?? true;
+      if (!branchId) throw new Error('No branch selected');
       const itemRef = doc(db, 'products', itemId);
       const payload = {
         inStock: activeState,
@@ -85,6 +89,7 @@ export function useBranchMenu() {
       duration: EightSixDuration;
       reason: string;
     }) => {
+      if (!branchId) throw new Error('No branch selected');
       let disabledUntil: Date | null = null;
       const now = new Date();
 
@@ -125,6 +130,7 @@ export function useBranchMenu() {
     }) => {
       // No category docs exist (categories derive from items): hiding a
       // category 86s every item in it. Each item still pushes to Petpooja.
+      if (!branchId) throw new Error('No branch selected');
       const snap = await getDocs(
         query(
           collection(db, 'products'),
@@ -160,11 +166,25 @@ export function useBranchMenu() {
       sideIds: string[];
       drinkIds: string[];
     }) => {
+      if (!branchId) throw new Error('No branch selected');
       const comboId = `combo_${Date.now().toString(36)}`;
       const itemRef = doc(db, 'products', comboId);
 
+      // Delivery reads by restId and 86-ing joins on petpoojaItemId — both
+      // must be stamped or the combo is invisible outside Partner.
+      let restId: string | null = null;
+      try {
+        const branchSnap = await getDoc(doc(db, 'branches', branchId));
+        const b = branchSnap.data() as Record<string, any> | undefined;
+        if (b?.petpoojaStoreId) restId = b.petpoojaStoreId;
+      } catch {
+        // restId stays null — combo still visible to Partner scoped views
+      }
+
       await setDoc(itemRef, {
         id: comboId,
+        petpoojaItemId: comboId,
+        ...(restId ? { restId } : {}),
         name: comboData.name,
         description: comboData.description,
         price: comboData.price,

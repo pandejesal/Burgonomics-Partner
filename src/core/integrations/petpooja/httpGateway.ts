@@ -279,6 +279,9 @@ export class HttpPetpoojaGateway implements PetpoojaGateway {
   // -- POS-critical paths --------------------------------------------------
 
   async pushOrder(orderId: string, customOrder?: any): Promise<PetpoojaOrderPushResult> {
+    if (!orderId && !customOrder) {
+      throw new Error("Order id is required to push an order.");
+    }
     const payload = mapOrderToPetpoojaSaveOrder(customOrder || { id: orderId });
     try {
       const res = await this.post<{ success?: boolean; petpoojaOrderId?: string; kotNumber?: string }>(
