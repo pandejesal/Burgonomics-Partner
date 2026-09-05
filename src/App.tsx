@@ -15,10 +15,14 @@ import { UsersPage } from '@/pages/UsersPage';
 import { NotificationsPage } from '@/pages/NotificationsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { DeliveryQueuePage } from '@/pages/DeliveryQueuePage';
+import { KDSPage } from '@/pages/KDSPage';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { AdminRoutes } from '@/pages/admin/AdminRoutes';
 import { ChatPage } from '@/pages/ChatPage';
+
+import { AuthProvider } from '@/core/auth/AuthContext';
+import { Toaster } from 'sonner';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -32,7 +36,8 @@ const queryClient = new QueryClient({
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      <AuthProvider>
+        <BrowserRouter>
         <Routes>
           {/* Public routes */}
           <Route path="/login" element={<LoginPage />} />
@@ -42,6 +47,9 @@ function App() {
 
           {/* Protected partner routes */}
           <Route element={<ProtectedRoute />}>
+            {/* Fullscreen Dedicated Kitchen Display System */}
+            <Route path="/kds" element={<KDSPage />} />
+
             <Route element={<AppLayout />}>
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/orders" element={<OrdersPage />} />
@@ -101,6 +109,8 @@ function App() {
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </BrowserRouter>
+      <Toaster position="top-right" richColors />
+      </AuthProvider>
     </QueryClientProvider>
   );
 }
