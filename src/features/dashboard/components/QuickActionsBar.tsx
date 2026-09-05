@@ -29,7 +29,7 @@ export function QuickActionsBar() {
     {
       title: 'Courier Dispatch Queue',
       description: 'Assign Porter / In-house',
-      href: '/delivery',
+      href: '/delivery-queue',
       icon: Bike,
       color: 'bg-cyan-950/40 text-cyan-400 border-cyan-500/40 hover:bg-cyan-950/60',
     },

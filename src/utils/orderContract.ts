@@ -48,6 +48,10 @@ const DELIVERY_TO_PARTNER: Record<string, OrderStatus> = {
   CANCELLED: 'cancelled',
   // Partner has no failed state; cancelled keeps it out of active buckets.
   FAILED: 'cancelled',
+  // Rider-cancelled orders still need fulfillment (rebook) — they must stay
+  // in the actionable dispatch bucket, NEVER 'pending' (which reads as a
+  // brand-new order). needsRebook + deliveryStatus ride alongside.
+  RIDER_CANCELLED: 'out_for_delivery',
   // Legacy lowercase variants already seen in the wild (KDS-tolerated).
   pending: 'pending',
   placed: 'pending',

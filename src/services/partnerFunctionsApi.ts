@@ -150,6 +150,19 @@ export const partnerFunctionsApi = {
   },
 
   /**
+   * Staff Grill-Coins compensation. Server-side only: writes the balance AND
+   * a ledger row, branch-scoped. Never fake this client-side.
+   */
+  async adjustCustomerCoins(params: {
+    customerId: string;
+    delta: number;
+    reason: string;
+    notes?: string;
+  }): Promise<{ success: boolean; customerId: string; applied: number; balanceAfter: number }> {
+    return await apiRequest('/customers/adjustCoins', params);
+  },
+
+  /**
    * Subscribes this device token to FCM topics (e.g. branch_<id>_orders for
    * KOT alerts). Topics can only be subscribed server-side.
    */

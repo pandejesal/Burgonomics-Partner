@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useCustomer } from '@/hooks/useCustomer';
+import { useAdjustGrillCoins } from '@/hooks/useAdjustGrillCoins';
 import {
   CustomerOrderHistoryCard,
   GrillCoinsLedgerModal,
@@ -27,7 +28,7 @@ export function CustomerDetailPage() {
   const { data: customer, isLoading } = useCustomer(id || '');
 
   const [isCoinsModalOpen, setIsCoinsModalOpen] = useState(false);
-  const [coinOverride, setCoinOverride] = useState<number | null>(null);
+  const adjustCoins = useAdjustGrillCoins();
 
   // Scoped orders come from useCustomer (customerId == id, server-filtered).
   // The old code re-downloaded the ENTIRE orders collection via useOrders()
@@ -59,8 +60,9 @@ export function CustomerDetailPage() {
     );
   }
 
-  const displayCoins =
-    coinOverride !== null ? coinOverride : customer.loyaltyPoints || 0;
+  // Server truth (see CustomersPage): the modal toasts success only after the
+  // mutation resolves; failures surface the server reason instead.
+  const displayCoins = customer.loyaltyPoints || 0;
 
   const totalSpend = customer.totalSpend || customerOrders.reduce((sum, o) => sum + (o.total || 0), 0);
   const totalOrdersCount = customer.totalOrders || customerOrders.length;
@@ -68,9 +70,8 @@ export function CustomerDetailPage() {
     customer.averageOrderValue ||
     (totalOrdersCount > 0 ? Math.round(totalSpend / totalOrdersCount) : 0);
 
-  const handleConfirmAdjustment = (payload: WalletAdjustmentPayload) => {
-    const nextCoins = Math.max(0, displayCoins + payload.delta);
-    setCoinOverride(nextCoins);
+  const handleConfirmAdjustment = async (payload: WalletAdjustmentPayload) => {
+    await adjustCoins.mutateAsync(payload);
   };
 
   return (

@@ -7,7 +7,10 @@ import {
   OrderFiltersBar,
   OrderTableList,
   ManualOrderCreateModal,
+  KOTPrintPreview,
 } from '@/features/orders';
+import { useQueryClient } from '@tanstack/react-query';
+import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
 import {
   ChefHat,
   Download,
@@ -25,6 +28,9 @@ export function OrdersPage() {
   const [dateRange, setDateRange] = useState<'today' | 'week' | 'month' | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [printOrder, setPrintOrder] = useState<Order | null>(null);
+  const [dispatchingId, setDispatchingId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   const { orders = [], isLoading, updateOrderStatus } = useOrders({
     status: statusFilter,
@@ -82,12 +88,26 @@ export function OrdersPage() {
     ]);
   };
 
+  // Row actions do REAL work: print opens the thermal-slip preview (which
+  // prints), dispatch books a live Porter rider. The old handlers toasted
+  // success and did nothing — orders sat in Ready while staff moved on.
   const handlePrintKot = (order: Order) => {
-    toast.success(`Printing 80mm Thermal KOT for #${order.id.slice(0, 6).toUpperCase()}...`);
+    setPrintOrder(order);
   };
 
-  const handleDispatchPorter = (orderId: string) => {
-    toast.success(`Initiating Porter Rider dispatch for #${orderId.slice(0, 6).toUpperCase()}...`);
+  const handleDispatchPorter = async (orderId: string) => {
+    if (dispatchingId) return;
+    setDispatchingId(orderId);
+    try {
+      const staffName = user?.name || user?.email || 'Branch Staff';
+      const res = await partnerFunctionsApi.bookPorterRider(orderId, staffName);
+      toast.success(`Porter rider ${res.riderName} dispatched (${res.porterOrderId})`);
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+    } catch (err: any) {
+      toast.error(err?.message || 'Porter dispatch failed — no rider was booked');
+    } finally {
+      setDispatchingId(null);
+    }
   };
 
   return (
@@ -157,6 +177,15 @@ export function OrdersPage() {
           toast.success(`Order #${order.id.slice(0, 6).toUpperCase()} created & KOT dispatched!`);
         }}
       />
+
+      {/* Row-level KOT print (real preview → real print) */}
+      {printOrder && (
+        <KOTPrintPreview
+          order={printOrder}
+          isOpen={!!printOrder}
+          onClose={() => setPrintOrder(null)}
+        />
+      )}
     </div>
   );
 }
