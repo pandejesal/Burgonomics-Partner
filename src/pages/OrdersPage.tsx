@@ -32,7 +32,7 @@ export function OrdersPage() {
   const [dispatchingId, setDispatchingId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
-  const { orders = [], isLoading, updateOrderStatus } = useOrders({
+  const { orders = [], isLoading, error: ordersError, refetch: refetchOrders } = useOrders({
     status: statusFilter,
     dateRange,
   });
@@ -160,6 +160,20 @@ export function OrdersPage() {
         totalCount={orders.length}
         filteredCount={filteredOrders.length}
       />
+
+      {/* Stream error is NOT an empty shift: distinct panel with Retry */}
+      {ordersError && !isLoading && (
+        <div role="alert" className="rounded-2xl border border-rose-500/50 bg-rose-950/60 p-4 text-xs font-bold text-rose-200 flex flex-wrap items-center justify-between gap-3">
+          <span>Order stream failed — {ordersError.message || 'check connection and permissions.'}</span>
+          <button
+            type="button"
+            onClick={() => refetchOrders()}
+            className="px-4 py-2 rounded-xl bg-[#0E4825] text-emerald-300 font-bold cursor-pointer"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* High-Contrast Data Table List */}
       <OrderTableList

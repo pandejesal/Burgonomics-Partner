@@ -26,6 +26,7 @@ import {
   UtensilsCrossed,
   Plus,
   RotateCcw,
+  RefreshCw,
   Sparkles,
   AlertTriangle,
   WifiOff,
@@ -45,11 +46,21 @@ export function KDSPage() {
     preparingOrders,
     readyOrders,
     bumpOrder,
+    bumpingIds,
     recallLastOrder,
     canRecall,
     lastBumpedOrder,
     simulateOrder,
+    refresh,
+    lastRefreshAt,
   } = useKDSRealtimeStream();
+  const [nowTick, setNowTick] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => setNowTick(Date.now()), 15000);
+    return () => window.clearInterval(t);
+  }, []);
+  void nowTick;
+  const refreshAgeSec = Math.max(0, Math.round((Date.now() - lastRefreshAt) / 1000));
 
   // Channel filter: 'all' | 'delivery' | 'takeaway' | 'dinein'
   const [channelFilter, setChannelFilter] = useState<OrderType | 'all'>('all');
@@ -157,6 +168,17 @@ export function KDSPage() {
                 Makeline Live
               </span>
             </h1>
+            <span className="text-[10px] font-mono text-neutral-500" title="Last order-stream refresh">
+              {refreshAgeSec < 60 ? `${refreshAgeSec}s ago` : `${Math.floor(refreshAgeSec / 60)}m ago`}
+            </span>
+            <button
+              type="button"
+              onClick={refresh}
+              aria-label="Refresh order stream now"
+              className="p-2 rounded-lg bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white transition-colors cursor-pointer"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
           </div>
         </div>
 
@@ -296,7 +318,7 @@ export function KDSPage() {
                   order={order}
                   checkedItems={checkedItems}
                   onToggleItemCheck={handleToggleItemCheck}
-                  onBumpOrder={bumpOrder}
+                  onBumpOrder={bumpOrder} isBumping={!!bumpingIds[order.id]}
                 />
               ))
             )}
@@ -334,7 +356,7 @@ export function KDSPage() {
                   order={order}
                   checkedItems={checkedItems}
                   onToggleItemCheck={handleToggleItemCheck}
-                  onBumpOrder={bumpOrder}
+                  onBumpOrder={bumpOrder} isBumping={!!bumpingIds[order.id]}
                 />
               ))
             )}
@@ -372,7 +394,7 @@ export function KDSPage() {
                   order={order}
                   checkedItems={checkedItems}
                   onToggleItemCheck={handleToggleItemCheck}
-                  onBumpOrder={bumpOrder}
+                  onBumpOrder={bumpOrder} isBumping={!!bumpingIds[order.id]}
                 />
               ))
             )}
@@ -384,3 +406,4 @@ export function KDSPage() {
 }
 
 export default KDSPage;
+

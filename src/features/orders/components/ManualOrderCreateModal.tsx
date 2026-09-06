@@ -58,6 +58,7 @@ export function ManualOrderCreateModal({
   ]);
 
   const [paymentMethod, setPaymentMethod] = useState<'cod' | 'upi' | 'razorpay'>('cod');
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [cashTendered, setCashTendered] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [phoneError, setPhoneError] = useState<string | null>(null);
@@ -155,11 +156,19 @@ export function ManualOrderCreateModal({
       updatedAt: Timestamp.now(),
     };
 
+    // Success-only close: the old code closed + toasted success even when the
+    // write failed (offline/denied) — staff lost the whole form believing the
+    // order existed. On failure the modal stays open with every field intact.
+    setSubmitError(null);
     try {
       const orderRef = doc(db, 'orders', orderId);
       await setDoc(orderRef, newOrder);
-    } catch (err) {
-      console.warn('Simulated order in local memory:', err);
+    } catch (err: any) {
+      setIsSubmitting(false);
+      setSubmitError(
+        err?.message || 'Order could not be saved (offline or permission denied). Check connection and retry — nothing was lost.'
+      );
+      return;
     }
 
     setIsSubmitting(false);
@@ -429,6 +438,11 @@ export function ManualOrderCreateModal({
           </div>
 
           {/* Submit button */}
+          {submitError && (
+            <div role="alert" className="rounded-xl border border-rose-500/50 bg-rose-950/60 p-3 text-xs font-bold text-rose-200">
+              {submitError}
+            </div>
+          )}
           <button
             type="submit"
             disabled={selectedItems.length === 0 || isSubmitting}

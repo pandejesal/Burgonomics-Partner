@@ -26,6 +26,8 @@ export function MenuPage() {
     categories,
     items,
     isLoading,
+    error: menuError,
+    refetch: refetchMenu,
     lastSyncedAt,
     toggleAvailability,
     syncPetpooja,
@@ -254,6 +256,19 @@ export function MenuPage() {
       <div className="space-y-3">
         {isLoading ? (
           <div className="p-16 text-center text-zinc-400 text-xs">Loading menu items...</div>
+        ) : menuError ? (
+          <div role="alert" className="text-center py-16 bg-[#112415] rounded-2xl border border-rose-900/50 p-8 space-y-3">
+            <UtensilsCrossed className="w-10 h-10 mx-auto text-rose-400" />
+            <h3 className="font-bold text-white text-sm">Menu failed to load</h3>
+            <p className="text-xs text-zinc-400">{menuError.message || 'Check connection and permissions, then retry.'}</p>
+            <button
+              type="button"
+              onClick={() => refetchMenu()}
+              className="px-4 py-2 rounded-xl bg-[#0E4825] text-emerald-300 font-bold text-xs cursor-pointer"
+            >
+              Retry
+            </button>
+          </div>
         ) : filteredItems.length === 0 ? (
           <div className="text-center py-16 bg-[#112415] rounded-2xl border border-[#1E3A24] p-8 space-y-2">
             <UtensilsCrossed className="w-10 h-10 mx-auto text-zinc-600" />

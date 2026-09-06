@@ -18,6 +18,8 @@ interface KDSOrderCardProps {
   checkedItems: Record<string, boolean>;
   onToggleItemCheck: (orderId: string, itemIdx: number) => void;
   onBumpOrder: (orderId: string, targetStatus: OrderStatus) => void;
+  /** True while this order's bump mutation is in flight (button locks). */
+  isBumping?: boolean;
   className?: string;
 }
 
@@ -26,6 +28,7 @@ export function KDSOrderCard({
   checkedItems,
   onToggleItemCheck,
   onBumpOrder,
+  isBumping = false,
   className = '',
 }: KDSOrderCardProps) {
   const shortOrderNumber =
@@ -206,6 +209,8 @@ export function KDSOrderCard({
         <button
           type="button"
           onClick={handleBump}
+          disabled={isBumping}
+          aria-busy={isBumping}
           className={`w-full h-14 min-h-[56px] rounded-xl font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98] cursor-pointer ${
             isPending
               ? 'bg-[#0E4825] hover:bg-[#135d30] text-emerald-300 border border-emerald-500/50 shadow-emerald-950/50 animate-pulse'

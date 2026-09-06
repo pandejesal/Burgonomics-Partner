@@ -74,10 +74,20 @@ export function useMenu() {
 
   // Single canonical fetch: `products` where branchId matches. Categories are
   // derived from the items (no category collection — single source of truth).
-  const { data: products = [], isLoading: productsLoading } = useQuery<MenuItem[]>({
+  // Errors surface (not swallowed): MenuPage renders a distinct error/offline
+  // panel with Retry instead of the filter-empty dead end. Seeds stay DEV-only.
+  const {
+    data: products = [],
+    isLoading: productsLoading,
+    error: productsError,
+    refetch: refetchProducts,
+  } = useQuery<MenuItem[], Error>({
     queryKey: ['menuItems', branchId],
     queryFn: async () => {
-      if (!branchId) return SEED_ITEMS;
+      if (!branchId) {
+        if (!ALLOW_SEED_CATALOG) throw new Error('No branch selected');
+        return SEED_ITEMS;
+      }
 
       try {
         const itemsSnap = await getDocs(
@@ -96,16 +106,23 @@ export function useMenu() {
           } catch {
             // sync denied — fall through to seeds (dev) / empty (prod)
           }
+          if (!ALLOW_SEED_CATALOG) {
+            throw new Error('Menu is empty for this outlet — sync from Petpooja.');
+          }
           return SEED_ITEMS;
         }
 
         return itemsSnap.docs.map((d) => mapProductDoc(d.id, d.data() as Record<string, any>));
-      } catch (err) {
-        console.warn('Error loading menu items:', err);
-        return SEED_ITEMS;
+      } catch (err: any) {
+        if (ALLOW_SEED_CATALOG) {
+          console.warn('Error loading menu items:', err?.message || err);
+          return SEED_ITEMS;
+        }
+        throw err instanceof Error ? err : new Error('Menu failed to load.');
       }
     },
     enabled: !!branchId,
+    retry: 1,
   });
 
   // Categories derived from the canonical items (first-seen order, counts).
@@ -212,6 +229,8 @@ export function useMenu() {
     categories,
     items,
     isLoading: productsLoading,
+    error: productsError,
+    refetch: refetchProducts,
     lastSyncedAt,
     toggleAvailability,
     syncPetpooja,
