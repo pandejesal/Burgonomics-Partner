@@ -129,13 +129,20 @@ export function OrderDetailPage() {
   };
 
   const handleCancelAndRefund = async (reason: string, notes: string, shouldRefund: boolean) => {
-    if (updateStatus && typeof updateStatus.mutateAsync === 'function') {
-      await updateStatus.mutateAsync({
-        status: 'cancelled',
-        cancellationReason: notes ? `${reason}: ${notes}` : reason,
-      });
+    try {
+      if (updateStatus && typeof updateStatus.mutateAsync === 'function') {
+        await updateStatus.mutateAsync({
+          status: 'cancelled',
+          cancellationReason: notes ? `${reason}: ${notes}` : reason,
+        });
+      }
+      toast.success(
+        `Order cancelled (${reason}).${shouldRefund ? ' Process the refund from Payments to complete it.' : ''}`
+      );
+    } catch (err) {
+      toast.error('Failed to cancel order — no changes were made.');
+      throw err;
     }
-    toast.success(`Order cancelled (${reason}). ${shouldRefund ? 'Refund initiated.' : ''}`);
   };
 
   const handlePetpoojaSync = async () => {
