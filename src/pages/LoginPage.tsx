@@ -154,10 +154,11 @@ export function LoginPage() {
           {activeTab === 'email' && (
             <form onSubmit={handleEmailSubmit} className="space-y-4 text-xs">
               <div className="space-y-1.5">
-                <label className="block text-zinc-300 font-semibold text-xs">Operator Email</label>
+                <label htmlFor="operator-email" className="block text-zinc-300 font-semibold text-xs">Operator Email</label>
                 <div className="relative">
                   <Mail className="w-4 h-4 text-zinc-500 absolute left-3.5 top-3" />
                   <input
+                    id="operator-email"
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
@@ -170,10 +171,11 @@ export function LoginPage() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="block text-zinc-300 font-semibold text-xs">Password</label>
+                <label htmlFor="operator-password" className="block text-zinc-300 font-semibold text-xs">Password</label>
                 <div className="relative">
                   <Lock className="w-4 h-4 text-zinc-500 absolute left-3.5 top-3" />
                   <input
+                    id="operator-password"
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
@@ -185,6 +187,8 @@ export function LoginPage() {
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    aria-pressed={showPassword}
                     className="absolute right-3 top-3 text-zinc-500 hover:text-zinc-300 transition-colors"
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
