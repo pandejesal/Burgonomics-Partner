@@ -2104,7 +2104,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
           onClose={() => setConfirmToggleStore(null)}
           onConfirm={handleConfirmToggleStoreState}
           title={`${confirmToggleStore.isOpen ? "CLOSE" : "OPEN"} Burgonomics Outlet POS?`}
-          description={`Are you sure you want to toggle POS operating state of ${confirmToggleStore.name}? Customers using Swiggy/Zomgy/Petpooja channels will receive immediate routing state adjustments.`}
+          description={`Are you sure you want to toggle POS operating state of ${confirmToggleStore.name}? Customers ordering from ${confirmToggleStore.name} will see updated availability right away.`}
           confirmLabel="Confirm Toggle State"
         />
       )}
