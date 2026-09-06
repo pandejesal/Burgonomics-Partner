@@ -15,6 +15,7 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import type { Ticket, TicketStatus, TicketType } from '@/types';
+import { normalizeTicketDoc } from '@/utils/ticketContract';
 
 interface UseTicketsParams {
   status?: TicketStatus | 'all';
@@ -78,26 +79,27 @@ export function useTickets(params: UseTicketsParams = {}) {
           const out: Ticket[] = [];
           supportSnap.forEach((d) => {
             const data = d.data();
-            out.push({
-              id: d.id,
-              ticketNumber: data.ticketNumber || d.id,
-              title: data.subject || data.title || 'Customer Support Incident',
-              branchId: data.branchId,
-              branchName: data.branchName || data.branchId,
-              category: data.category || 'customer_escalation',
-              priority: data.priority || 'medium',
-              message: data.description || data.message || '',
-              orderId: data.orderId,
-              status: data.status || 'open',
-              raisedById: data.customerId || data.raisedById || 'customer',
-              raisedByName: data.customerName || data.raisedByName || 'Customer',
-              raisedByRole: 'customer',
-              assignedTo: data.assignedTo || { tier: 'branch' },
-              attachments: data.attachments || [],
-              resolution: data.resolution?.notes || data.resolution || '',
-              createdAt: data.createdAt || Timestamp.now(),
-              updatedAt: data.updatedAt || Timestamp.now(),
-            } as any);
+            out.push(
+              normalizeTicketDoc(d.id, {
+                ticketNumber: data.ticketNumber || d.id,
+                title: data.subject || data.title || 'Customer Support Incident',
+                branchId: data.branchId,
+                branchName: data.branchName || data.branchId,
+                category: data.category || 'customer_escalation',
+                priority: data.priority || 'medium',
+                message: data.description || data.message || '',
+                orderId: data.orderId,
+                status: data.status || 'open',
+                raisedById: data.customerId || data.raisedById || 'customer',
+                raisedByName: data.customerName || data.raisedByName || 'Customer',
+                raisedByRole: 'customer',
+                assignedTo: data.assignedTo || { tier: 'branch' },
+                attachments: data.attachments || [],
+                resolution: data.resolution?.notes || data.resolution || '',
+                createdAt: data.createdAt || Timestamp.now(),
+                updatedAt: data.updatedAt || Timestamp.now(),
+              })
+            );
           });
           return out;
         } catch (err) {
@@ -114,10 +116,7 @@ export function useTickets(params: UseTicketsParams = {}) {
           );
           const out: Ticket[] = [];
           ticketsSnap.forEach((d) => {
-            out.push({
-              id: d.id,
-              ...d.data(),
-            } as any);
+            out.push(normalizeTicketDoc(d.id, d.data() as Record<string, any>));
           });
           return out;
         } catch (err) {

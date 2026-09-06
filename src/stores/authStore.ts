@@ -82,13 +82,16 @@ export async function resolveUserProfile(firebaseUser: FirebaseUser): Promise<Us
 
     if (userDocSnap.exists()) {
       const data = userDocSnap.data();
-      const role = data.role as UserRole;
+      // Unwrap {name}-shaped roles and reject non-strings, mirroring the
+      // admins-doc path: a malformed role must deny, never escalate.
+      const rawRole = typeof data.role === 'object' ? (data.role as any)?.name : data.role;
+      const role = rawRole as UserRole;
 
       // Ensure user is an authorized operator, not a generic customer
-      if (role && VALID_OPERATOR_ROLES.includes(role) && role !== 'customer') {
+      if (typeof rawRole === 'string' && VALID_OPERATOR_ROLES.includes(role) && role !== 'customer') {
         const branchIds: string[] = Array.isArray(data.branchIds)
-          ? data.branchIds
-          : data.branchId
+          ? data.branchIds.filter((b): b is string => typeof b === 'string')
+          : typeof data.branchId === 'string'
           ? [data.branchId]
           : [];
 
@@ -114,15 +117,31 @@ export async function resolveUserProfile(firebaseUser: FirebaseUser): Promise<Us
 
     // 3. Check custom claims on token
     const tokenResult = await firebaseUser.getIdTokenResult();
-    const tokenRole = tokenResult.claims.role as UserRole;
-    if (tokenRole && VALID_OPERATOR_ROLES.includes(tokenRole) && tokenRole !== 'customer') {
+    const rawTokenRole =
+      typeof tokenResult.claims.role === 'object'
+        ? (tokenResult.claims.role as any)?.name
+        : tokenResult.claims.role;
+    const tokenRole = rawTokenRole as UserRole;
+    // A string-shaped branchIds claim ("branch_x") used to pass the cast and
+    // break `in` queries downstream (string slice / per-character match).
+    const claimBranchIds = tokenResult.claims.branchIds;
+    const claimCityIds = tokenResult.claims.cityIds;
+    if (typeof rawTokenRole === 'string' && VALID_OPERATOR_ROLES.includes(tokenRole) && tokenRole !== 'customer') {
       return {
         id: firebaseUser.uid,
         name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Operator',
         email: firebaseUser.email || '',
         role: tokenRole,
-        branchIds: (tokenResult.claims.branchIds as string[]) || [],
-        cityIds: (tokenResult.claims.cityIds as string[]) || ['Surat'],
+        branchIds: Array.isArray(claimBranchIds)
+          ? claimBranchIds.filter((b): b is string => typeof b === 'string')
+          : typeof claimBranchIds === 'string'
+          ? [claimBranchIds]
+          : [],
+        cityIds: Array.isArray(claimCityIds)
+          ? claimCityIds.filter((c): c is string => typeof c === 'string')
+          : typeof claimCityIds === 'string'
+          ? [claimCityIds]
+          : ['Surat'],
         phone: '',
         createdAt: Timestamp.now(),
       };

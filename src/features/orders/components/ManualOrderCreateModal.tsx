@@ -107,8 +107,10 @@ export function ManualOrderCreateModal({
     e.preventDefault();
     if (selectedItems.length === 0) return;
 
-    // Delivery orders MUST carry a real customer phone (rider contact + KOT).
-    const phone = normalizedPhone(customerPhone);
+    // Counter orders used to persist the literal '+91 ' placeholder as the
+    // customer phone (dial-fail downstream, unsearchable in CRM). Normalize
+    // for ALL order types; store '' when absent, block only delivery.
+    const phone = normalizedPhone(customerPhone) || '';
     if (orderType === 'delivery' && !phone) {
       setPhoneError('Enter a valid 10-digit mobile number — the rider needs it.');
       return;
@@ -133,7 +135,7 @@ export function ManualOrderCreateModal({
       id: orderId,
       customerId: 'cust_walkin',
       customerName: customerName || 'Walk-in Customer',
-      customerPhone: phone || customerPhone.trim(),
+      customerPhone: phone,
       branchId,
       branchName: branchId.includes('surat') ? 'Surat Adajan' : 'Ahmedabad SG Highway',
       city: branchId.includes('surat') ? 'Surat' : 'Ahmedabad',
@@ -144,7 +146,10 @@ export function ManualOrderCreateModal({
       total,
       orderType,
       tableNumber: orderType === 'dinein' ? tableNumber || '01' : undefined,
-      // Delivery-compatible object form (see orderContract); readers normalize.
+      // Delivery-compatible object form (see orderContract): ALL readers go
+      // through normalizeOrderDoc/toPartnerStatus, which map this to
+      // 'pending' (pinned by tests/order-contract.test.ts). Never read
+      // .status raw off a Firestore doc — always normalize first.
       status: toDeliveryStatusMeta('pending') as unknown as OrderStatus,
       paymentMethod,
       paymentStatus: 'completed',

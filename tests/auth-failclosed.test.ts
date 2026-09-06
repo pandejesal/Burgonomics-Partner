@@ -24,11 +24,11 @@ vi.mock('firebase/firestore', () => ({
 
 import { resolveUserProfile } from '../src/stores/authStore';
 
-const firebaseUser = (uid: string) =>
+const firebaseUser = (uid: string, claims: Record<string, unknown> = {}) =>
   ({
     uid,
     email: `${uid}@example.com`,
-    getIdTokenResult: async () => ({ claims: {} }),
+    getIdTokenResult: async () => ({ claims }),
   }) as any;
 
 describe('Partner login fail-closed contract (real resolveUserProfile)', () => {
@@ -58,6 +58,25 @@ describe('Partner login fail-closed contract (real resolveUserProfile)', () => {
   it('still admits a valid branch_staff profile with scoped branches', async () => {
     docSnapshots['admins/uid_staff'] = { role: 'branch_staff', branchIds: ['branch_surat_01'] };
     const profile = await resolveUserProfile(firebaseUser('uid_staff'));
+    expect(profile?.role).toBe('branch_staff');
+    expect(profile?.branchIds).toEqual(['branch_surat_01']);
+  });
+
+  it('unwraps object-shaped roles in the users collection (same as admins path)', async () => {
+    docSnapshots['users/uid_objrole'] = { role: { name: 'branch_owner' }, branchIds: ['branch_surat_01'] };
+    const profile = await resolveUserProfile(firebaseUser('uid_objrole'));
+    expect(profile?.role).toBe('branch_owner');
+  });
+
+  it('denies non-string roles (numbers, null) in the users collection', async () => {
+    docSnapshots['users/uid_numrole'] = { role: 42, branchIds: ['branch_surat_01'] };
+    await expect(resolveUserProfile(firebaseUser('uid_numrole'))).resolves.toBeNull();
+  });
+
+  it('wraps a string-shaped branchIds claim into an array (no per-character scoping)', async () => {
+    const profile = await resolveUserProfile(
+      firebaseUser('uid_claims', { role: 'branch_staff', branchIds: 'branch_surat_01' })
+    );
     expect(profile?.role).toBe('branch_staff');
     expect(profile?.branchIds).toEqual(['branch_surat_01']);
   });

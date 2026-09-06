@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useTicket } from '@/hooks/useTicket';
 import { useAuthStore } from '@/stores/authStore';
 import { validatePartialRefundAmount } from '@/utils/refundValidation';
+import { normalizeTier, normalizeTimeline } from '@/utils/ticketContract';
 import {
   ArrowLeft,
   ShieldAlert,
@@ -67,9 +68,9 @@ export function TicketDetailPage() {
   }
 
   const isResolved = ticket.status === 'resolved' || ticket.status === 'closed';
-  const assignedTier = (ticket as any).assignedTo?.tier || 'branch';
+  const assignedTier = normalizeTier((ticket as any).assignedTo?.tier);
   const diagnostics = (ticket as any).diagnostics || {};
-  const timeline = (ticket as any).timeline || [];
+  const timeline = normalizeTimeline((ticket as any).timeline);
 
   const handleCopyPayload = () => {
     const payload = JSON.stringify(

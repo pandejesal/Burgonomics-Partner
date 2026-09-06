@@ -73,8 +73,10 @@ export function GrillCoinsLedgerModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (points <= 0) {
-      toast.error('Points must be greater than 0');
+    // DOM min/max is advisory (paste/devtools bypass it): enforce integer +
+    // 1..5000 cap here too. Server re-validates (±5000, non-zero).
+    if (!Number.isInteger(points) || points < 1 || points > 5000) {
+      toast.error('Enter a whole number of coins between 1 and 5000.');
       return;
     }
     if (isInvalidDebit) {
