@@ -77,10 +77,9 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Burgonomics Partner uses your location to assign nearby outlet orders and dispatch Porter riders to customer addresses.</string>
 	<!-- No NSCameraUsageDescription / NSPhotoLibraryUsageDescription: no camera
 	     or photo code ships (no @capacitor/camera, no picker). Declaring them
-	     invites App Store privacy questions. Re-add with the scanner feature. -->
+	     invites App Store privacy questions. Re-add with the scanner feature.
+	     NSLocationWhenInUseUsageDescription removed likewise; re-add with dispatch-tracking. -->
 </dict>
 </plist>
