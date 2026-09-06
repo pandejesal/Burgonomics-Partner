@@ -124,9 +124,7 @@ export function useBranches() {
         active: branchInput.status === 'active',
         status: branchInput.status,
         expectedLaunchDate: branchInput.expectedLaunchDate || null,
-        bannerImage:
-          branchInput.bannerImage ||
-          'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=800&auto=format&fit=crop&q=80',
+        bannerImage: branchInput.bannerImage || null,
         petpoojaStoreId: branchInput.petpoojaStoreId || null,
         razorpayAccountId: branchInput.razorpayAccountId || `acc_Rzp_${Date.now().toString().slice(-6)}`,
         brandRoyaltyPercent: branchInput.brandRoyaltyPercent || 5.0,
