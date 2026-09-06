@@ -22,7 +22,9 @@ const config: CapacitorConfig = {
   plugins: {
     SplashScreen: {
       launchShowDuration: 1200,
-      launchAutoHide: true,
+      // Manual hide from nativeBootstrap (after first render): auto-hide on
+      // a fixed timer races slow-device bundle load (white flash/cut splash).
+      launchAutoHide: false,
       backgroundColor: '#0E4825',
       androidSplashResourceName: 'splash',
       androidScaleType: 'CENTER_CROP',

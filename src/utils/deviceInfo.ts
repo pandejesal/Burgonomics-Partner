@@ -1,3 +1,5 @@
+import { Capacitor } from '@capacitor/core';
+
 export interface DeviceInfo {
   device: string;
   browser: string;
@@ -10,12 +12,10 @@ export function getDeviceInfo(): DeviceInfo {
   let os = "Unknown OS";
   let device = "Desktop Workspace";
 
-  // Check if running inside Capacitor native app wrapper
-  if (typeof window !== "undefined" && (window as any).Capacitor && (window as any).Capacitor.isNative) {
-    browser = "Capacitor WebView";
-    device = "Mobile Application";
-  } else if (typeof window !== "undefined" && (window as any).Capacitor) {
-    browser = "Capacitor Engine";
+  // Canonical native check (matches the push guard): the legacy
+  // window.Capacitor.isNative flag misclassifies live-reload web sessions.
+  if (Capacitor.isNativePlatform()) {
+    browser = `Capacitor WebView (${Capacitor.getPlatform()})`;
     device = "Mobile Application";
   } else if (/Mobi|Android|iPhone|iPad/i.test(ua)) {
     device = "Mobile Browser";
