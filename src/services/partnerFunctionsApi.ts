@@ -172,4 +172,14 @@ export const partnerFunctionsApi = {
   ): Promise<{ success: boolean; subscribed: string[] }> {
     return await apiRequest('/notifications/subscribe', { token, topics });
   },
+
+  /**
+   * Releases stale topics (old branches after a switch, sign-out).
+   */
+  async unsubscribeFromTopics(
+    token: string,
+    topics: string[]
+  ): Promise<{ success: boolean; unsubscribed: string[] }> {
+    return await apiRequest('/notifications/unsubscribe', { token, topics });
+  },
 };

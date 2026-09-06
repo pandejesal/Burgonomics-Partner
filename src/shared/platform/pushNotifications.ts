@@ -12,8 +12,11 @@ import { toast } from 'sonner';
 import { logger } from '@/core/logging/logger';
 import type { User } from '@/types';
 
-let isInitialized = false;
+let listenersAttached = false;
 let currentToken: string | null = null;
+// Topics this device holds server-side (for unsubscribing stale branches on
+// account/branch switch — otherwise old outlets keep paging this terminal).
+let subscribedTopics: string[] = [];
 
 export function isNativePlatform(): boolean {
   return Capacitor.isNativePlatform();
@@ -39,11 +42,76 @@ function setCachedToken(token: string | null) {
 }
 
 /**
- * Initializes notification channels and listeners.
+ * Initializes notification channels and listeners. Listeners attach ONCE, but
+ * topic subscription re-runs on every user/branch change: the old single
+ * `isInitialized` guard made post-login calls no-ops, so branch/role
+ * switches never re-subscribed (and stale topics were never released).
  */
 export async function initPushNotifications(user?: User | null): Promise<void> {
-  if (!isNativePlatform() || isInitialized) return;
-  isInitialized = true;
+  if (!isNativePlatform()) return;
+  const freshUser = await currentStoreUser(user);
+  await attachListenersOnce();
+  await subscribeUserTopics(freshUser);
+  // First-run prompt: previously nothing ever asked, so fresh installs that
+  // never granted permission got no token despite tapping notification UIs.
+  try {
+    await requestPushPermissions();
+  } catch {
+    // Permission flow is best-effort; denial just means no pushes.
+  }
+}
+
+async function currentStoreUser(fallback?: User | null): Promise<User | null> {
+  try {
+    const { useAuthStore } = await import('@/stores/authStore');
+    return useAuthStore.getState().user || fallback || null;
+  } catch {
+    return fallback || null;
+  }
+}
+
+/** Desired topics for a user (branch + escalation fan-out per role). */
+function desiredTopicsFor(user: User | null): string[] {
+  if (!user) return [];
+  const topics = (user.branchIds || []).flatMap((b) => [
+    `branch_${b}_orders`,
+    `branch_${b}_tickets`,
+  ]);
+  if (user.role === 'regional_manager' || user.role === 'support') {
+    topics.push('regional_managers');
+  }
+  if (user.role === 'brand_owner' || user.role === 'developer') {
+    topics.push('superadmins');
+  }
+  if (user.role !== 'customer') topics.push('tickets_escalated');
+  return [...new Set(topics)];
+}
+
+/**
+ * Reconciles device topic subscriptions with the current user: subscribes
+ * missing topics, unsubscribes stale ones (old branches after a switch —
+ * otherwise the previous outlet keeps paging this terminal).
+ */
+async function subscribeUserTopics(user: User | null): Promise<void> {
+  const token = getCachedToken();
+  if (!token) return;
+  const wanted = desiredTopicsFor(user);
+  const toAdd = wanted.filter((t) => !subscribedTopics.includes(t));
+  const toDrop = subscribedTopics.filter((t) => !wanted.includes(t));
+  if (toAdd.length === 0 && toDrop.length === 0) return;
+  try {
+    const { partnerFunctionsApi } = await import('@/services/partnerFunctionsApi');
+    if (toAdd.length > 0) await partnerFunctionsApi.subscribeToTopics(token, toAdd);
+    if (toDrop.length > 0) await partnerFunctionsApi.unsubscribeFromTopics(token, toDrop);
+    subscribedTopics = wanted;
+  } catch (subErr) {
+    console.warn('[Push] Topic subscription reconcile failed:', subErr);
+  }
+}
+
+async function attachListenersOnce(): Promise<void> {
+  if (listenersAttached) return;
+  listenersAttached = true;
 
   try {
     const pushModule: any = await import('@capacitor/push-notifications').catch(() => null);
@@ -87,38 +155,20 @@ export async function initPushNotifications(user?: User | null): Promise<void> {
       logger.debug('[Push] FCM/APNs registration received');
       setCachedToken(token.value);
 
-      // Subscribe to branch topics so kitchen + ticket alerts arrive. Reads
-      // the CURRENT user from the store (not the init-time closure) so
-      // account switches re-subscribe correctly on token refresh.
-      let freshUser: User | null = user || null;
-      try {
-        const { useAuthStore } = await import('@/stores/authStore');
-        freshUser = useAuthStore.getState().user || user || null;
-      } catch {
-        // store unavailable — fall back to init-time user
-      }
-      const branchIds = freshUser?.branchIds?.length ? freshUser.branchIds : [];
-      if (branchIds.length > 0) {
-        try {
-          const { partnerFunctionsApi } = await import('@/services/partnerFunctionsApi');
-          await partnerFunctionsApi.subscribeToTopics(
-            token.value,
-            branchIds.flatMap((b) => [`branch_${b}_orders`, `branch_${b}_tickets`])
-          );
-        } catch (subErr) {
-          console.warn('[Push] Branch topic subscription failed:', subErr);
-        }
-      }
+      // ALWAYS resolve the user fresh (never the init-time closure) for both
+      // topic subscription and the Firestore registry write.
+      const freshUser = await currentStoreUser();
+      await subscribeUserTopics(freshUser);
 
-      if (user) {
+      if (freshUser) {
         try {
           await setDoc(
             doc(db, 'device_tokens', token.value),
             {
               token: token.value,
-              userId: user.id,
-              role: user.role,
-              branchIds: user.branchIds || [],
+              userId: freshUser.id,
+              role: freshUser.role,
+              branchIds: freshUser.branchIds || [],
               platform: Capacitor.getPlatform(),
               updatedAt: serverTimestamp(),
             },
@@ -137,7 +187,7 @@ export async function initPushNotifications(user?: User | null): Promise<void> {
 
     // 4. Foreground Push Listener
     PushNotifications.addListener('pushNotificationReceived', (notification: any) => {
-      console.log('[Push] Foreground notification received:', notification?.title);
+      logger.debug('[Push] Foreground notification received');
 
       // Play chime if available
       try {
@@ -147,26 +197,31 @@ export async function initPushNotifications(user?: User | null): Promise<void> {
         // Non-blocking audio play
       }
 
+      // Typed payload only: a generic targetId used to route chats, campaigns
+      // and announcements into /orders/<id>. Unknown types surface a toast
+      // with NO navigation instead of a full reload to a wrong page.
       const data = notification?.data || {};
-      const orderId = data.orderId || data.targetId;
-      const ticketId = data.ticketId;
       const title = notification?.title || '🔔 New Alert';
       const body = notification?.body || '';
-      const action = orderId
-        ? {
-            label: 'View Order',
-            onClick: () => {
-              window.location.href = `/orders/${orderId}`;
-            },
-          }
-        : ticketId
+      const kind = data.type as string | undefined;
+      const orderId = typeof data.orderId === 'string' && data.orderId ? data.orderId : undefined;
+      const ticketId = typeof data.ticketId === 'string' && data.ticketId ? data.ticketId : undefined;
+      const action =
+        orderId && (!kind || kind === 'order' || kind === 'NEW_KOT' || kind === 'payment_captured')
           ? {
-              label: 'View Ticket',
+              label: 'View Order',
               onClick: () => {
-                window.location.href = `/tickets/${ticketId}`;
+                window.location.href = `/orders/${orderId}`;
               },
             }
-          : undefined;
+          : ticketId && (!kind || kind === 'ticket' || kind === 'ticket_escalated' || kind === 'ticket_reminder')
+            ? {
+                label: 'View Ticket',
+                onClick: () => {
+                  window.location.href = `/tickets/${ticketId}`;
+                },
+              }
+            : undefined;
 
       toast(title, {
         description: body,
@@ -178,14 +233,15 @@ export async function initPushNotifications(user?: User | null): Promise<void> {
     // 5. System Tray Click Action Listener
     PushNotifications.addListener('pushNotificationActionPerformed', (action: any) => {
       const data = action?.notification?.data || {};
-      const orderId = data.orderId || data.targetId;
-      const ticketId = data.ticketId;
+      const kind = data.type as string | undefined;
+      const orderId = typeof data.orderId === 'string' && data.orderId ? data.orderId : undefined;
+      const ticketId = typeof data.ticketId === 'string' && data.ticketId ? data.ticketId : undefined;
 
-      if (orderId) {
+      if (orderId && (!kind || kind === 'order' || kind === 'NEW_KOT' || kind === 'payment_captured')) {
         setTimeout(() => {
           window.location.href = `/orders/${orderId}`;
         }, 100);
-      } else if (ticketId) {
+      } else if (ticketId && (!kind || kind === 'ticket' || kind === 'ticket_escalated' || kind === 'ticket_reminder')) {
         setTimeout(() => {
           window.location.href = `/tickets/${ticketId}`;
         }, 100);
