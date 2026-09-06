@@ -1510,7 +1510,15 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                     printReceiptData.order,
                     printReceiptData.type,
                   );
-                  const printWindow = window.open("", "_blank");
+                  // Escape first: receipt text carries customer names, notes,
+                  // and item modifiers — raw document.write turned them into
+                  // live HTML/JS in the print window (stored XSS via order).
+                  const escaped = printContent
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/\n/g, "<br>");
+                  const printWindow = window.open("", "_blank", "noopener");
                   if (printWindow) {
                     printWindow.document.write(`
                       <html>
@@ -1521,7 +1529,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                           </style>
                         </head>
                         <body>
-                          ${printContent.replace(/\n/g, "<br>")}
+                          ${escaped}
                           <script>window.print();</script>
                         </body>
                       </html>

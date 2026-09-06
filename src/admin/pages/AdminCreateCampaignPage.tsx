@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { isSafeDeepLink, isSafeImageUrl } from "@/utils/urlSafety";
 import {
   ArrowLeft,
   ArrowRight,
@@ -99,7 +100,20 @@ export const AdminCreateCampaignPage: React.FC = () => {
     setStep((prev) => prev - 1);
   };
 
+  const [linkError, setLinkError] = useState("");
+
   const handleLaunch = () => {
+    // Deep links + images persist into push payloads: reject non-allowlisted
+    // schemes/hosts here, not at tap time on a customer's phone.
+    if (deepLink.trim() && !isSafeDeepLink(deepLink)) {
+      setLinkError("Deep link must be burgonomics://menu|offers|stores|orders|profile or an https://burgonomics.com (or partner/netlify) URL.");
+      return;
+    }
+    if (msgImage.trim() && !isSafeImageUrl(msgImage)) {
+      setLinkError("Image must be an https:// URL (no data:, javascript:, or file:).");
+      return;
+    }
+    setLinkError("");
     let audienceVal = "";
     if (audienceType === "Custom Segment") {
       const seg = segments.find((s) => s.id === selectedSegmentId);
@@ -177,13 +191,13 @@ export const AdminCreateCampaignPage: React.FC = () => {
             <div
               className={`h-2 rounded-full transition-all duration-300 ${
                 s <= step
-                  ? "bg-[#0E4825] dark:bg-emerald-500 shadow-[0_2px_8px_rgba(14,72,37,0.15)]"
+                  ? "bg-primary dark:bg-emerald-500 shadow-[0_2px_8px_rgba(14,72,37,0.15)]"
                   : "bg-gray-200 dark:bg-gray-800"
               }`}
             />
             <span
               className={`hidden md:block text-[10px] font-black uppercase tracking-wider ${
-                s === step ? "text-[#0E4825] dark:text-emerald-400 font-extrabold" : "text-gray-400"
+                s === step ? "text-primary dark:text-emerald-400 font-extrabold" : "text-gray-400"
               }`}
             >
               Step {s}: {stepTitles[s - 1].split(" ")[0]}
@@ -208,7 +222,7 @@ export const AdminCreateCampaignPage: React.FC = () => {
                     value={campaignName}
                     onChange={(e) => setCampaignName(e.target.value)}
                     placeholder="e.g. Ahmedabad Sunday Fries Blast"
-                    className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-transparent px-4 py-3 text-sm focus:border-[#0E4825] focus:outline-none dark:text-white"
+                    className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-transparent px-4 py-3 text-sm focus:border-primary focus:outline-none dark:text-white"
                   />
                   <p className="text-[10px] text-gray-400">
                     A unique, scannable title used internally to search your marketing ledger.
@@ -223,7 +237,7 @@ export const AdminCreateCampaignPage: React.FC = () => {
                     value={campaignDesc}
                     onChange={(e) => setCampaignDesc(e.target.value)}
                     placeholder="Brief outline explaining the offer goals, targeted locations, or promo structures..."
-                    className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-transparent px-4 py-3 text-sm focus:border-[#0E4825] focus:outline-none h-24 dark:text-white resize-none"
+                    className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-transparent px-4 py-3 text-sm focus:border-primary focus:outline-none h-24 dark:text-white resize-none"
                   />
                 </div>
 
@@ -245,11 +259,11 @@ export const AdminCreateCampaignPage: React.FC = () => {
                         onClick={() => setObjective(obj)}
                         className={`flex items-center gap-3 p-3.5 rounded-2xl border text-left text-xs font-bold transition-all ${
                           objective === obj
-                            ? "border-[#0E4825] bg-[#0E4825]/5 text-[#0E4825] dark:border-emerald-500 dark:text-emerald-400 dark:bg-emerald-950/20 shadow-sm"
+                            ? "border-primary bg-primary/5 text-primary dark:border-emerald-500 dark:text-emerald-400 dark:bg-emerald-950/20 shadow-sm"
                             : "border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900 text-gray-600 dark:text-gray-300"
                         }`}
                       >
-                        <Megaphone size={14} className="shrink-0 text-[#FF6600]" />
+                        <Megaphone size={14} className="shrink-0 text-accent dark:text-accent-light" />
                         <span>{obj}</span>
                       </button>
                     ))}
@@ -276,7 +290,7 @@ export const AdminCreateCampaignPage: React.FC = () => {
                           onClick={() => toggleChannel(item.id)}
                           className={`flex flex-col items-center justify-center p-4 rounded-2xl border text-center gap-2 transition-all ${
                             isSelected
-                              ? "border-[#0E4825] bg-[#0E4825]/5 text-[#0E4825] dark:border-emerald-500 dark:text-emerald-400 dark:bg-emerald-950/20 shadow-sm"
+                              ? "border-primary bg-primary/5 text-primary dark:border-emerald-500 dark:text-emerald-400 dark:bg-emerald-950/20 shadow-sm"
                               : "border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900 text-gray-500 dark:text-gray-400"
                           }`}
                         >
@@ -338,12 +352,12 @@ export const AdminCreateCampaignPage: React.FC = () => {
                         onClick={() => setAudienceType(item.id)}
                         className={`p-4 rounded-2xl border text-left transition-all space-y-1 ${
                           audienceType === item.id
-                            ? "border-[#0E4825] bg-[#0E4825]/5 text-[#0E4825] dark:border-emerald-500 dark:text-emerald-400 dark:bg-emerald-950/20 shadow-sm"
+                            ? "border-primary bg-primary/5 text-primary dark:border-emerald-500 dark:text-emerald-400 dark:bg-emerald-950/20 shadow-sm"
                             : "border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900 text-gray-600 dark:text-gray-300"
                         }`}
                       >
                         <div className="flex items-center gap-2">
-                          <Users size={14} className="text-[#FF6600]" />
+                          <Users size={14} className="text-accent dark:text-accent-light" />
                           <span className="text-xs font-bold uppercase tracking-wider">
                             {item.label}
                           </span>
@@ -420,7 +434,7 @@ export const AdminCreateCampaignPage: React.FC = () => {
                         <div
                           key={cust.id}
                           onClick={() => toggleCustomerSelection(cust.id)}
-                          className="flex items-center justify-between p-2.5 rounded-xl border border-gray-200/50 dark:border-gray-850 bg-white dark:bg-black cursor-pointer hover:border-[#0E4825]"
+                          className="flex items-center justify-between p-2.5 rounded-xl border border-gray-200/50 dark:border-gray-850 bg-white dark:bg-black cursor-pointer hover:border-primary"
                         >
                           <div className="flex items-center gap-2.5">
                             <img src={cust.avatar} className="h-7 w-7 rounded-full object-cover" />
@@ -459,7 +473,7 @@ export const AdminCreateCampaignPage: React.FC = () => {
                     value={msgTitle}
                     onChange={(e) => setMsgTitle(e.target.value)}
                     placeholder="e.g. Free Peri-Peri Fries Today! 🍟"
-                    className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-transparent px-4 py-3 text-sm focus:border-[#0E4825] focus:outline-none dark:text-white"
+                    className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-transparent px-4 py-3 text-sm focus:border-primary focus:outline-none dark:text-white"
                   />
                   <p className="text-[10px] text-gray-400">
                     Supports template variables like{" "}
@@ -478,7 +492,7 @@ export const AdminCreateCampaignPage: React.FC = () => {
                     value={msgBody}
                     onChange={(e) => setMsgBody(e.target.value)}
                     placeholder="Hi {{customer_name}}, craving a premium snack? Order your burger on our app and get Peri-Peri fries + shake FREE! Valid today at {{store_name}}."
-                    className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-transparent px-4 py-3 text-sm focus:border-[#0E4825] focus:outline-none h-28 dark:text-white resize-none"
+                    className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-transparent px-4 py-3 text-sm focus:border-primary focus:outline-none h-28 dark:text-white resize-none"
                   />
                 </div>
 
@@ -521,6 +535,11 @@ export const AdminCreateCampaignPage: React.FC = () => {
                     placeholder="burgonomics://menu/fries"
                     className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-transparent px-4 py-3 text-sm focus:outline-none dark:text-white"
                   />
+                  {linkError && (
+                    <p role="alert" className="text-[11px] font-bold text-rose-500">
+                      {linkError}
+                    </p>
+                  )}
                 </div>
               </div>
             )}
@@ -538,11 +557,11 @@ export const AdminCreateCampaignPage: React.FC = () => {
                       onClick={() => setScheduleType("now")}
                       className={`flex-1 flex flex-col items-center justify-center p-5 rounded-2xl border text-center gap-2 transition-all ${
                         scheduleType === "now"
-                          ? "border-[#0E4825] bg-[#0E4825]/5 text-[#0E4825] dark:border-emerald-500 dark:text-emerald-400 dark:bg-emerald-950/20 shadow-sm"
+                          ? "border-primary bg-primary/5 text-primary dark:border-emerald-500 dark:text-emerald-400 dark:bg-emerald-950/20 shadow-sm"
                           : "border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900 text-gray-500 dark:text-gray-400"
                       }`}
                     >
-                      <Sparkles size={18} className="text-[#FF6600]" />
+                      <Sparkles size={18} className="text-accent dark:text-accent-light" />
                       <span className="text-xs font-black uppercase tracking-wider">
                         Send Instantly
                       </span>
@@ -556,11 +575,11 @@ export const AdminCreateCampaignPage: React.FC = () => {
                       onClick={() => setScheduleType("later")}
                       className={`flex-1 flex flex-col items-center justify-center p-5 rounded-2xl border text-center gap-2 transition-all ${
                         scheduleType === "later"
-                          ? "border-[#0E4825] bg-[#0E4825]/5 text-[#0E4825] dark:border-emerald-500 dark:text-emerald-400 dark:bg-emerald-950/20 shadow-sm"
+                          ? "border-primary bg-primary/5 text-primary dark:border-emerald-500 dark:text-emerald-400 dark:bg-emerald-950/20 shadow-sm"
                           : "border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900 text-gray-500 dark:text-gray-400"
                       }`}
                     >
-                      <Calendar size={18} className="text-[#0E4825]" />
+                      <Calendar size={18} className="text-primary" />
                       <span className="text-xs font-black uppercase tracking-wider">
                         Schedule Ahead
                       </span>
@@ -600,7 +619,7 @@ export const AdminCreateCampaignPage: React.FC = () => {
                       type="button"
                       onClick={() => setAbTestingEnabled(!abTestingEnabled)}
                       className={`w-12 h-6 rounded-full p-0.5 transition-all cursor-pointer ${
-                        abTestingEnabled ? "bg-[#0E4825]" : "bg-gray-200 dark:bg-gray-800"
+                        abTestingEnabled ? "bg-primary" : "bg-gray-200 dark:bg-gray-800"
                       }`}
                     >
                       <div
@@ -647,12 +666,12 @@ export const AdminCreateCampaignPage: React.FC = () => {
             {/* STEP 5: REVIEW & LAUNCH */}
             {step === 5 && (
               <div className="space-y-6">
-                <div className="rounded-2xl border border-[#0E4825]/20 bg-[#0E4825]/5 p-5 space-y-4">
+                <div className="rounded-2xl border border-primary/20 bg-primary/5 p-5 space-y-4">
                   <div className="flex items-center gap-2.5">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-[#0E4825] text-white">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-primary text-white">
                       <Check size={16} />
                     </span>
-                    <h4 className="font-bold text-sm text-[#0E4825] dark:text-emerald-400 uppercase tracking-wider">
+                    <h4 className="font-bold text-sm text-primary dark:text-emerald-400 uppercase tracking-wider">
                       Ready to Broadcast
                     </h4>
                   </div>
@@ -676,7 +695,7 @@ export const AdminCreateCampaignPage: React.FC = () => {
                     <span className="text-gray-400 font-bold uppercase tracking-wider">
                       Objective:
                     </span>
-                    <span className="font-extrabold text-[#FF6600]">{objective}</span>
+                    <span className="font-extrabold text-accent dark:text-accent-light">{objective}</span>
                   </div>
 
                   <div className="flex justify-between py-3">
@@ -694,7 +713,7 @@ export const AdminCreateCampaignPage: React.FC = () => {
                     <span className="text-gray-400 font-bold uppercase tracking-wider">
                       Delivery Channels:
                     </span>
-                    <span className="font-extrabold text-[#0E4825] dark:text-emerald-400">
+                    <span className="font-extrabold text-primary dark:text-emerald-400">
                       {channels.join(", ")}
                     </span>
                   </div>
@@ -704,7 +723,7 @@ export const AdminCreateCampaignPage: React.FC = () => {
                       <span className="text-gray-400 font-bold uppercase tracking-wider">
                         Promo Coupon:
                       </span>
-                      <span className="font-mono font-black text-xs text-[#FF6600] bg-orange-50 dark:bg-orange-950/20 px-2 py-0.5 rounded border border-orange-200/50">
+                      <span className="font-mono font-black text-xs text-accent dark:text-accent-light bg-orange-50 dark:bg-orange-950/20 px-2 py-0.5 rounded border border-orange-200/50">
                         {couponCode}
                       </span>
                     </div>
@@ -750,7 +769,7 @@ export const AdminCreateCampaignPage: React.FC = () => {
                   variant="primary"
                   size="sm"
                   onClick={handleLaunch}
-                  className="bg-gradient-to-r from-[#0E4825] to-[#FF6600]"
+                  className="bg-gradient-to-r from-primary to-accent"
                 >
                   <Megaphone size={14} />
                   <span>Launch Broadcast Campaign</span>
@@ -808,7 +827,7 @@ export const AdminCreateCampaignPage: React.FC = () => {
                           className="rounded-2xl bg-white/90 dark:bg-[#1A1A1A]/95 p-3.5 shadow-lg border border-white/25 dark:border-gray-800/10 backdrop-blur-md animate-fadeIn text-gray-900 dark:text-white"
                         >
                           <div className="flex items-center gap-1.5 mb-1.5">
-                            <div className="flex h-4 w-4 items-center justify-center rounded bg-[#0E4825] text-white font-extrabold text-[8px]">
+                            <div className="flex h-4 w-4 items-center justify-center rounded bg-primary text-white font-extrabold text-[8px]">
                               B
                             </div>
                             <span className="text-[9px] font-black uppercase tracking-widest text-gray-400">
@@ -849,7 +868,7 @@ export const AdminCreateCampaignPage: React.FC = () => {
                           )}
                           <p className="text-[10px] leading-relaxed font-sans">{bodyText}</p>
                           {couponCode && (
-                            <div className="mt-2 bg-white/80 p-1.5 rounded-lg border border-dashed border-green-400 text-center text-[10px] font-bold font-mono text-[#0E4825]">
+                            <div className="mt-2 bg-white/80 p-1.5 rounded-lg border border-dashed border-green-400 text-center text-[10px] font-bold font-mono text-primary">
                               Code: {couponCode}
                             </div>
                           )}
