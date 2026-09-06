@@ -1,4 +1,6 @@
 import React from "react";
+import { toast } from "sonner";
+import { logger } from "@/core/logging/logger";
 import { useAdmin } from "../../../hooks/useAdmin";
 import { useQueueStats, useQueueMutations } from "../../hooks/useDashboardData";
 import {
@@ -20,41 +22,45 @@ export const QueueMonitor: React.FC = () => {
   const { data: queues, isLoading, isError, refetch } = useQueueStats();
   const { pause, resume, retryFailed, replayDlq } = useQueueMutations();
 
+  // Non-blocking toasts (never alert()): alerts freeze the UI thread and
+  // can't be styled or dismissed consistently.
   const handlePause = async (name: string) => {
     try {
       await pause(name);
-      alert(`Successfully paused BullMQ queue: ${name}`);
+      toast.success(`Paused queue: ${name}`);
     } catch (err: any) {
-      alert(`Failed to pause queue: ${err.message}`);
+      logger.error("queue.pause_failed", err, { queue: name });
+      toast.error("Pause failed — retry", { description: err?.message });
     }
   };
 
   const handleResume = async (name: string) => {
     try {
       await resume(name);
-      alert(`Successfully resumed BullMQ queue: ${name}`);
+      toast.success(`Resumed queue: ${name}`);
     } catch (err: any) {
-      alert(`Failed to resume queue: ${err.message}`);
+      logger.error("queue.resume_failed", err, { queue: name });
+      toast.error("Resume failed — retry", { description: err?.message });
     }
   };
 
   const handleRetryFailed = async (name: string) => {
     try {
       const res = await retryFailed({ name });
-      alert(`Triggered retry. Successfully queued ${res?.retried ?? 0} failed jobs from DLQ!`);
+      toast.success(`Requeued ${res?.retried ?? 0} failed jobs from DLQ`);
     } catch (err: any) {
-      alert(`Failed to retry jobs: ${err.message}`);
+      logger.error("queue.retry_failed", err, { queue: name });
+      toast.error("Retry failed — retry", { description: err?.message });
     }
   };
 
   const handleReplayDlq = async (name: string) => {
     try {
       const res = await replayDlq(name);
-      alert(
-        `Triggered replay of DLQ. Re-enqueued ${res?.replayed ?? 0} poison-pill jobs successfully!`,
-      );
+      toast.success(`Re-enqueued ${res?.replayed ?? 0} DLQ jobs`);
     } catch (err: any) {
-      alert(`Failed to replay DLQ: ${err.message}`);
+      logger.error("queue.replay_failed", err, { queue: name });
+      toast.error("Replay failed — retry", { description: err?.message });
     }
   };
 
@@ -115,7 +121,7 @@ export const QueueMonitor: React.FC = () => {
           </div>
           <button
             onClick={() => refetch()}
-            className="p-2 rounded-xl border border-gray-100 dark:border-gray-800 hover:border-[#0E4825] dark:hover:border-emerald-800 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-all cursor-pointer"
+            className="p-2 rounded-xl border border-gray-100 dark:border-gray-800 hover:border-primary dark:hover:border-emerald-800 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-all cursor-pointer"
           >
             <RefreshCw size={13} />
           </button>
@@ -213,7 +219,7 @@ export const QueueMonitor: React.FC = () => {
                       <>
                         <button
                           onClick={() => handleRetryFailed(q.name)}
-                          className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg bg-orange-50 hover:bg-orange-100 text-[#FF6600] font-bold text-[10px] border border-orange-200/50 cursor-pointer transition-all"
+                          className="flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg bg-orange-50 hover:bg-orange-100 text-accent font-bold text-[10px] border border-orange-200/50 cursor-pointer transition-all"
                         >
                           <RotateCw size={10} />
                           <span>Retry All</span>

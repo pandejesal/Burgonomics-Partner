@@ -9,6 +9,7 @@ import { Capacitor } from '@capacitor/core';
 import { db } from '@/config/firebase';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { toast } from 'sonner';
+import { logger } from '@/core/logging/logger';
 import type { User } from '@/types';
 
 let isInitialized = false;
@@ -81,7 +82,9 @@ export async function initPushNotifications(user?: User | null): Promise<void> {
     // 2. Token Registration Listener
     PushNotifications.addListener('registration', async (token: { value: string }) => {
       if (!token?.value) return;
-      console.log('[Push] Registered with FCM/APNs token:', token.value.slice(0, 12) + '...');
+      // Never log token material, even truncated — prefixes are stable
+      // identifiers. Dev-only debug through the gated logger.
+      logger.debug('[Push] FCM/APNs registration received');
       setCachedToken(token.value);
 
       // Subscribe to branch topics so kitchen + ticket alerts arrive. Reads

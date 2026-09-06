@@ -99,6 +99,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
 
   // Main states
   const [orders, setOrders] = useState<RichOrder[]>([]);
+  const [streamError, setStreamError] = useState<string | null>(null);
   const [isSimulatorEnabled, setIsSimulatorEnabled] = useState(false);
   const [viewMode, setViewMode] = useState<"live" | "history">(defaultTab);
   const [selectedOrder, setSelectedOrder] = useState<RichOrder | null>(null);
@@ -126,8 +127,12 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
 
     const unsubscribe = adminOrdersService.listenLiveOrders(
       effectiveStoreFilter,
-      (liveOrders) => setOrders(liveOrders),
-      (err) => console.error("Error listening to live orders:", err),
+      (liveOrders) => {
+        setStreamError(null);
+        setOrders(liveOrders);
+      },
+      // A stalled stream looks exactly like a quiet kitchen — banner it.
+      (err) => setStreamError(err?.message || "Live order stream disconnected — reload the page."),
     );
 
     return () => unsubscribe();
@@ -266,7 +271,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
       status: "Accepted",
       title: "Accepted / POS",
       bgHeader: "bg-orange-50 dark:bg-orange-950/10 border-orange-200 dark:border-orange-900/30",
-      textHeader: "text-[#FF6600]",
+      textHeader: "text-accent dark:text-accent-light",
     },
     {
       status: "Preparing",
@@ -278,8 +283,8 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
       status: "Ready",
       title: "Ready / Dispatch",
       bgHeader:
-        "bg-[#0E4825]/5 dark:bg-[#0E4825]/10 border-emerald-200/50 dark:border-emerald-900/30",
-      textHeader: "text-[#0E4825] dark:text-emerald-400",
+        "bg-primary/5 dark:bg-primary/10 border-emerald-200/50 dark:border-emerald-900/30",
+      textHeader: "text-primary dark:text-emerald-400",
     },
     {
       status: "Out for Delivery",
@@ -314,7 +319,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
       header: "Order ID",
       accessorKey: "id",
       cell: (row) => (
-        <span className="font-mono font-bold text-[#0E4825] dark:text-emerald-400">{row.id}</span>
+        <span className="font-mono font-bold text-primary dark:text-emerald-400">{row.id}</span>
       ),
     },
     {
@@ -340,8 +345,8 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
             row.fulfillment === "delivery"
               ? "bg-blue-50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400"
               : row.fulfillment === "takeaway"
-                ? "bg-orange-50 dark:bg-orange-950/20 text-[#FF6600]"
-                : "bg-[#0E4825]/5 dark:bg-[#0E4825]/10 text-[#0E4825] dark:text-emerald-400"
+                ? "bg-orange-50 dark:bg-orange-950/20 text-accent dark:text-accent-light"
+                : "bg-primary/5 dark:bg-primary/10 text-primary dark:text-emerald-400"
           }`}
         >
           {row.fulfillment}
@@ -509,7 +514,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
             onClick={() => setViewMode("live")}
             className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs font-bold uppercase transition-all ${
               viewMode === "live"
-                ? "bg-[#0E4825] text-white"
+                ? "bg-primary text-white"
                 : "bg-gray-50 dark:bg-gray-900 text-gray-500 hover:text-gray-900"
             }`}
           >
@@ -520,7 +525,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
             onClick={() => setViewMode("history")}
             className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs font-bold uppercase transition-all ${
               viewMode === "history"
-                ? "bg-[#0E4825] text-white"
+                ? "bg-primary text-white"
                 : "bg-gray-50 dark:bg-gray-900 text-gray-500 hover:text-gray-900"
             }`}
           >
@@ -552,7 +557,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
             }}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl border text-xs font-bold transition-all ${
               isSimulatorEnabled
-                ? "bg-amber-50 dark:bg-amber-950/20 text-[#FF6600] border-amber-200"
+                ? "bg-amber-50 dark:bg-amber-950/20 text-accent dark:text-accent-light border-amber-200"
                 : "bg-gray-50 dark:bg-gray-900 text-gray-400 border-gray-100 dark:border-gray-800"
             }`}
           >
@@ -608,6 +613,13 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
         </div>
       </div>
 
+      {/* Stream failure banner — a dead listener is not an empty kitchen */}
+      {streamError && viewMode === "live" && (
+        <div role="alert" className="rounded-2xl border border-rose-500/50 bg-rose-950/60 p-3 text-xs font-bold text-rose-200">
+          {streamError}
+        </div>
+      )}
+
       {/* Main Workspace content depends on View Mode */}
       {viewMode === "live" ? (
         /* Kanban Live Board View */
@@ -662,7 +674,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                             className={`p-4 rounded-2xl border bg-white dark:bg-[#1C1C1C] cursor-pointer hover:shadow-md transition-all duration-150 relative group ${
                               isLate
                                 ? "border-red-300 dark:border-red-950/40 bg-red-50/10"
-                                : "border-gray-100 dark:border-gray-800 hover:border-[#0E4825]"
+                                : "border-gray-100 dark:border-gray-800 hover:border-primary"
                             }`}
                           >
                             {/* Card badge indicators */}
@@ -671,7 +683,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                                 className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-lg ${
                                   order.fulfillment === "delivery"
                                     ? "bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400"
-                                    : "bg-orange-50 dark:bg-orange-950/30 text-[#FF6600]"
+                                    : "bg-orange-50 dark:bg-orange-950/30 text-accent dark:text-accent-light"
                                 }`}
                               >
                                 {order.fulfillment}
@@ -689,7 +701,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
 
                             {/* Order short details */}
                             <div className="mb-2.5">
-                              <span className="block font-mono font-black text-xs text-[#0E4825] dark:text-emerald-400 mb-0.5">
+                              <span className="block font-mono font-black text-xs text-primary dark:text-emerald-400 mb-0.5">
                                 {order.id}
                               </span>
                               <span className="block font-bold text-xs text-gray-900 dark:text-white truncate">
@@ -722,7 +734,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                                     e.stopPropagation();
                                     setConfirmAction({ type: "accept", orderId: order.id });
                                   }}
-                                  className="px-2.5 py-1 rounded-lg bg-[#0E4825] hover:bg-[#12582e] text-white text-[10px] font-black uppercase flex items-center gap-1"
+                                  className="px-2.5 py-1 rounded-lg bg-primary hover:bg-[#12582e] text-white text-[10px] font-black uppercase flex items-center gap-1"
                                 >
                                   <Check size={11} />
                                   <span>Accept</span>
@@ -734,7 +746,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                                     e.stopPropagation();
                                     handleUpdateStatus(order.id, "Preparing");
                                   }}
-                                  className="px-2.5 py-1 rounded-lg bg-[#FF6600] hover:bg-[#e05900] text-white text-[10px] font-black uppercase flex items-center gap-1"
+                                  className="px-2.5 py-1 rounded-lg bg-accent hover:bg-accent-hover text-white text-[10px] font-black uppercase flex items-center gap-1"
                                 >
                                   <Play size={11} />
                                   <span>Prepare</span>
@@ -827,15 +839,15 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
               {/* Drawer Header */}
               <div className="px-6 py-5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gray-50/50 dark:bg-gray-900/10">
                 <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-2xl bg-[#0E4825]/5 dark:bg-[#0E4825]/10 flex items-center justify-center text-[#0E4825] dark:text-emerald-400">
+                  <div className="h-10 w-10 rounded-2xl bg-primary/5 dark:bg-primary/10 flex items-center justify-center text-primary dark:text-emerald-400">
                     <ShoppingBag size={18} />
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="font-mono font-black text-base text-[#0E4825] dark:text-emerald-400">
+                      <span className="font-mono font-black text-base text-primary dark:text-emerald-400">
                         {selectedOrder.id}
                       </span>
-                      <span className="text-[10px] font-black uppercase tracking-wider text-[#FF6600] bg-orange-50 dark:bg-orange-950/20 px-2 py-0.5 rounded-lg">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-accent dark:text-accent-light bg-orange-50 dark:bg-orange-950/20 px-2 py-0.5 rounded-lg">
                         {selectedOrder.fulfillment}
                       </span>
                     </div>
@@ -858,7 +870,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                 <div className="md:col-span-5 space-y-6">
                   {/* Customer Information Card */}
                   <div className="p-4 rounded-2xl bg-gray-50/50 dark:bg-gray-900/10 border border-gray-100 dark:border-gray-800 space-y-4">
-                    <span className="block text-[10px] font-black uppercase tracking-widest text-[#0E4825] dark:text-emerald-400">
+                    <span className="block text-[10px] font-black uppercase tracking-widest text-primary dark:text-emerald-400">
                       Customer Profile
                     </span>
                     <div className="flex items-start gap-3">
@@ -869,7 +881,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                         <span className="block font-black text-sm text-gray-900 dark:text-white truncate">
                           {selectedOrder.address?.contactName || "Walk-In Dine-In Customer"}
                         </span>
-                        <div className="flex items-center gap-1 text-xs text-[#FF6600] font-bold mt-0.5">
+                        <div className="flex items-center gap-1 text-xs text-accent dark:text-accent-light font-bold mt-0.5">
                           <Award size={13} />
                           <span>{selectedOrder.customerCohort || "Gold Tier Member"}</span>
                         </div>
@@ -943,7 +955,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                           <div
                             className={`absolute -left-[23px] top-0 h-3 w-3 rounded-full border bg-white dark:bg-[#1A1A1A] ${
                               idx === selectedOrder.timeline.length - 1
-                                ? "border-[#0E4825] bg-[#0E4825] dark:border-emerald-400 dark:bg-emerald-400 animate-pulse"
+                                ? "border-primary bg-primary dark:border-emerald-400 dark:bg-emerald-400 animate-pulse"
                                 : "border-gray-300"
                             }`}
                           />
@@ -956,7 +968,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                                 {step.timestamp}
                               </span>
                             </div>
-                            <span className="block text-[10px] font-black uppercase text-[#FF6600]">
+                            <span className="block text-[10px] font-black uppercase text-accent dark:text-accent-light">
                               {step.actor}
                             </span>
                             <p className="text-gray-500 mt-0.5">{step.description}</p>
@@ -1116,7 +1128,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                   {/* Petpooja POS Integration Panel */}
                   <div className="p-4 rounded-2xl bg-gray-50/50 dark:bg-gray-900/10 border border-gray-100 dark:border-gray-800 space-y-3.5">
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-[#FF6600]">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-accent dark:text-accent-light">
                         Petpooja POS API Link
                       </span>
                       <span
@@ -1155,7 +1167,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                         onClick={() =>
                           setConfirmAction({ type: "petpooja", orderId: selectedOrder.id })
                         }
-                        className="flex-1 py-2 text-[10px] font-black uppercase rounded-xl border border-orange-200 text-[#FF6600] hover:bg-orange-50/30 transition-all"
+                        className="flex-1 py-2 text-[10px] font-black uppercase rounded-xl border border-orange-200 text-accent dark:text-accent-light hover:bg-orange-50/30 transition-all"
                       >
                         Push to POS
                       </button>
@@ -1239,7 +1251,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                       onClick={() =>
                         setConfirmAction({ type: "accept", orderId: selectedOrder.id })
                       }
-                      className="flex-1 py-3 px-4 bg-[#0E4825] hover:bg-[#11572c] text-white font-black text-xs uppercase tracking-wider rounded-2xl shadow-md transition-all flex items-center justify-center gap-1.5"
+                      className="flex-1 py-3 px-4 bg-primary hover:bg-[#11572c] text-white font-black text-xs uppercase tracking-wider rounded-2xl shadow-md transition-all flex items-center justify-center gap-1.5"
                     >
                       <Check size={14} />
                       <span>Accept Order</span>
@@ -1259,7 +1271,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                 {selectedOrder.orderStatus === "Accepted" && (
                   <button
                     onClick={() => handleUpdateStatus(selectedOrder.id, "Preparing")}
-                    className="flex-1 py-3 px-4 bg-[#FF6600] hover:bg-[#e05900] text-white font-black text-xs uppercase tracking-wider rounded-2xl shadow-md transition-all flex items-center justify-center gap-1.5"
+                    className="flex-1 py-3 px-4 bg-accent hover:bg-accent-hover text-white font-black text-xs uppercase tracking-wider rounded-2xl shadow-md transition-all flex items-center justify-center gap-1.5"
                   >
                     <Play size={14} />
                     <span>Send to Kitchen (Prepare)</span>
@@ -1291,7 +1303,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                     ) : (
                       <button
                         onClick={() => handleUpdateStatus(selectedOrder.id, "Completed")}
-                        className="flex-1 py-3 px-4 bg-[#0E4825] hover:bg-[#11572c] text-white font-black text-xs uppercase tracking-wider rounded-2xl shadow-md transition-all flex items-center justify-center gap-1.5"
+                        className="flex-1 py-3 px-4 bg-primary hover:bg-[#11572c] text-white font-black text-xs uppercase tracking-wider rounded-2xl shadow-md transition-all flex items-center justify-center gap-1.5"
                       >
                         <Check size={14} />
                         <span>Mark Handed Over / Settled</span>
@@ -1304,7 +1316,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                 {selectedOrder.orderStatus === "Out for Delivery" && (
                   <button
                     onClick={() => handleUpdateStatus(selectedOrder.id, "Completed")}
-                    className="flex-1 py-3 px-4 bg-[#0E4825] hover:bg-[#11572c] text-white font-black text-xs uppercase tracking-wider rounded-2xl shadow-md transition-all flex items-center justify-center gap-1.5"
+                    className="flex-1 py-3 px-4 bg-primary hover:bg-[#11572c] text-white font-black text-xs uppercase tracking-wider rounded-2xl shadow-md transition-all flex items-center justify-center gap-1.5"
                   >
                     <CheckCircle2 size={14} />
                     <span>Confirm Rider Delivery</span>
@@ -1468,7 +1480,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                   onClick={() => setPrintReceiptData({ ...printReceiptData, type: t as any })}
                   className={`flex-1 py-2 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all ${
                     printReceiptData.type === t
-                      ? "bg-white dark:bg-[#1A1A1A] text-[#0E4825] dark:text-emerald-400 shadow-sm"
+                      ? "bg-white dark:bg-[#1A1A1A] text-primary dark:text-emerald-400 shadow-sm"
                       : "text-gray-400 hover:text-gray-600"
                   }`}
                 >
@@ -1517,7 +1529,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                     printWindow.document.close();
                   }
                 }}
-                className="flex-1 py-3 px-4 bg-[#0E4825] text-white font-black text-xs uppercase tracking-wider rounded-2xl hover:bg-[#12592d] transition-all flex items-center justify-center gap-1.5"
+                className="flex-1 py-3 px-4 bg-primary text-white font-black text-xs uppercase tracking-wider rounded-2xl hover:bg-[#12592d] transition-all flex items-center justify-center gap-1.5"
               >
                 <Printer size={13} />
                 <span>Print Ticket</span>

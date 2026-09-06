@@ -5,6 +5,7 @@ import { doc, getDoc, onSnapshot, updateDoc, Timestamp } from 'firebase/firestor
 import type { Order, OrderStatus } from '@/types';
 import { normalizeOrderDoc, toDeliveryStatusMeta, toPartnerStatus } from '@/utils/orderContract';
 import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
+import { logger } from '@/core/logging/logger';
 import { toast } from 'sonner';
 
 function notifyMutationError(action: string) {
@@ -30,7 +31,11 @@ export function useOrder(orderId: string) {
         }
       },
       (err) => {
-        console.warn('useOrder onSnapshot listener error:', err);
+        // A dead listener looks exactly like an idle order — surface it.
+        logger.warn('useOrder listener stalled', { orderId, message: (err as any)?.message });
+        toast.error('Live order updates stalled — reopen the order', {
+          description: (err as any)?.message,
+        });
       }
     );
     return () => unsubscribe();

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { logger } from "@/core/logging/logger";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Boxes,
@@ -98,6 +99,8 @@ export const SystemQueueTab: React.FC = () => {
     }
   }, [selectedQueueName, fetchFailedJobs]);
 
+  // Every failure path sets visible status: the old bare console.error made
+  // staff clicks vanish silently, and non-OK HTTP was ignored entirely.
   const handlePauseQueue = async (qName: string) => {
     if (!accessToken) return;
     try {
@@ -108,9 +111,12 @@ export const SystemQueueTab: React.FC = () => {
       if (response.ok) {
         setActionStatus(`Paused queue: ${qName}`);
         fetchQueues();
+      } else {
+        setActionStatus(`Pause failed (${response.status}) — retry`);
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      logger.error("queue.pause_failed", err, { queue: qName });
+      setActionStatus(`Pause failed — retry (${err?.message || "network error"})`);
     }
   };
 
@@ -124,9 +130,12 @@ export const SystemQueueTab: React.FC = () => {
       if (response.ok) {
         setActionStatus(`Resumed queue: ${qName}`);
         fetchQueues();
+      } else {
+        setActionStatus(`Resume failed (${response.status}) — retry`);
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      logger.error("queue.resume_failed", err, { queue: qName });
+      setActionStatus(`Resume failed — retry (${err?.message || "network error"})`);
     }
   };
 
@@ -152,9 +161,12 @@ export const SystemQueueTab: React.FC = () => {
           fetchFailedJobs(selectedQueueName);
         }
         setSelectedJob(null);
+      } else {
+        setActionStatus(`Retry failed (${response.status}) — retry`);
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      logger.error("queue.retry_failed", err, { queue: qName });
+      setActionStatus(`Retry failed — retry (${err?.message || "network error"})`);
     }
   };
 
@@ -174,9 +186,12 @@ export const SystemQueueTab: React.FC = () => {
         if (selectedQueueName) {
           fetchFailedJobs(selectedQueueName);
         }
+      } else {
+        setActionStatus(`Replay failed (${response.status}) — retry`);
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      logger.error("queue.replay_failed", err, { queue: qName });
+      setActionStatus(`Replay failed — retry (${err?.message || "network error"})`);
     }
   };
 
@@ -268,7 +283,7 @@ export const SystemQueueTab: React.FC = () => {
           <div className="flex items-center gap-2">
             <button
               onClick={() => handleRetryFailed(selectedQueueName)}
-              className="px-3 py-1.5 rounded-lg bg-[#FF6600]/10 border border-[#FF6600]/30 text-[#FF6600] text-xs font-bold font-mono uppercase flex items-center gap-1.5 hover:bg-[#FF6600]/20 cursor-pointer"
+              className="px-3 py-1.5 rounded-lg bg-accent/10 border border-accent/30 text-accent dark:text-accent-light text-xs font-bold font-mono uppercase flex items-center gap-1.5 hover:bg-accent/20 cursor-pointer"
             >
               <RotateCcw size={12} /> Retry Failed
             </button>
@@ -334,7 +349,7 @@ export const SystemQueueTab: React.FC = () => {
                   onClick={() => setSelectedJob(job)}
                   className={`p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
                     selectedJob?.id === job.id
-                      ? "bg-[#0E4825]/15 border-emerald-700/50"
+                      ? "bg-primary/15 border-emerald-700/50"
                       : "bg-black/30 border-gray-900/60 hover:border-gray-800"
                   }`}
                 >
