@@ -10,6 +10,7 @@ export function useTicket(ticketId: string) {
   const { data: ticket, isLoading, error } = useQuery<Ticket>({
     queryKey: ['ticket', ticketId],
     queryFn: async () => {
+      let fetchError: unknown = null;
       try {
         // Check support_tickets collection first
         let ticketRef = doc(db, 'support_tickets', ticketId);
@@ -25,7 +26,13 @@ export function useTicket(ticketId: string) {
           return normalizeTicketDoc(ticketSnap.id, ticketSnap.data() as Record<string, any>);
         }
       } catch (e) {
+        fetchError = e;
         console.warn('Firestore fetch notice, loading fallback ticket:', e);
+      }
+
+      // Production must fail visible — never render fabricated tickets.
+      if (!import.meta.env.DEV) {
+        throw fetchError instanceof Error ? fetchError : new Error('Ticket unavailable — check connection and retry.');
       }
 
       // Rich Mock Ticket Fallbacks for Dev/Demo

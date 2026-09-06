@@ -97,8 +97,8 @@ export function useOrder(orderId: string) {
       await updateDoc(orderRef, {
         riderName: riderData.riderName,
         riderPhone: riderData.riderPhone,
-        riderVehicleNumber: riderData.riderVehicleNumber || 'GJ-01-BK-4092',
-        riderTrackingUrl: riderData.riderTrackingUrl || `https://porter.in/track/ord_${orderId.slice(-6)}`,
+        riderVehicleNumber: riderData.riderVehicleNumber || '',
+        riderTrackingUrl: riderData.riderTrackingUrl || '',
         deliveryStatus: 'manually_assigned',
         status: toDeliveryStatusMeta(nextStatus),
         updatedAt: Timestamp.now(),

@@ -435,6 +435,7 @@ export function useOrders(params: UseOrdersParams = {}) {
 
   const simulateOrder = useMutation({
     mutationFn: async (customParams?: { branchId?: string; branchName?: string; orderType?: 'delivery' | 'takeaway' | 'dinein' }) => {
+      if (!import.meta.env.DEV) throw new Error('Simulated orders are available in development builds only.');
       const targetBranchId = customParams?.branchId || selectedBranchId || user?.branchIds?.[0] || 'branch_surat_01';
       const targetBranchName = customParams?.branchName || (targetBranchId === 'branch_surat_01' ? 'Surat Adajan' : 'Ahmedabad SG Highway');
       const orderType = customParams?.orderType || (['delivery', 'takeaway', 'dinein'] as const)[Math.floor(Math.random() * 3)];
