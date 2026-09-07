@@ -17,7 +17,11 @@ interface AdminAuthState {
 export const useAdminAuthStore = create<AdminAuthState>((set, get) => ({
   admin: null,
   accessToken: null,
-  isLoading: true,
+  // NOTE: starts false — the /admin/login route skips bootstrap() (the only
+  // path that would clear a true initial), which used to wedge the submit
+  // button on "Verifying Credentials..." forever. login/logout/bootstrap
+  // each set isLoading:true when real work starts.
+  isLoading: false,
   error: null,
 
   clearError: () => set({ error: null }),
