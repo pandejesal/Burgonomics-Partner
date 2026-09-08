@@ -76,14 +76,20 @@ export function ManualOrderCreateModal({
   const packagingFee = orderType === 'takeaway' ? 15 : 0;
   const total = subtotal + tax + packagingFee;
 
-  const tenderedNumber = parseFloat(cashTendered) || 0;
+  /** Max units per line — beyond this the bill needs a supervisor split. */
+  const MAX_QTY_PER_LINE = 20;
+
+  const tenderedRaw = cashTendered.trim() === '' ? NaN : Number(cashTendered);
+  const tenderedNumber = Number.isFinite(tenderedRaw) && tenderedRaw >= 0 ? tenderedRaw : 0;
   const changeDue = Math.max(0, tenderedNumber - total);
 
   const handleAddItem = (item: (typeof MENU_ITEMS)[0]) => {
     setSelectedItems((prev) => {
       const existing = prev.find((i) => i.item.id === item.id);
       if (existing) {
-        return prev.map((i) => (i.item.id === item.id ? { ...i, quantity: i.quantity + 1 } : i));
+        return prev.map((i) =>
+          i.item.id === item.id ? { ...i, quantity: Math.min(MAX_QTY_PER_LINE, i.quantity + 1) } : i
+        );
       }
       return [...prev, { item, quantity: 1 }];
     });
@@ -95,7 +101,8 @@ export function ManualOrderCreateModal({
         .map((i) => {
           if (i.item.id === itemId) {
             const nextQty = i.quantity + delta;
-            return nextQty > 0 ? { ...i, quantity: nextQty } : null;
+            if (nextQty <= 0) return null;
+            return { ...i, quantity: Math.min(MAX_QTY_PER_LINE, nextQty) };
           }
           return i;
         })
@@ -105,7 +112,23 @@ export function ManualOrderCreateModal({
 
   const handleCreateOrder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (selectedItems.length === 0) return;
+    setSubmitError(null);
+
+    if (selectedItems.length === 0) {
+      setSubmitError('Add at least one item before placing the order.');
+      return;
+    }
+
+    const name = customerName.trim();
+    if (!name) {
+      setSubmitError('Enter a customer name — blank names are not accepted at the counter.');
+      return;
+    }
+
+    if (!(total > 0)) {
+      setSubmitError('Order total must be above ₹0 — add items before placing the order.');
+      return;
+    }
 
     // Counter orders used to persist the literal '+91 ' placeholder as the
     // customer phone (dial-fail downstream, unsearchable in CRM). Normalize
@@ -117,10 +140,38 @@ export function ManualOrderCreateModal({
     }
     setPhoneError(null);
 
+    // Tender integrity: a provided cash figure must be a real non-negative
+    // number covering the bill — never coerce garbage/negatives via || 0,
+    // and never place a short-tender cash order.
+    if (paymentMethod === 'cod' && cashTendered.trim() !== '') {
+      const tendered = Number(cashTendered);
+      if (!Number.isFinite(tendered) || tendered < 0) {
+        setSubmitError('Cash received must be a valid non-negative amount.');
+        return;
+      }
+      if (tendered < total) {
+        setSubmitError(`Cash received (₹${tendered}) is short of the bill (₹${total}).`);
+        return;
+      }
+    }
+
+    // Outlet integrity: no silent fallback branch — billing without a
+    // resolved outlet would attribute revenue to the wrong store.
+    const branchId = selectedBranchId || user?.branchIds?.[0];
+    if (!branchId) {
+      setSubmitError('No outlet selected — pick a branch before billing.');
+      return;
+    }
+
+    // Dine-in integrity: a table number is required, never defaulted.
+    if (orderType === 'dinein' && !tableNumber.trim()) {
+      setSubmitError('Enter the table number for dine-in orders.');
+      return;
+    }
+
     setIsSubmitting(true);
 
     const orderId = `ord_pos_${Date.now().toString().slice(-6)}`;
-    const branchId = selectedBranchId || user?.branchIds?.[0] || 'branch_surat_01';
 
     const orderItems: OrderItem[] = selectedItems.map((i) => ({
       itemId: i.item.id,
@@ -134,7 +185,7 @@ export function ManualOrderCreateModal({
     const newOrder: Order = {
       id: orderId,
       customerId: 'cust_walkin',
-      customerName: customerName || 'Walk-in Customer',
+      customerName: name,
       customerPhone: phone,
       branchId,
       branchName: branchId.includes('surat') ? 'Surat Adajan' : 'Ahmedabad SG Highway',
@@ -145,17 +196,20 @@ export function ManualOrderCreateModal({
       deliveryFee: 0,
       total,
       orderType,
-      tableNumber: orderType === 'dinein' ? tableNumber || '01' : undefined,
+      tableNumber: orderType === 'dinein' ? tableNumber.trim() : undefined,
       // Delivery-compatible object form (see orderContract): ALL readers go
       // through normalizeOrderDoc/toPartnerStatus, which map this to
       // 'pending' (pinned by tests/order-contract.test.ts). Never read
       // .status raw off a Firestore doc — always normalize first.
       status: toDeliveryStatusMeta('pending') as unknown as OrderStatus,
       paymentMethod,
-      paymentStatus: 'completed',
+      // Honest-until-receipt: a counter order is pending/unsynced/unprinted
+      // until the payment, Petpooja sync, and KOT print receipts confirm it.
+      // Hardcoding completed/synced/true here inflated revenue and AOV.
+      paymentStatus: 'pending',
       petpoojaOrderId: `PP-${orderId}`,
-      petpoojaSyncStatus: 'synced',
-      kotPrinted: true,
+      petpoojaSyncStatus: 'pending',
+      kotPrinted: false,
       specialInstructions,
       createdAt: Timestamp.now(),
       updatedAt: Timestamp.now(),

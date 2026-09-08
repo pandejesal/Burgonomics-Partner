@@ -52,28 +52,37 @@ export function OrderDetailPage() {
   const [loadingQuote, setLoadingQuote] = useState(false);
   const [isDispatchingPorter, setIsDispatchingPorter] = useState(false);
 
+  // Quote inputs as stable scalars — dep on the whole `order` object
+  // refetched on every snapshot churn. Only a new order id or a changed
+  // drop point justifies a fresh quote.
+  const orderIdForQuote = order?.id;
+  const dropLat = order?.deliveryAddress?.lat;
+  const dropLng = order?.deliveryAddress?.lng;
+  const isDeliveryOrder =
+    order?.orderType === 'delivery' || (order as any)?.fulfillment === 'delivery';
+
   useEffect(() => {
-    if (order && (order.orderType === 'delivery' || (order as any).fulfillment === 'delivery')) {
-      setLoadingQuote(true);
-      getPorterDeliveryQuote({
-        dropLat: order.deliveryAddress?.lat,
-        dropLng: order.deliveryAddress?.lng,
-        customerName: order.customerName,
-        customerPhone: order.customerPhone,
+    if (!order || !isDeliveryOrder) return;
+    setLoadingQuote(true);
+    getPorterDeliveryQuote({
+      dropLat,
+      dropLng,
+      customerName: order.customerName,
+      customerPhone: order.customerPhone,
+    })
+      .then((q) => {
+        setPorterQuote(q);
+        setLoadingQuote(false);
       })
-        .then((q) => {
-          setPorterQuote(q);
-          setLoadingQuote(false);
-        })
-        .catch((err) => {
-          setLoadingQuote(false);
-          // Never swallow: a missing quote looks identical to "free delivery".
-          toast.error("Delivery quote failed", {
-            description: err instanceof Error ? err.message : "Could not reach the dispatcher.",
-          });
+      .catch((err) => {
+        setLoadingQuote(false);
+        // Never swallow: a missing quote looks identical to "free delivery".
+        toast.error('Delivery quote failed', {
+          description: err instanceof Error ? err.message : 'Could not reach the dispatcher.',
         });
-    }
-  }, [order]);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderIdForQuote, dropLat, dropLng, isDeliveryOrder]);
 
   if (isLoading) {
     return (
@@ -160,6 +169,21 @@ export function OrderDetailPage() {
   };
 
   const handleDispatchPorterRider = async () => {
+    if (isDispatchingPorter) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      toast.error("You're offline — booking not attempted. Reconnect and retry.");
+      return;
+    }
+    // Paid-booking confirm with the live fare — a Porter dispatch spends
+    // real money and cannot be undone.
+    const fareHint = porterQuote ? ` (~₹${porterQuote.estimatedFare})` : '';
+    const confirmed =
+      typeof window === 'undefined'
+        ? true
+        : window.confirm(
+            `Book a PAID Porter rider${fareHint} for this order? This charges the branch and cannot be undone.`
+          );
+    if (!confirmed) return;
     setIsDispatchingPorter(true);
     try {
       if (autoDispatchPorter && typeof autoDispatchPorter.mutateAsync === 'function') {
@@ -167,7 +191,7 @@ export function OrderDetailPage() {
       }
       toast.success('Porter courier successfully dispatched!');
     } catch (err) {
-      toast.error('Porter dispatch failed');
+      toast.error(err instanceof Error ? err.message : 'Porter dispatch failed');
     } finally {
       setIsDispatchingPorter(false);
     }

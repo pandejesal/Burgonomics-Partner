@@ -19,6 +19,8 @@ interface OrderTableListProps {
   onDispatchPorter?: (orderId: string) => void;
   isLoading?: boolean;
   className?: string;
+  /** Per-order Porter booking pending set — only that row's button locks. */
+  dispatchingOrderIds?: ReadonlySet<string>;
 }
 
 export function OrderTableList({
@@ -27,6 +29,7 @@ export function OrderTableList({
   onDispatchPorter,
   isLoading = false,
   className = '',
+  dispatchingOrderIds,
 }: OrderTableListProps) {
   if (isLoading) {
     return (
@@ -189,16 +192,21 @@ export function OrderTableList({
                     {isDelivery && order.status === 'ready' && (
                       <button
                         type="button"
+                        disabled={dispatchingOrderIds?.has(order.id)}
                         onClick={(e) => {
                           e.stopPropagation();
                           onDispatchPorter?.(order.id);
                         }}
-                        aria-label={`Dispatch Porter courier for order ${shortCode}`}
-                        className="px-2 py-1 min-h-[44px] rounded-lg bg-orange-600 hover:bg-orange-500 text-white font-bold text-[10px] flex items-center gap-1 transition-colors cursor-pointer"
+                        aria-label={
+                          dispatchingOrderIds?.has(order.id)
+                            ? `Booking Porter courier for order ${shortCode}`
+                            : `Dispatch Porter courier for order ${shortCode}`
+                        }
+                        className="px-2 py-1 min-h-[44px] rounded-lg bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white font-bold text-[10px] flex items-center gap-1 transition-colors cursor-pointer"
                         title="Dispatch Porter Courier"
                       >
                         <Send className="w-3 h-3" />
-                        <span>Porter</span>
+                        <span>{dispatchingOrderIds?.has(order.id) ? 'Booking…' : 'Porter'}</span>
                       </button>
                     )}
 

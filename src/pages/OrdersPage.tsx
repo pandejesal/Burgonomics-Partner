@@ -29,7 +29,9 @@ export function OrdersPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [printOrder, setPrintOrder] = useState<Order | null>(null);
-  const [dispatchingId, setDispatchingId] = useState<string | null>(null);
+  // Per-order pending: a global single-flight dropped taps on OTHER orders
+  // during rush. Each booking tracks its own order id.
+  const [dispatchingIds, setDispatchingIds] = useState<Set<string>>(new Set());
   const queryClient = useQueryClient();
 
   const { orders = [], isLoading, error: ordersError, refetch: refetchOrders } = useOrders({
@@ -96,17 +98,36 @@ export function OrdersPage() {
   };
 
   const handleDispatchPorter = async (orderId: string) => {
-    if (dispatchingId) return;
-    setDispatchingId(orderId);
+    if (dispatchingIds.has(orderId)) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      toast.error("You're offline — booking not attempted. Reconnect and retry.");
+      return;
+    }
+    // Paid-booking confirm: a Porter dispatch spends real money and cannot
+    // be undone — never fire it off a single accidental tap.
+    const confirmed =
+      typeof window === 'undefined'
+        ? true
+        : window.confirm(
+            `Book a PAID Porter rider for order ${orderId}? This charges the branch and cannot be undone.`
+          );
+    if (!confirmed) return;
+    setDispatchingIds((prev) => new Set(prev).add(orderId));
     try {
       const staffName = user?.name || user?.email || 'Branch Staff';
-      const res = await partnerFunctionsApi.bookPorterRider(orderId, staffName);
+      const res = await partnerFunctionsApi.bookPorterRider(orderId, staffName, {
+        idempotencyKey: crypto.randomUUID(),
+      });
       toast.success(`Porter rider ${res.riderName} dispatched (${res.porterOrderId})`);
       queryClient.invalidateQueries({ queryKey: ['orders'] });
     } catch (err: any) {
       toast.error(err?.message || 'Porter dispatch failed — no rider was booked');
     } finally {
-      setDispatchingId(null);
+      setDispatchingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(orderId);
+        return next;
+      });
     }
   };
 
@@ -181,6 +202,7 @@ export function OrdersPage() {
         isLoading={isLoading}
         onPrintKot={handlePrintKot}
         onDispatchPorter={handleDispatchPorter}
+        dispatchingOrderIds={dispatchingIds}
       />
 
       {/* Walk-in Order Creation Modal */}

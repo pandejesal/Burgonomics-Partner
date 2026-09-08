@@ -45,6 +45,7 @@ export function TicketDetailPage() {
   const [replyText, setReplyText] = useState('');
   const [copiedPayload, setCopiedPayload] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
 
   if (isLoading) {
     return (
@@ -72,7 +73,7 @@ export function TicketDetailPage() {
   const diagnostics = (ticket as any).diagnostics || {};
   const timeline = normalizeTimeline((ticket as any).timeline);
 
-  const handleCopyPayload = () => {
+  const handleCopyPayload = async () => {
     const payload = JSON.stringify(
       {
         ticketId: ticket.id,
@@ -86,9 +87,13 @@ export function TicketDetailPage() {
       null,
       2
     );
-    navigator.clipboard.writeText(payload);
-    setCopiedPayload(true);
-    setTimeout(() => setCopiedPayload(false), 2000);
+    try {
+      await navigator.clipboard.writeText(payload);
+      setCopiedPayload(true);
+      setTimeout(() => setCopiedPayload(false), 2000);
+    } catch {
+      // Clipboard permission denied or unavailable — silent fail, no crash.
+    }
   };
 
   // Partial-refund validation lives in utils/refundValidation (unit-tested):
@@ -100,57 +105,66 @@ export function TicketDetailPage() {
 
   const handleExecuteAction = async () => {
     setSuccessMessage('');
+    setErrorMessage('');
 
-    if (activeActionTab === 'refund') {
-      if (partialRefundError) return;
-      const amount = refundType === 'partial' ? Number(refundAmountInput) : undefined;
-      await updateTicket.mutateAsync({
-        status: 'resolved',
-        resolutionAction: refundType === 'full' ? 'full_refund' : 'partial_refund',
-        refundAmount: amount,
-        resolution: `${refundType === 'full' ? '100% Full Refund' : `Partial Refund of ₹${amount}`} processed with Razorpay Route reversal. Notes: ${resolutionNotes.trim() || 'Approved by operator'}`,
-      });
-      setSuccessMessage(`Refund of ${refundType === 'full' ? '100% total' : `₹${amount}`} processed successfully with Route reversal.`);
-    } else if (activeActionTab === 'goodwill') {
-      await updateTicket.mutateAsync({
-        status: 'resolved',
-        resolutionAction: goodwillType === 'coupon' ? 'discount_coupon' : 'loyalty_credit',
-        resolution: `Issued ₹100 Goodwill ${goodwillType === 'coupon' ? 'Promo Voucher' : 'Loyalty Grill Coins'}. Notes: ${resolutionNotes.trim() || 'Courtesy courtesy compensation'}`,
-      });
-      setSuccessMessage(`Goodwill ${goodwillType === 'coupon' ? 'Voucher' : 'Coins'} issued to customer.`);
-    } else if (activeActionTab === 'escalate_brand') {
-      await updateTicket.mutateAsync({
-        status: 'in_progress',
-        assignedToTier: 'brand_support',
-        resolution: `Escalated to Tier 2 (Brand Support): ${resolutionNotes.trim() || 'Franchise/Brand policy review required'}`,
-      });
-      setSuccessMessage('Successfully escalated to Tier 2 (Brand Support Team).');
-    } else if (activeActionTab === 'escalate_dev') {
-      await updateTicket.mutateAsync({
-        status: 'in_progress',
-        assignedToTier: 'developer_team',
-        resolution: `Escalated to Tier 3 (Developer Team): ${resolutionNotes.trim() || 'Technical investigation / API gateway timeout'}`,
-      });
-      setSuccessMessage('Successfully escalated to Tier 3 (Developer Team). P0 Diagnostic snapshot generated.');
-    } else {
-      await updateTicket.mutateAsync({
-        status: 'resolved',
-        resolution: resolutionNotes.trim() || `Resolved by ${user?.name || 'Staff'} (${user?.role || 'team'})`,
-      });
-      setSuccessMessage('Incident marked as resolved.');
+    try {
+      if (activeActionTab === 'refund') {
+        if (partialRefundError) return;
+        const amount = refundType === 'partial' ? Number(refundAmountInput) : undefined;
+        await updateTicket.mutateAsync({
+          status: 'in_progress',
+          resolutionAction: refundType === 'full' ? 'full_refund_requested' : 'partial_refund_requested',
+          refundAmount: amount,
+          resolution: `Refund requested — queued for processing. No money has moved yet. ${refundType === 'full' ? 'Full order refund' : `Partial refund of ₹${amount}`}. Notes: ${resolutionNotes.trim() || 'Approved by operator'}`,
+        });
+        setSuccessMessage(`Refund of ${refundType === 'full' ? '100% total' : `₹${amount}`} requested — queued for processing. No money has moved yet.`);
+      } else if (activeActionTab === 'goodwill') {
+        await updateTicket.mutateAsync({
+          status: 'in_progress',
+          resolutionAction: goodwillType === 'coupon' ? 'discount_coupon' : 'loyalty_credit',
+          resolution: `Goodwill ${goodwillType === 'coupon' ? 'Promo Voucher' : 'Loyalty Grill Coins'} (₹100) recorded — pending backend issuance. Notes: ${resolutionNotes.trim() || 'Courtesy compensation'}`,
+        });
+        setSuccessMessage(`Goodwill ${goodwillType === 'coupon' ? 'Voucher' : 'Coins'} (₹100) recorded — pending backend issuance.`);
+      } else if (activeActionTab === 'escalate_brand') {
+        await updateTicket.mutateAsync({
+          status: 'in_progress',
+          assignedToTier: 'brand_support',
+          resolution: `Escalated to Tier 2 (Brand Support): ${resolutionNotes.trim() || 'Franchise/Brand policy review required'}`,
+        });
+        setSuccessMessage('Successfully escalated to Tier 2 (Brand Support Team).');
+      } else if (activeActionTab === 'escalate_dev') {
+        await updateTicket.mutateAsync({
+          status: 'in_progress',
+          assignedToTier: 'developer_team',
+          resolution: `Escalated to Tier 3 (Developer Team): ${resolutionNotes.trim() || 'Technical investigation / API gateway timeout'}`,
+        });
+        setSuccessMessage('Successfully escalated to Tier 3 (Developer Team). P0 Diagnostic snapshot generated.');
+      } else {
+        await updateTicket.mutateAsync({
+          status: 'resolved',
+          resolution: resolutionNotes.trim() || `Resolved by ${user?.name || 'Staff'} (${user?.role || 'team'})`,
+        });
+        setSuccessMessage('Incident marked as resolved.');
+      }
+
+      setResolutionNotes('');
+    } catch {
+      setErrorMessage('Action failed — Firestore rejected the update. Check your connection and retry.');
     }
-
-    setResolutionNotes('');
   };
 
   const handleSendReply = async () => {
     if (!replyText.trim()) return;
-    await addMessage.mutateAsync({
-      text: replyText.trim(),
-      authorName: user?.name || 'Store Staff',
-      authorRole: user?.role || 'branch_staff',
-    });
-    setReplyText('');
+    try {
+      await addMessage.mutateAsync({
+        text: replyText.trim(),
+        authorName: user?.name || 'Store Staff',
+        authorRole: user?.role || 'branch_staff',
+      });
+      setReplyText('');
+    } catch {
+      setErrorMessage('Failed to send message — check your connection and retry.');
+    }
   };
 
   return (
@@ -373,6 +387,14 @@ export function TicketDetailPage() {
           </div>
         )}
 
+        {/* Error Alert Banner */}
+        {errorMessage && (
+          <div role="alert" className="bg-rose-950 border border-rose-700 rounded-xl p-3.5 text-xs text-rose-300 font-bold flex items-center space-x-2 shadow-md">
+            <AlertCircle className="w-4 h-4 text-rose-400" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
+
         {/* Unified 5-Tab Action Panel (Active if not resolved or for updates) */}
         {!isResolved && (
           <div className="bg-bg border border-border rounded-2xl p-5 space-y-4">
@@ -456,7 +478,7 @@ export function TicketDetailPage() {
                 )}
 
                 <p className="text-[11px] text-zinc-400">
-                  ⚡ Auto-invokes <code className="text-amber-400">autoRefund</code> Cloud Function with Razorpay Route split reversal (net branch deduction).
+                  Records a refund request as <code className="text-amber-400">in_progress</code> — queued for backend processing. No money moves until a Cloud Function executes the Razorpay reversal.
                 </p>
               </div>
             )}
@@ -528,8 +550,8 @@ export function TicketDetailPage() {
               disabled={updateTicket.isPending || !!partialRefundError}
               className="w-full py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-white font-black text-xs uppercase tracking-wider shadow-md transition-colors cursor-pointer"
             >
-              {activeActionTab === 'refund' && 'Execute Refund & Resolve'}
-              {activeActionTab === 'goodwill' && 'Issue Goodwill & Resolve'}
+              {activeActionTab === 'refund' && 'Request Refund & Queue'}
+              {activeActionTab === 'goodwill' && 'Record Goodwill & Queue'}
               {activeActionTab === 'escalate_brand' && 'Confirm Escalation to Brand Support'}
               {activeActionTab === 'escalate_dev' && 'Dispatch P0 Snapshot to Developer Team'}
               {activeActionTab === 'standard' && 'Confirm Resolution'}

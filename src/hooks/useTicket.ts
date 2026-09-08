@@ -144,50 +144,47 @@ export function useTicket(ticketId: string) {
       resolutionAction?: string;
       refundAmount?: number;
     }) => {
-      try {
-        let targetCollection = 'support_tickets';
-        let docRef = doc(db, targetCollection, ticketId);
-        let docSnap = await getDoc(docRef);
+      let targetCollection = 'support_tickets';
+      let docRef = doc(db, targetCollection, ticketId);
+      let docSnap = await getDoc(docRef);
 
-        if (!docSnap.exists()) {
-          targetCollection = 'tickets';
-          docRef = doc(db, targetCollection, ticketId);
-        }
+      if (!docSnap.exists()) {
+        targetCollection = 'tickets';
+        docRef = doc(db, targetCollection, ticketId);
+      }
 
-        const updateData: Record<string, any> = {
-          status,
-          resolution,
-          updatedAt: Timestamp.now(),
-        };
+      const updateData: Record<string, any> = {
+        status,
+        resolution,
+        updatedAt: Timestamp.now(),
+      };
 
-        if (assignedToTier) {
-          updateData['assignedTo.tier'] = assignedToTier;
-        }
+      if (assignedToTier) {
+        updateData['assignedTo.tier'] = assignedToTier;
+      }
 
-        if (resolutionAction) {
-          updateData.resolutionAction = resolutionAction;
-        }
+      if (resolutionAction) {
+        updateData.resolutionAction = resolutionAction;
+      }
 
-        if (refundAmount) {
-          updateData.refundAmount = refundAmount;
-        }
+      if (refundAmount) {
+        updateData.refundAmount = refundAmount;
+      }
 
-        await updateDoc(docRef, updateData);
+      await updateDoc(docRef, updateData);
 
-        // If escalated to developer team, create error snapshot
-        if (assignedToTier === 'developer_team') {
-          const snapshotId = `err_${Date.now()}_diag`;
-          await setDoc(doc(collection(db, 'dev_error_snapshots'), snapshotId), {
-            id: snapshotId,
-            source: 'tickets',
-            severity: 'high',
-            message: `Escalated ticket ${ticketId}: ${resolution || 'Operator escalated incident'}`,
-            ticketId,
-            createdAt: Timestamp.now(),
-          });
-        }
-      } catch (err) {
-        console.warn('Updated ticket locally / firestore note:', err);
+      // If escalated to developer team, create error snapshot.
+      // If this write also fails the error still propagates naturally.
+      if (assignedToTier === 'developer_team') {
+        const snapshotId = `err_${Date.now()}_diag`;
+        await setDoc(doc(collection(db, 'dev_error_snapshots'), snapshotId), {
+          id: snapshotId,
+          source: 'tickets',
+          severity: 'high',
+          message: `Escalated ticket ${ticketId}: ${resolution || 'Operator escalated incident'}`,
+          ticketId,
+          createdAt: Timestamp.now(),
+        });
       }
     },
     onSuccess: () => {
@@ -210,15 +207,11 @@ export function useTicket(ticketId: string) {
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
 
-      try {
-        const docRef = doc(db, 'support_tickets', ticketId);
-        await updateDoc(docRef, {
-          timeline: arrayUnion(event),
-          updatedAt: Timestamp.now(),
-        });
-      } catch {
-        console.warn('Appended message in memory / fallback');
-      }
+      const docRef = doc(db, 'support_tickets', ticketId);
+      await updateDoc(docRef, {
+        timeline: arrayUnion(event),
+        updatedAt: Timestamp.now(),
+      });
 
       return event;
     },
