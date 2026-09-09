@@ -42,6 +42,10 @@ const deliveryStatusFilters: { value: DeliveryFilterStatus; label: string }[] = 
   { value: 'out_for_delivery', label: 'Out for Delivery / In-Transit' },
 ];
 
+// Seed orders are DEV-only. Production renders real dispatch data or an
+// explicit loading/error/empty state — never invented customers and totals.
+const DEV_SEED_ORDERS: RichOrder[] = import.meta.env.DEV ? INITIAL_RICH_ORDERS : [];
+
 const statusColors: Record<string, string> = {
   placed: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30',
   new: 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30',
@@ -63,18 +67,35 @@ export function DeliveryQueuePage() {
   const [adminLiveOrders, setAdminLiveOrders] = useState<RichOrder[]>([]);
 
   // Hook for Firestore orders (Partner app session)
-  const { orders: partnerOrders, isLoading: partnerLoading } = useOrders();
+  const {
+    orders: partnerOrders,
+    isLoading: partnerLoading,
+    error: partnerError,
+    refetch: refetchPartnerOrders,
+  } = useOrders();
   const { admin } = useAdminAuthStore();
+
+  // Admin live listener errors surface in the UI (banner + retry affordance),
+  // never discarded to console-only while the queue renders stale data.
+  const [liveError, setLiveError] = useState<string | null>(null);
 
   // Listen for admin live orders if in admin portal or partner orders are empty
   useEffect(() => {
     const unsub = adminOrdersService.listenLiveOrders(
       null,
-      (live) => setAdminLiveOrders(live),
-      (err) => console.warn('Delivery queue live listener error:', err)
+      (live) => {
+        setAdminLiveOrders(live);
+        setLiveError(null);
+      },
+      (err) => setLiveError(err?.message || 'Live dispatch updates unavailable')
     );
     return () => unsub();
   }, []);
+
+  const retryLiveStream = () => {
+    setLiveError(null);
+    void refetchPartnerOrders();
+  };
 
   // Unify and filter orders to delivery fulfillment and active statuses
   const deliveryOrders = useMemo(() => {
@@ -87,14 +108,16 @@ export function DeliveryQueuePage() {
         const fulfillment = (o as any).fulfillment || o.orderType;
         if (fulfillment === 'delivery') {
           seenIds.add(o.id);
+          // No invented fallbacks: unknown phone/address/total render as
+          // "not provided" downstream instead of fabricated contact data.
           combined.push({
             id: o.id,
             shortCode: (o as any).shortCode || `#${o.id.slice(-6)}`,
             customerName: o.customerName || (o as any).customer?.name || 'Customer',
-            customerPhone: o.customerPhone || (o as any).customer?.phone || '+91 98765 43210',
-            address: o.deliveryAddress?.full || (o as any).deliveryAddress?.street || 'Ahmedabad',
-            status: (o.status || 'pending').toLowerCase(),
-            total: o.total || (o as any).totalAmount || 399,
+            customerPhone: o.customerPhone || (o as any).customer?.phone || '',
+            address: o.deliveryAddress?.full || (o as any).deliveryAddress?.street || '',
+            status: (o.status || 'quarantine').toLowerCase(),
+            total: o.total ?? (o as any).totalAmount ?? null,
             riderName: o.riderName,
             riderPhone: o.riderPhone,
             riderVehicleNumber: o.riderVehicleNumber,
@@ -107,9 +130,9 @@ export function DeliveryQueuePage() {
       });
     }
 
-    // 2. Ingest Admin live/seed orders
+    // 2. Ingest admin live orders, plus DEV-only seeds when both are empty.
     const sourceAdminOrders =
-      adminLiveOrders.length > 0 ? adminLiveOrders : INITIAL_RICH_ORDERS;
+      adminLiveOrders.length > 0 ? adminLiveOrders : DEV_SEED_ORDERS;
 
     sourceAdminOrders.forEach((o) => {
       const fulfillment = (o.fulfillment || '').toLowerCase();
@@ -121,15 +144,17 @@ export function DeliveryQueuePage() {
         combined.push({
           id: o.id,
           shortCode: o.shortCode || `#${o.id.slice(-6)}`,
-          customerName: o.customerEmail ? o.customerEmail.split('@')[0] : 'Aarav Mehta',
-          customerPhone: o.deliveryPartner?.phone || '+91 98112 00392',
-          address: o.fulfillmentInstructions || 'Satellite Road, Ahmedabad',
+          customerName: o.customerEmail ? o.customerEmail.split('@')[0] : 'Customer',
+          customerPhone: o.deliveryPartner?.phone || '',
+          address: o.fulfillmentInstructions || '',
           status: mappedStatus,
-          total: (o as any).totalAmount || (o as any).total || 499,
+          total: (o as any).totalAmount ?? (o as any).total ?? null,
           riderName: o.deliveryPartner?.name,
           riderPhone: o.deliveryPartner?.phone,
           riderVehicleNumber: o.deliveryPartner?.vehicleNumber,
-          riderTrackingUrl: `https://maps.google.com/?q=${encodeURIComponent(o.fulfillmentInstructions || 'Ahmedabad')}`,
+          // Only a real rider-provided tracking URL is linked. The old code
+          // fabricated a Maps search URL per order — removed.
+          riderTrackingUrl: (o as any).riderTrackingUrl,
           items: o.items || [],
           storeName: o.store?.name || 'Burgonomics Prahladnagar',
           createdAt: o.placedAt ? new Date(o.placedAt) : new Date(),
@@ -340,10 +365,52 @@ export function DeliveryQueuePage() {
         </button>
       </div>
 
+      {/* Live-stream error banner: surfaced, never discarded. Data below may
+          be stale while the listener is down. */}
+      {liveError && (
+        <div
+          role="alert"
+          className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center gap-2 justify-between"
+        >
+          <p className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+            Live dispatch updates unavailable ({liveError}). Showing last known data.
+          </p>
+          <button
+            type="button"
+            onClick={retryLiveStream}
+            className="px-3.5 py-2 rounded-xl bg-amber-500 text-white text-xs font-bold hover:bg-amber-600 transition-colors cursor-pointer shrink-0"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Orders List */}
-      {partnerLoading && deliveryOrders.length === 0 ? (
-        <div className="flex justify-center py-16">
+      {partnerLoading && deliveryOrders.length === 0 && !partnerError ? (
+        <div className="flex justify-center py-16" aria-busy="true" aria-label="Loading delivery queue">
           <Spinner size="lg" />
+        </div>
+      ) : partnerError && deliveryOrders.length === 0 ? (
+        <div
+          role="alert"
+          className="bg-surface rounded-2xl border border-rose-500/30 p-12 text-center space-y-3"
+        >
+          <div className="w-12 h-12 rounded-full bg-rose-500/10 text-rose-500 flex items-center justify-center mx-auto">
+            <AlertTriangle className="w-6 h-6" />
+          </div>
+          <h3 className="text-base font-bold text-text-primary">
+            Delivery queue failed to load
+          </h3>
+          <p className="text-xs text-text-secondary max-w-sm mx-auto">
+            {(partnerError as Error)?.message || 'Check connection and permissions, then retry.'}
+          </p>
+          <button
+            type="button"
+            onClick={() => refetchPartnerOrders()}
+            className="px-4 py-2 rounded-xl bg-primary text-white font-bold text-xs cursor-pointer"
+          >
+            Retry
+          </button>
         </div>
       ) : deliveryOrders.length === 0 ? (
         <div className="bg-surface rounded-2xl border border-border p-12 text-center space-y-3">
@@ -351,11 +418,28 @@ export function DeliveryQueuePage() {
             <Bike className="w-6 h-6" />
           </div>
           <h3 className="text-base font-bold text-text-primary">
-            No delivery orders matching current filters
+            {statusFilter !== 'all' || searchQuery.trim() || unassignedOnly
+              ? 'No delivery orders match these filters'
+              : 'No active delivery orders'}
           </h3>
           <p className="text-xs text-text-secondary max-w-sm mx-auto">
-            New customer orders with delivery fulfillment will appear here in real-time as they are placed.
+            {statusFilter !== 'all' || searchQuery.trim() || unassignedOnly
+              ? 'Try widening the status filter or clearing the search.'
+              : 'New customer orders with delivery fulfillment will appear here in real-time as they are placed.'}
           </p>
+          {(statusFilter !== 'all' || searchQuery.trim() || unassignedOnly) && (
+            <button
+              type="button"
+              onClick={() => {
+                setStatusFilter('all');
+                setSearchQuery('');
+                setUnassignedOnly(false);
+              }}
+              className="px-4 py-2 rounded-xl bg-surface border border-border text-xs font-bold text-text-secondary hover:text-text-primary cursor-pointer"
+            >
+              Clear filters
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -386,7 +470,7 @@ export function DeliveryQueuePage() {
                     </div>
 
                     <span className="text-sm font-black text-primary">
-                      ₹{order.total?.toLocaleString()}
+                      {typeof order.total === 'number' ? `₹${order.total?.toLocaleString()}` : '—'}
                     </span>
                   </div>
 
@@ -396,17 +480,23 @@ export function DeliveryQueuePage() {
                       <span className="font-bold text-text-primary">
                         {order.customerName}
                       </span>
-                      <a
-                        href={`tel:${order.customerPhone}`}
-                        className="text-primary hover:underline font-semibold flex items-center gap-1"
-                      >
-                        <Phone className="w-3 h-3" />
-                        <span>{order.customerPhone}</span>
-                      </a>
+                      {order.customerPhone ? (
+                        <a
+                          href={`tel:${order.customerPhone}`}
+                          className="text-primary hover:underline font-semibold flex items-center gap-1"
+                        >
+                          <Phone className="w-3 h-3" />
+                          <span>{order.customerPhone}</span>
+                        </a>
+                      ) : (
+                        <span className="text-text-secondary text-[11px]">Phone not provided</span>
+                      )}
                     </div>
                     <div className="flex items-start gap-1.5 text-text-secondary text-[11px]">
                       <MapPin className="w-3.5 h-3.5 shrink-0 mt-0.5 text-text-secondary" />
-                      <span className="line-clamp-2 leading-relaxed">{order.address}</span>
+                      <span className="line-clamp-2 leading-relaxed">
+                        {order.address || 'Address not provided'}
+                      </span>
                     </div>
                   </div>
 
@@ -434,7 +524,7 @@ export function DeliveryQueuePage() {
                         </p>
                         <p className="text-[10px] text-text-secondary truncate">
                           {hasRider
-                            ? `${order.riderVehicleNumber || 'GJ-01-BK-4092'} • ${order.riderPhone}`
+                            ? `${order.riderVehicleNumber || 'Vehicle —'} • ${order.riderPhone || 'no phone'}`
                             : 'Requires Porter or Store Rider'}
                         </p>
                       </div>

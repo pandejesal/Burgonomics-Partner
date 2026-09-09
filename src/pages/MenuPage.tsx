@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useBranchMenu } from '@/features/menu/hooks/useBranchMenu';
 import { useAuthStore } from '@/stores/authStore';
 import { MenuItemToggleRow } from '@/features/menu/components/MenuItemToggleRow';
@@ -43,6 +43,14 @@ export function MenuPage() {
   const [eightSixTargetItem, setEightSixTargetItem] = useState<MenuItem | null>(null);
   const [showComboDrawer, setShowComboDrawer] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  // App↔POS divergence: the Firestore write landed but the Petpooja push did
+  // not (or was skipped for an unlinked item). Shown until a retry succeeds.
+  const [posDivergence, setPosDivergence] = useState<{
+    itemId: string;
+    itemName: string;
+    isAvailable: boolean;
+    reason: 'push-failed' | 'unlinked';
+  } | null>(null);
 
   const canEdit =
     user?.role === 'brand_owner' ||
@@ -50,9 +58,21 @@ export function MenuPage() {
     user?.role === 'branch_owner';
 
   const showToast = (msg: string) => {
+    // Single toast at a time: each action replaces the previous message so
+    // rapid taps can't stack duplicate success toasts.
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 4000);
   };
+
+  // Auto-dismiss the single toast; the timer resets on every new message.
+  const toastTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (!toastMessage) return;
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToastMessage(null), 4000);
+    return () => {
+      if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    };
+  }, [toastMessage]);
 
   const handleManualSync = async () => {
     try {
@@ -66,6 +86,27 @@ export function MenuPage() {
     }
   };
 
+  const notePosOutcome = (
+    item: MenuItem,
+    isAvailable: boolean,
+    outcome: { posSynced: boolean; posSkipped: boolean }
+  ) => {
+    if (outcome.posSynced) {
+      if (posDivergence?.itemId === item.id) setPosDivergence(null);
+      showToast(
+        isAvailable
+          ? `${item.name} is now back IN STOCK on customer app & POS`
+          : `${item.name} marked 86ed — customer app & POS updated`
+      );
+    } else if (outcome.posSkipped) {
+      setPosDivergence({ itemId: item.id, itemName: item.name, isAvailable, reason: 'unlinked' });
+      showToast(`${item.name} saved in app — no POS item linked, POS unchanged.`);
+    } else {
+      setPosDivergence({ itemId: item.id, itemName: item.name, isAvailable, reason: 'push-failed' });
+      showToast(`${item.name} saved in app — POS push failed, divergence flagged below.`);
+    }
+  };
+
   const handleToggleStock = async (item: MenuItem) => {
     const isCurrentlyAvailable = item.isAvailable ?? item.inStock ?? true;
     if (isCurrentlyAvailable) {
@@ -75,8 +116,8 @@ export function MenuPage() {
     }
     // Re-enable item immediately — toast only after the write lands.
     try {
-      await toggleAvailability.mutateAsync({ itemId: item.id, isAvailable: true });
-      showToast(`${item.name} is now back IN STOCK on customer app & POS`);
+      const outcome = await toggleAvailability.mutateAsync({ itemId: item.id, isAvailable: true });
+      notePosOutcome(item, true, outcome);
     } catch (err) {
       console.error('Re-enable failed:', err);
       showToast(`Could not re-enable ${item.name} — no changes were made.`);
@@ -84,15 +125,34 @@ export function MenuPage() {
   };
 
   const handleConfirm86 = async (itemId: string, duration: EightSixDuration, reason: string) => {
+    const item = items?.find((i) => i.id === itemId);
     try {
-      await markItem86.mutateAsync({ itemId, duration, reason });
-      showToast('Item marked out of stock on customer app & POS');
+      const outcome = await markItem86.mutateAsync({ itemId, duration, reason });
+      if (item) notePosOutcome(item, false, outcome);
+      else showToast('Item marked out of stock');
     } catch (err) {
       console.error('86-ing failed:', err);
       showToast('Could not update stock — no changes were made.');
     }
-    const item = items?.find((i) => i.id === itemId);
-    showToast(`${item?.name || 'Item'} marked 86ed (${duration.replace('_', ' ')})`);
+  };
+
+  const handleRetryPosPush = async () => {
+    if (!posDivergence) return;
+    const item = items?.find((i) => i.id === posDivergence.itemId);
+    if (!item) {
+      setPosDivergence(null);
+      return;
+    }
+    try {
+      const outcome = await toggleAvailability.mutateAsync({
+        itemId: item.id,
+        isAvailable: posDivergence.isAvailable,
+      });
+      notePosOutcome(item, posDivergence.isAvailable, outcome);
+    } catch (err) {
+      console.error('POS retry failed:', err);
+      showToast('POS retry failed — app state unchanged, divergence kept.');
+    }
   };
 
   const filteredItems = (items || []).filter((item) => {
@@ -196,6 +256,42 @@ export function MenuPage() {
           </button>
         </div>
       </div>
+
+      {/* App↔POS divergence banner: the app write landed but the POS does
+          not match. Dismissable only via a successful retry. */}
+      {posDivergence && (
+        <div
+          role="alert"
+          className="flex flex-col sm:flex-row sm:items-center gap-2 justify-between bg-amber-950/60 border border-amber-800 rounded-2xl p-4"
+        >
+          <p className="text-xs text-amber-200">
+            <span className="font-bold">POS divergence:</span> {posDivergence.itemName} is{' '}
+            {posDivergence.isAvailable ? 'IN STOCK' : '86ed'} in the app but{' '}
+            {posDivergence.reason === 'unlinked'
+              ? 'has no linked POS item, so the POS was not updated.'
+              : 'the POS push failed, so the POS may still show the old state.'}
+          </p>
+          <div className="flex items-center gap-2 shrink-0">
+            {posDivergence.reason === 'push-failed' && (
+              <button
+                type="button"
+                onClick={handleRetryPosPush}
+                disabled={toggleAvailability.isPending}
+                className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-bold text-xs cursor-pointer"
+              >
+                {toggleAvailability.isPending ? 'Retrying…' : 'Retry POS push'}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setPosDivergence(null)}
+              className="px-3.5 py-2 rounded-xl border border-amber-800 text-amber-200 font-bold text-xs cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Search Bar & Filters */}
       <div className="flex flex-col sm:flex-row gap-3 items-center justify-between bg-[#112415] p-3 rounded-2xl border border-[#1E3A24]">

@@ -41,16 +41,22 @@ export function KDSOrderCard({
   const isTakeaway = orderType === 'takeaway';
   const isDineIn = orderType === 'dinein';
 
-  // Check if all items on ticket are checked off
+  // Check if all items on ticket are checked off. An order with no item
+  // lines has nothing to verify, so it counts as complete (otherwise the
+  // bump would brick with no way to clear it).
   const allItemsChecked =
-    order.items && order.items.length > 0
-      ? order.items.every((_, idx) => !!checkedItems[`${order.id}_${idx}`])
-      : false;
+    !order.items || order.items.length === 0
+      ? true
+      : order.items.every((_, idx) => !!checkedItems[`${order.id}_${idx}`]);
 
   // Determine bump action based on current status
   const isPending = order.status === 'pending' || (order.status as any) === 'placed';
   const isPreparing = order.status === 'preparing' || order.status === 'accepted';
   const isReady = order.status === 'ready' || (order.status as any) === 'ready_for_pickup';
+
+  // The preparing → ready bump certifies the food is packed: it stays locked
+  // until every item line is checked. Other transitions need no checklist.
+  const bumpGated = isPreparing && !allItemsChecked;
 
   const handleBump = () => {
     if (isPending) {
@@ -209,10 +215,17 @@ export function KDSOrderCard({
         <button
           type="button"
           onClick={handleBump}
-          disabled={isBumping}
+          disabled={isBumping || bumpGated}
           aria-busy={isBumping}
-          className={`w-full h-14 min-h-[56px] rounded-xl font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98] cursor-pointer ${
-            isPending
+          title={bumpGated ? 'Check every item line before marking ready' : undefined}
+          className={`w-full h-14 min-h-[56px] rounded-xl font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 shadow-md transition-all active:scale-[0.98] ${
+            isBumping || bumpGated
+              ? 'cursor-not-allowed'
+              : 'cursor-pointer'
+          } ${
+            bumpGated
+              ? 'bg-neutral-800 text-neutral-500 border border-neutral-700'
+              : isPending
               ? 'bg-[#0E4825] hover:bg-[#135d30] text-emerald-300 border border-emerald-500/50 shadow-emerald-950/50 animate-pulse'
               : isPreparing
               ? 'bg-[#FF6600] hover:bg-[#e05a00] text-white shadow-orange-950/50'
@@ -230,7 +243,7 @@ export function KDSOrderCard({
             <>
               <Flame className="w-5 h-5 stroke-[2.5]" />
               <span>
-                {allItemsChecked ? 'Mark Food Ready ✓' : 'Mark Food Ready / Packed'}
+                {bumpGated ? 'Check All Items to Mark Ready' : 'Mark Food Ready / Packed'}
               </span>
             </>
           )}

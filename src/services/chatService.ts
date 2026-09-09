@@ -52,7 +52,8 @@ export const chatService = {
     userId: string,
     userRole: UserRole,
     branchIds: string[],
-    callback: (threads: ChatThread[]) => void
+    callback: (threads: ChatThread[]) => void,
+    onError?: (message: string) => void
   ): Unsubscribe {
     const chatsRef = collection(db, 'chats');
 
@@ -86,7 +87,9 @@ export const chatService = {
       },
       (error) => {
         console.error('Error fetching chat threads:', error);
-        callback([]);
+        // Listener death is an error, never an empty list: keep existing
+        // data on screen and let the caller render the failure.
+        onError?.(error?.message || 'Chat threads failed to load');
       }
     );
   },
@@ -96,7 +99,8 @@ export const chatService = {
    */
   subscribeToMessages(
     chatId: string,
-    callback: (messages: ChatMessage[]) => void
+    callback: (messages: ChatMessage[]) => void,
+    onError?: (message: string) => void
   ): Unsubscribe {
     const messagesRef = collection(db, 'chats', chatId, 'messages');
     // Latest 50 only: the old code subscribed to the thread's ENTIRE history
@@ -117,7 +121,8 @@ export const chatService = {
       },
       (error) => {
         console.error(`Error fetching messages for chat ${chatId}:`, error);
-        callback([]);
+        // Listener death is an error, never an empty list.
+        onError?.(error?.message || 'Messages failed to load');
       }
     );
   },

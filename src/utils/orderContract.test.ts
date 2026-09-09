@@ -74,8 +74,35 @@ describe('orderContract — Partner ↔ Delivery interop', () => {
     expect(orderDocTimeMs({})).toBe(0);
   });
 
-  it('emits delivery meta the customer app resolves', () => {
-    expect(toDeliveryStatusMeta('preparing')).toMatchObject({
+  it('quarantines unknown statuses instead of fail-open pending', () => {
+    expect(toPartnerStatus('SOME_FUTURE_STATE')).toBe('quarantine');
+    expect(toPartnerStatus({ code: 'WEIRD' })).toBe('quarantine');
+    expect(toPartnerStatus(null)).toBe('quarantine');
+    expect(toPartnerStatus('quarantine')).toBe('quarantine');
+
+    const order = normalizeOrderDoc('ord_q', {
+      store: { id: 'str_001' },
+      status: { code: 'WEIRD' },
+      totals: { grandTotal: 100 },
+      items: [],
+    });
+    expect(order.status).toBe('quarantine');
+    expect(order.quarantineReason).toMatch(/WEIRD/);
+  });
+
+  it('quarantines corrupt docs with a reason instead of fresh work', () => {
+    const order = normalizeOrderDoc('ord_corrupt', {
+      store: { id: 'str_001' },
+      status: { code: 'PLACED' },
+      totals: { grandTotal: 100 },
+      items: 'not-a-list',
+    });
+    expect(order.status).toBe('quarantine');
+    expect(order.quarantineReason).toMatch(/malformed items/);
+    expect(order.items).toEqual([]);
+  });
+
+  it('emits delivery meta the customer app resolves', () => {    expect(toDeliveryStatusMeta('preparing')).toMatchObject({
       code: 'PREPARING',
       kind: 'in_progress',
       terminal: false,

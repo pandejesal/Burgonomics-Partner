@@ -10,6 +10,10 @@ export function useChats() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loadingThreads, setLoadingThreads] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  // Listener failures are error states with the last known data kept —
+  // never a silent empty list.
+  const [threadsError, setThreadsError] = useState<string | null>(null);
+  const [messagesError, setMessagesError] = useState<string | null>(null);
 
   // Subscribe to threads
   useEffect(() => {
@@ -25,12 +29,17 @@ export function useChats() {
       user.branchIds || [],
       (fetchedThreads) => {
         setThreads(fetchedThreads);
+        setThreadsError(null);
         setLoadingThreads(false);
 
         // Auto-select first thread if none selected
         if (!activeThreadId && fetchedThreads.length > 0) {
           setActiveThreadId(fetchedThreads[0].id);
         }
+      },
+      (message) => {
+        setThreadsError(message);
+        setLoadingThreads(false);
       }
     );
 
@@ -45,14 +54,25 @@ export function useChats() {
     }
 
     setLoadingMessages(true);
-    const unsubscribe = chatService.subscribeToMessages(activeThreadId, (newMessages) => {
-      setMessages(newMessages);
-      setLoadingMessages(false);
-    });
+    setMessagesError(null);
+    const unsubscribe = chatService.subscribeToMessages(
+      activeThreadId,
+      (newMessages) => {
+        setMessages(newMessages);
+        setMessagesError(null);
+        setLoadingMessages(false);
+      },
+      (message) => {
+        setMessagesError(message);
+        setLoadingMessages(false);
+      }
+    );
 
     return () => unsubscribe();
   }, [activeThreadId]);
 
+  // Offline send keeps the failure visible to the caller: the composer holds
+  // the text and shows a queued/retry state instead of dropping it.
   const sendMessage = async (text: string, imageUrl?: string) => {
     if (!user || !activeThreadId || (!text.trim() && !imageUrl)) return;
 
@@ -106,6 +126,8 @@ export function useChats() {
     messages,
     loadingThreads,
     loadingMessages,
+    threadsError,
+    messagesError,
     sendMessage,
     createOrOpenBranchChannel,
     createOrOpenDirectDm,

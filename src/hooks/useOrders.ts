@@ -38,7 +38,7 @@ export function useOrders(params: UseOrdersParams = {}) {
   const { selectedCity, selectedBranchId } = useAppStore();
   const queryClient = useQueryClient();
 
-  const { data: orders = [], isLoading, error, refetch } = useQuery({
+  const { data: orders = [], isLoading, error, refetch, dataUpdatedAt } = useQuery({
     queryKey: ['orders', user?.id, user?.role, selectedCity, selectedBranchId, params],
     queryFn: async (): Promise<Order[]> => {
       try {
@@ -503,5 +503,5 @@ export function useOrders(params: UseOrdersParams = {}) {
     },
   });
 
-  return { orders, isLoading, error, refetch, updateOrderStatus, simulateOrder };
+  return { orders, isLoading, error, refetch, dataUpdatedAt, updateOrderStatus, simulateOrder };
 }

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useBranches } from '@/hooks/useBranches';
 import { useAuthStore } from '@/stores/authStore';
+import { scopeTruncationNotice } from '@/utils/branchScope';
 import { AddFutureStoreModal } from '@/components/stores/AddFutureStoreModal';
 import { BranchSettingsModal } from '@/components/stores/BranchSettingsModal';
 import {
@@ -39,6 +40,15 @@ export function BranchesPage() {
 
   const isGlobalRole =
     user?.role === 'brand_owner' || user?.role === 'developer' || user?.role === 'support';
+
+  // Firestore `in` queries cap at 10 branches: scoped roles with wider
+  // assignments must see the truncation, never a silently partial network.
+  const truncationNotice =
+    !isGlobalRole && user?.role !== 'regional_manager'
+      ? scopeTruncationNotice(user?.branchIds ?? [])
+      : null;
+  const hasNoAssignment =
+    !isGlobalRole && user?.role !== 'regional_manager' && (user?.branchIds?.length ?? 0) === 0;
 
   const canEditBranch = (branchId: string) => {
     if (isGlobalRole) return true;
@@ -93,6 +103,17 @@ export function BranchesPage() {
         )}
       </div>
 
+      {/* 10-branch scoped-read cap: surfaced, never silently dropped. */}
+      {truncationNotice && (
+        <div
+          role="note"
+          className="flex items-start gap-2 bg-amber-950/40 border border-amber-800/60 rounded-2xl p-4 text-[11px] text-amber-200"
+        >
+          <span className="font-bold shrink-0">Heads up:</span>
+          <span>{truncationNotice}</span>
+        </div>
+      )}
+
       {/* Filter Tabs */}
       <div className="flex items-center space-x-2 border-b border-[#1E3A24] pb-3">
         <button
@@ -131,6 +152,16 @@ export function BranchesPage() {
       {/* Content Grid */}
       {isLoading ? (
         <div className="p-16 text-center text-zinc-400 text-xs">Loading store network...</div>
+      ) : hasNoAssignment ? (
+        <div className="text-center py-16 bg-[#132A17] rounded-2xl border border-[#234B2A] p-8 space-y-3">
+          <Store className="w-12 h-12 mx-auto text-zinc-600" />
+          <h3 className="font-semibold text-white text-sm">No outlets assigned to you</h3>
+          <p className="text-xs text-zinc-400 max-w-sm mx-auto">
+            Your account has no branch assignments, so there is nothing to show — this is
+            an empty assignment, not an empty network. Contact your brand owner to get
+            assigned.
+          </p>
+        </div>
       ) : filteredBranches.length === 0 ? (
         <div className="text-center py-16 bg-[#132A17] rounded-2xl border border-[#234B2A] p-8 space-y-3">
           <Store className="w-12 h-12 mx-auto text-zinc-600" />

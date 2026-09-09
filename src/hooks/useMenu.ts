@@ -166,6 +166,8 @@ export function useMenu() {
   // Toggle item 86-ing / availability on the canonical `products` doc, then
   // propagate to the physical Petpooja POS (best-effort — Firestore write is
   // the instant UX, POS push is reconciled by the retry worker on failure).
+  // Resolves with the POS-push outcome so callers can show 86-divergence
+  // instead of toasting success on a failed push.
   const toggleAvailability = useMutation({
     mutationFn: async ({
       itemId,
@@ -173,7 +175,7 @@ export function useMenu() {
     }: {
       itemId: string;
       available: boolean;
-    }) => {
+    }): Promise<{ posSynced: boolean; posSkipped: boolean }> => {
       if (!branchId) throw new Error('No branch selected');
 
       const itemRef = doc(db, 'products', itemId);
@@ -193,12 +195,14 @@ export function useMenu() {
         // Never push a Firestore doc id to the POS as an item id — the KOT
         // side would 86 the wrong item (or nothing) with a success response.
         console.warn(`[useMenu] No petpoojaItemId for ${itemId} — POS push skipped`);
-        return;
+        return { posSynced: false, posSkipped: true };
       }
       try {
         await partnerFunctionsApi.syncItemStock(branchId, petpoojaItemId, available);
+        return { posSynced: true, posSkipped: false };
       } catch (err) {
         console.warn('[useMenu] Petpooja stock push failed (Firestore state kept):', err);
+        return { posSynced: false, posSkipped: false };
       }
     },
     onSuccess: () => {

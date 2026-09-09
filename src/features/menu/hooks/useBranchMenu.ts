@@ -24,23 +24,35 @@ import type { MenuItem } from '@/types';
  * for both apps). Availability changes also propagate to the physical
  * Petpooja POS best-effort — Firestore state is the instant UX either way.
  */
+/**
+ * Result of the best-effort Petpooja POS push. Firestore is always written
+ * first (instant UX); a failed or skipped push is divergence the UI must
+ * show — never a console-only warning behind a success toast.
+ */
+export interface PosPushResult {
+  posSynced: boolean;
+  posSkipped: boolean;
+}
+
 async function pushStock(
   branchId: string,
   items: MenuItem[] | undefined,
   itemId: string,
   inStock: boolean
-) {
+): Promise<PosPushResult> {
   const petpoojaItemId = items?.find((i) => i.id === itemId)?.petpoojaItemId;
   if (!petpoojaItemId) {
     // Never push a Firestore doc id to the POS as an item id — the KOT side
     // would 86 the wrong item (or nothing) with a success response.
     console.warn(`[useBranchMenu] No petpoojaItemId for ${itemId} — POS push skipped`);
-    return;
+    return { posSynced: false, posSkipped: true };
   }
   try {
     await partnerFunctionsApi.syncItemStock(branchId, petpoojaItemId, inStock);
+    return { posSynced: true, posSkipped: false };
   } catch (err) {
     console.warn('[useBranchMenu] Petpooja stock push failed (Firestore state kept):', err);
+    return { posSynced: false, posSkipped: false };
   }
 }
 
@@ -78,7 +90,7 @@ export function useBranchMenu() {
       await updateDoc(itemRef, payload).catch(async () => {
         await setDoc(itemRef, { ...payload, branchId }, { merge: true });
       });
-      await pushStock(branchId, baseMenu.items, itemId, activeState);
+      return pushStock(branchId, baseMenu.items, itemId, activeState);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['menuItems', branchId] });
@@ -119,7 +131,7 @@ export function useBranchMenu() {
       await updateDoc(itemRef, payload).catch(async () => {
         await setDoc(itemRef, { ...payload, branchId }, { merge: true });
       });
-      await pushStock(branchId, baseMenu.items, itemId, false);
+      return pushStock(branchId, baseMenu.items, itemId, false);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['menuItems', branchId] });
@@ -161,9 +173,14 @@ export function useBranchMenu() {
         );
       });
       await batch.commit();
+      let synced = true;
+      let skipped = false;
       for (const d of snap.docs) {
-        await pushStock(branchId, baseMenu.items, d.id, isAvailable);
+        const r = await pushStock(branchId, baseMenu.items, d.id, isAvailable);
+        if (!r.posSynced) synced = false;
+        if (r.posSkipped) skipped = true;
       }
+      return { posSynced: synced, posSkipped: skipped } satisfies PosPushResult;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['menuItems', branchId] });

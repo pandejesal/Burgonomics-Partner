@@ -27,12 +27,18 @@ export const ChatPage: React.FC = () => {
     messages,
     loadingThreads,
     loadingMessages,
+    threadsError,
+    messagesError,
     sendMessage,
     createOrOpenBranchChannel,
     createOrOpenDirectDm,
   } = useChats();
 
   const [inputMessage, setInputMessage] = useState('');
+  // A send that failed (offline or write error) keeps its text here with a
+  // queued state and a retry action — never silently dropped.
+  const [queuedMessage, setQueuedMessage] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
   const [activeTab, setActiveTab] = useState<'channels' | 'direct'>('channels');
   const [searchQuery, setSearchQuery] = useState('');
   const [showMobileList, setShowMobileList] = useState(true);
@@ -43,12 +49,23 @@ export const ChatPage: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputMessage.trim()) return;
-    const text = inputMessage;
-    setInputMessage('');
-    await sendMessage(text);
+  const handleSend = async (e?: { preventDefault(): void }) => {
+    e?.preventDefault();
+    const text = (queuedMessage ?? inputMessage).trim();
+    if (!text || sending) return;
+    // Clear the queued banner but hold the text until the write lands.
+    setQueuedMessage(null);
+    setSending(true);
+    try {
+      await sendMessage(text);
+      setInputMessage('');
+    } catch {
+      // Offline or write failure: keep the text and offer retry.
+      setQueuedMessage(text);
+      if (!inputMessage) setInputMessage(text);
+    } finally {
+      setSending(false);
+    }
   };
 
   const getRoleBadge = (role: UserRole) => {
@@ -186,6 +203,14 @@ export const ChatPage: React.FC = () => {
           <div className="flex-1 overflow-y-auto divide-y divide-[#1A3320]">
             {loadingThreads ? (
               <div className="p-8 text-center text-xs text-zinc-500">Loading channels...</div>
+            ) : threadsError ? (
+              <div role="alert" className="p-8 text-center space-y-2">
+                <p className="text-xs text-rose-300 font-semibold">Channels failed to load</p>
+                <p className="text-[11px] text-zinc-500">{threadsError}</p>
+                <p className="text-[11px] text-zinc-500">
+                  Showing last known threads. Check connection and reopen chat to retry.
+                </p>
+              </div>
             ) : filteredThreads.length === 0 ? (
               <div className="p-8 text-center space-y-2">
                 <p className="text-xs text-zinc-400">No active threads found.</p>
@@ -194,25 +219,17 @@ export const ChatPage: React.FC = () => {
                     ? 'Branch channels will appear when operational messages are sent.'
                     : 'Start a 1:1 conversation with Brand Owners, Developers or Support.'}
                 </p>
-                {/* Fallback default rooms */}
-                <div className="pt-4 flex flex-col space-y-2">
+                {/* Branch-scoped quick join: only the user's own outlets, never
+                    hardcoded cross-outlet rooms. */}
+                {(user?.branchIds?.length ? user.branchIds : []).map((branchId) => (
                   <button
-                    onClick={() =>
-                      createOrOpenBranchChannel('branch_surat_01', 'Surat Adajan Hub')
-                    }
-                    className="px-3 py-1.5 text-xs bg-[#132A17] hover:bg-[#1E3A24] border border-[#234B2A] text-zinc-300 rounded-lg text-left"
+                    key={branchId}
+                    onClick={() => createOrOpenBranchChannel(branchId, branchId)}
+                    className="px-3 py-1.5 text-xs bg-[#132A17] hover:bg-[#1E3A24] border border-[#234B2A] text-zinc-300 rounded-lg text-left w-full"
                   >
-                    + Join Surat Adajan Hub
+                    + Open {branchId} channel
                   </button>
-                  <button
-                    onClick={() =>
-                      createOrOpenBranchChannel('branch_ahmedabad_01', 'Ahmedabad SG Hub')
-                    }
-                    className="px-3 py-1.5 text-xs bg-[#132A17] hover:bg-[#1E3A24] border border-[#234B2A] text-zinc-300 rounded-lg text-left"
-                  >
-                    + Join Ahmedabad SG Hub
-                  </button>
-                </div>
+                ))}
               </div>
             ) : (
               filteredThreads.map((thread) => {
@@ -313,6 +330,14 @@ export const ChatPage: React.FC = () => {
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 {loadingMessages ? (
                   <div className="p-8 text-center text-xs text-zinc-500">Loading messages...</div>
+                ) : messagesError ? (
+                  <div role="alert" className="p-8 text-center space-y-2">
+                    <p className="text-xs text-rose-300 font-semibold">Messages failed to load</p>
+                    <p className="text-[11px] text-zinc-500">{messagesError}</p>
+                    <p className="text-[11px] text-zinc-500">
+                      Last known messages are shown. Reopen this thread to retry.
+                    </p>
+                  </div>
                 ) : messages.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-2">
                     <div className="p-4 rounded-full bg-[#132A17] text-[#D95D0F]">
@@ -369,6 +394,26 @@ export const ChatPage: React.FC = () => {
                 <div ref={messagesEndRef} />
               </div>
 
+              {/* Queued (unsent) message banner with retry */}
+              {queuedMessage && (
+                <div
+                  role="alert"
+                  className="mx-4 mb-2 p-3 bg-amber-950/60 border border-amber-800 rounded-xl flex items-center justify-between gap-2"
+                >
+                  <p className="text-[11px] text-amber-200">
+                    Message not sent — kept below. Check connection, then retry.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void handleSend()}
+                    disabled={sending}
+                    className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-[11px] font-bold shrink-0"
+                  >
+                    {sending ? 'Sending…' : 'Retry send'}
+                  </button>
+                </div>
+              )}
+
               {/* Message Composer Bar */}
               <form
                 onSubmit={handleSend}
@@ -378,12 +423,16 @@ export const ChatPage: React.FC = () => {
                   type="text"
                   placeholder={`Message ${activeThread.title}...`}
                   value={inputMessage}
-                  onChange={(e) => setInputMessage(e.target.value)}
+                  onChange={(e) => {
+                    setInputMessage(e.target.value);
+                    if (queuedMessage === null) return;
+                    if (e.target.value !== queuedMessage) setQueuedMessage(null);
+                  }}
                   className="flex-1 px-4 py-2.5 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-[#D95D0F]"
                 />
                 <button
                   type="submit"
-                  disabled={!inputMessage.trim()}
+                  disabled={!inputMessage.trim() || sending}
                   className="p-2.5 bg-[#D95D0F] hover:bg-[#b84d0b] disabled:opacity-50 text-white rounded-xl transition-colors shadow-sm flex items-center justify-center"
                 >
                   <Send className="w-4 h-4" />
