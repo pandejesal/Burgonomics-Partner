@@ -32,26 +32,77 @@ export const RaiseTicketModal: React.FC<RaiseTicketModalProps> = ({
   const [priority, setPriority] = useState<TicketPriority>('high');
   const [message, setMessage] = useState('');
   const [attachmentUrl, setAttachmentUrl] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<{ title?: string; message?: string; attachmentUrl?: string }>({});
+  const [submitError, setSubmitError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!isOpen) return null;
 
+  const TITLE_MIN = 8;
+  const TITLE_MAX = 120;
+  const MESSAGE_MIN = 20;
+  const MESSAGE_MAX = 2000;
+
+  function validateFields(): { title?: string; message?: string; attachmentUrl?: string } {
+    const errors: { title?: string; message?: string; attachmentUrl?: string } = {};
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
+      errors.title = 'Issue summary is required.';
+    } else if (trimmedTitle.length < TITLE_MIN) {
+      errors.title = `Issue summary must be at least ${TITLE_MIN} characters.`;
+    } else if (trimmedTitle.length > TITLE_MAX) {
+      errors.title = `Issue summary must be at most ${TITLE_MAX} characters.`;
+    }
+    const trimmedMessage = message.trim();
+    if (!trimmedMessage) {
+      errors.message = 'Detailed description is required.';
+    } else if (trimmedMessage.length < MESSAGE_MIN) {
+      errors.message = `Description must be at least ${MESSAGE_MIN} characters so triage can act on it.`;
+    } else if (trimmedMessage.length > MESSAGE_MAX) {
+      errors.message = `Description must be at most ${MESSAGE_MAX} characters.`;
+    }
+    const trimmedUrl = attachmentUrl.trim();
+    if (trimmedUrl) {
+      let parsed: URL | null = null;
+      try {
+        parsed = new URL(trimmedUrl);
+      } catch {
+        parsed = null;
+      }
+      if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) {
+        errors.attachmentUrl = 'Attachment must be a valid http(s) URL.';
+      }
+    }
+    return errors;
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !message.trim()) {
-      alert('Please fill out the ticket summary and description');
-      return;
-    }
+    if (isSubmitting || loading) return;
+    const errors = validateFields();
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) return;
 
-    await onSubmit({
-      title: title.trim(),
-      category,
-      priority,
-      message: message.trim(),
-      branchId: defaultBranchId,
-      branchName: defaultBranchName,
-      attachments: attachmentUrl.trim() ? [attachmentUrl.trim()] : [],
-    });
-    onClose();
+    setSubmitError('');
+    setIsSubmitting(true);
+    try {
+      await onSubmit({
+        title: title.trim(),
+        category,
+        priority,
+        message: message.trim(),
+        branchId: defaultBranchId,
+        branchName: defaultBranchName,
+        attachments: attachmentUrl.trim() ? [attachmentUrl.trim()] : [],
+      });
+      // Close ONLY on success — on failure the draft is preserved and the
+      // modal stays open with an inline error (never an unconditional close).
+      onClose();
+    } catch {
+      setSubmitError('Could not dispatch ticket — check connection and retry. Your draft is preserved.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -89,9 +140,18 @@ export const RaiseTicketModal: React.FC<RaiseTicketModalProps> = ({
               required
               placeholder="e.g. Petpooja KOT printer not printing online orders"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => {
+                setTitle(e.target.value);
+                if (fieldErrors.title) setFieldErrors((p) => ({ ...p, title: undefined }));
+              }}
+              aria-invalid={!!fieldErrors.title}
               className="w-full px-3.5 py-2.5 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-[#D95D0F]"
             />
+            {fieldErrors.title && (
+              <p role="alert" className="mt-1 text-[11px] font-bold text-rose-400">
+                {fieldErrors.title}
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -136,9 +196,18 @@ export const RaiseTicketModal: React.FC<RaiseTicketModalProps> = ({
               rows={3}
               placeholder="Describe what happened, error messages shown on POS, or customer details..."
               value={message}
-              onChange={(e) => setMessage(e.target.value)}
+              onChange={(e) => {
+                setMessage(e.target.value);
+                if (fieldErrors.message) setFieldErrors((p) => ({ ...p, message: undefined }));
+              }}
+              aria-invalid={!!fieldErrors.message}
               className="w-full px-3.5 py-2.5 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-[#D95D0F]"
             />
+            {fieldErrors.message && (
+              <p role="alert" className="mt-1 text-[11px] font-bold text-rose-400">
+                {fieldErrors.message}
+              </p>
+            )}
           </div>
 
           <div>
@@ -151,13 +220,28 @@ export const RaiseTicketModal: React.FC<RaiseTicketModalProps> = ({
                 type="text"
                 placeholder="https://..."
                 value={attachmentUrl}
-                onChange={(e) => setAttachmentUrl(e.target.value)}
+                onChange={(e) => {
+                  setAttachmentUrl(e.target.value);
+                  if (fieldErrors.attachmentUrl)
+                    setFieldErrors((p) => ({ ...p, attachmentUrl: undefined }));
+                }}
+                aria-invalid={!!fieldErrors.attachmentUrl}
                 className="w-full pl-9 pr-3 py-2 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-[#D95D0F]"
               />
             </div>
+            {fieldErrors.attachmentUrl && (
+              <p role="alert" className="mt-1 text-[11px] font-bold text-rose-400">
+                {fieldErrors.attachmentUrl}
+              </p>
+            )}
           </div>
 
           {/* Footer */}
+          {submitError && (
+            <p role="alert" className="text-[11px] font-bold text-rose-400 bg-rose-950/40 border border-rose-800/60 rounded-xl p-3">
+              {submitError}
+            </p>
+          )}
           <div className="pt-3 flex items-center justify-end space-x-3 border-t border-[#234B2A]">
             <button
               type="button"
@@ -168,11 +252,11 @@ export const RaiseTicketModal: React.FC<RaiseTicketModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || isSubmitting}
               className="px-5 py-2 text-xs font-semibold rounded-xl bg-[#D95D0F] hover:bg-[#b84d0b] text-white disabled:opacity-50 flex items-center space-x-1.5 shadow-md"
             >
               <Send className="w-4 h-4" />
-              <span>{loading ? 'Submitting...' : 'Dispatch Ticket'}</span>
+              <span>{loading || isSubmitting ? 'Submitting...' : 'Dispatch Ticket'}</span>
             </button>
           </div>
         </form>

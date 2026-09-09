@@ -16,6 +16,7 @@ import {
 } from 'firebase/firestore';
 import type { Ticket, TicketStatus, TicketType } from '@/types';
 import { normalizeTicketDoc } from '@/utils/ticketContract';
+import { FIRESTORE_IN_LIMIT } from '@/utils/branchScope';
 
 interface UseTicketsParams {
   status?: TicketStatus | 'all';
@@ -28,8 +29,11 @@ export function useTickets(params: UseTicketsParams = {}) {
   const queryClient = useQueryClient();
   // Sources that failed this fetch — surfaced in UI, never console-only.
   const warningsRef = useRef<string[]>([]);
+  // True when the session has no ticket scope at all (honest empty state,
+  // never a fallback branch's tickets). Written per fetch, read on render.
+  const emptyScopeRef = useRef(false);
 
-  const { data: tickets = [], isLoading, error } = useQuery({
+  const { data: tickets = [], isLoading, error, refetch } = useQuery({
     queryKey: ['tickets', user?.id, user?.role, selectedBranchId, params],
     queryFn: async (): Promise<Ticket[]> => {
       if (!user) throw new Error('Not authenticated');
@@ -44,25 +48,41 @@ export function useTickets(params: UseTicketsParams = {}) {
           const branchesSnap = await getDocs(collection(db, 'branches'));
           branchIds = branchesSnap.docs.map((d) => d.id);
         } else if (user.role === 'regional_manager') {
-          const branchesSnap = await getDocs(
-            query(collection(db, 'branches'), where('city', 'in', user.cityIds || ['Ahmedabad', 'Surat']))
-          );
-          branchIds = branchesSnap.docs.map((d) => d.id);
+          // No city assignment = no scope. Never fall back to default cities:
+          // a fallback would leak cross-outlet tickets into an empty scope.
+          const cityIds = user.cityIds ?? [];
+          if (cityIds.length === 0) {
+            branchIds = [];
+          } else {
+            const branchesSnap = await getDocs(
+              query(collection(db, 'branches'), where('city', 'in', cityIds.slice(0, FIRESTORE_IN_LIMIT)))
+            );
+            branchIds = branchesSnap.docs.map((d) => d.id);
+          }
         } else {
           branchIds = user.branchIds || [];
         }
       }
 
+      // Fail-closed: empty scope reads NOTHING and renders the honest empty
+      // state. A hardcoded branch fallback here would leak cross-branch PII
+      // (H21/H32) — an unassigned session must see zero tickets.
       if (branchIds.length === 0) {
-        branchIds = ['branch_surat_01', 'branch_ahmedabad_01'];
+        emptyScopeRef.current = true;
+        return [];
+      }
+      emptyScopeRef.current = false;
+
+      // Firestore `in` accepts at most 10 values: fan out one query per
+      // chunk per collection and merge, never slice-and-silently-drop.
+      const chunks: string[][] = [];
+      for (let i = 0; i < branchIds.length; i += FIRESTORE_IN_LIMIT) {
+        chunks.push(branchIds.slice(i, i + FIRESTORE_IN_LIMIT));
       }
 
-      // Dual-collection fetch, fired concurrently: the old code awaited
-      // support_tickets → tickets serially (2× latency). Dedup is Set-based
-      // (the old list.some() was O(n²) — ~4M comparisons at 2k+2k tickets).
-      const buildConstraints = (): any[] => {
+      const buildConstraints = (chunk: string[]): any[] => {
         const constraints: any[] = [
-          where('branchId', 'in', branchIds.slice(0, 10)),
+          where('branchId', 'in', chunk),
           orderBy('createdAt', 'desc'),
         ];
         if (params.status && params.status !== 'all') {
@@ -71,10 +91,10 @@ export function useTickets(params: UseTicketsParams = {}) {
         return constraints;
       };
 
-      const fetchSupportTickets = async (): Promise<Ticket[]> => {
+      const fetchSupportTickets = async (chunk: string[]): Promise<Ticket[]> => {
         try {
           const supportSnap = await getDocs(
-            query(collection(db, 'support_tickets'), ...buildConstraints())
+            query(collection(db, 'support_tickets'), ...buildConstraints(chunk))
           );
           const out: Ticket[] = [];
           supportSnap.forEach((d) => {
@@ -92,7 +112,7 @@ export function useTickets(params: UseTicketsParams = {}) {
                 status: data.status || 'open',
                 raisedById: data.customerId || data.raisedById || 'customer',
                 raisedByName: data.customerName || data.raisedByName || 'Customer',
-                raisedByRole: 'customer',
+                raisedByRole: 'customer' as any,
                 assignedTo: data.assignedTo || { tier: 'branch' },
                 attachments: data.attachments || [],
                 resolution: data.resolution?.notes || data.resolution || '',
@@ -109,10 +129,10 @@ export function useTickets(params: UseTicketsParams = {}) {
         }
       };
 
-      const fetchLegacyTickets = async (): Promise<Ticket[]> => {
+      const fetchLegacyTickets = async (chunk: string[]): Promise<Ticket[]> => {
         try {
           const ticketsSnap = await getDocs(
-            query(collection(db, 'tickets'), ...buildConstraints())
+            query(collection(db, 'tickets'), ...buildConstraints(chunk))
           );
           const out: Ticket[] = [];
           ticketsSnap.forEach((d) => {
@@ -126,10 +146,12 @@ export function useTickets(params: UseTicketsParams = {}) {
         }
       };
 
-      const [supportList, legacyList] = await Promise.all([
-        fetchSupportTickets(),
-        fetchLegacyTickets(),
+      const [supportLists, legacyLists] = await Promise.all([
+        Promise.all(chunks.map((chunk) => fetchSupportTickets(chunk))),
+        Promise.all(chunks.map((chunk) => fetchLegacyTickets(chunk))),
       ]);
+      const supportList = supportLists.flat();
+      const legacyList = legacyLists.flat();
       const list: Ticket[] = [...supportList];
       const seenIds = new Set(supportList.map((t) => t.id));
       for (const t of legacyList) {
@@ -178,7 +200,7 @@ export function useTickets(params: UseTicketsParams = {}) {
           status: 'open',
           raisedById: 'cust_01',
           raisedByName: 'Aarav Mehta',
-          raisedByRole: 'customer',
+          raisedByRole: 'customer' as any,
           assignedTo: { tier: 'branch' } as any,
           createdAt: seventyFiveMinsAgo, // 75 mins ago -> triggers >60m Inactivity Warning!
           updatedAt: seventyFiveMinsAgo,
@@ -236,7 +258,7 @@ export function useTickets(params: UseTicketsParams = {}) {
           resolvedByName: 'Alex (Lead Dev)',
           raisedById: 'cust_04',
           raisedByName: 'Neha Kothari',
-          raisedByRole: 'customer',
+          raisedByRole: 'customer' as any,
           assignedTo: { tier: 'branch' } as any,
           createdAt: twoHoursAgo,
           updatedAt: twoHoursAgo,
@@ -333,5 +355,5 @@ export function useTickets(params: UseTicketsParams = {}) {
     },
   });
 
-  return { tickets, isLoading, error, warnings: warningsRef.current, createTicket, updateTicket };
+  return { tickets, isLoading, error, refetch, isEmptyScope: emptyScopeRef.current, warnings: warningsRef.current, createTicket, updateTicket };
 }

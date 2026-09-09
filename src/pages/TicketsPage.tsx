@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import type { Ticket } from '@/types';
 import { DataWarningBanner } from '@/components/ui/DataWarningBanner';
+import { toast } from 'sonner';
 
 export function TicketsPage() {
   const { user } = useAuthStore();
@@ -31,12 +32,18 @@ export function TicketsPage() {
   const [showRaiseModal, setShowRaiseModal] = useState(false);
   const [resolvingTicket, setResolvingTicket] = useState<Ticket | null>(null);
 
-  const { tickets, isLoading, warnings, createTicket, updateTicket } = useTickets({
+  const { tickets, isLoading, error: ticketsError, refetch, warnings, createTicket, updateTicket } = useTickets({
     tier: activeTierTab === 'resolved' ? 'resolved' : 'all',
   });
 
   const handleRaiseTicket = async (ticketData: any) => {
-    await createTicket.mutateAsync(ticketData);
+    try {
+      await createTicket.mutateAsync(ticketData);
+      toast.success('Ticket raised — dispatched to triage queue.');
+    } catch {
+      toast.error('Could not raise ticket — check connection and retry.');
+      throw new Error('Raise ticket failed — ticket not created, retry.');
+    }
   };
 
   const handleQuickEscalate = async (ticket: Ticket) => {
@@ -55,22 +62,51 @@ export function TicketsPage() {
         ? 'L2_REGIONAL'
         : 'L3_EXECUTIVE';
 
-    await updateTicket.mutateAsync({
-      ticketId: ticket.id,
-      status: 'in_progress',
-      assignedToTier: nextTier,
-      resolution: `Manual escalation to ${nextLevel} by ${user?.name || 'Staff'}.`,
-    });
+    if (
+      !window.confirm(
+        `Escalate ticket ${ticket.ticketNumber || ticket.id} to ${nextLevel}? The assignee will be notified.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      await updateTicket.mutateAsync({
+        ticketId: ticket.id,
+        status: 'in_progress',
+        assignedToTier: nextTier,
+        resolution: `Manual escalation to ${nextLevel} by ${user?.name || 'Staff'}.`,
+      });
+      toast.success(`Escalated to ${nextLevel}.`);
+    } catch {
+      // Failed escalation looks failed, never done — the ticket is unchanged.
+      toast.error('Escalation failed — ticket unchanged, retry.');
+      throw new Error('Escalation failed — ticket unchanged, retry.');
+    }
   };
 
   const handleConfirmResolution = async (payload: TicketResolutionPayload) => {
-    await updateTicket.mutateAsync({
-      ticketId: payload.ticketId,
-      status: 'resolved',
-      resolution: `${payload.action}: ${payload.notes}${
-        payload.grillCoinsAmount ? ` (Credited ${payload.grillCoinsAmount} Grill Coins)` : ''
-      }`,
-    });
+    if (
+      !window.confirm(
+        `Mark ticket ${payload.ticketId} as resolved? This closes the active queue entry.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      await updateTicket.mutateAsync({
+        ticketId: payload.ticketId,
+        status: 'resolved',
+        resolution: `${payload.action}: ${payload.notes}${
+          payload.grillCoinsAmount ? ` (Credited ${payload.grillCoinsAmount} Grill Coins)` : ''
+        }`,
+      });
+      toast.success('Incident marked resolved.');
+    } catch {
+      toast.error('Resolution failed — ticket still active, retry.');
+      throw new Error('Resolution failed — ticket still active, retry.');
+    }
   };
 
   const filteredTickets = useMemo(() => {
@@ -108,8 +144,8 @@ export function TicketsPage() {
       if (q) {
         const matchesTitle = (t.title || (t as any).subject || '').toLowerCase().includes(q);
         const matchesDesc = (t.message || (t as any).description || '').toLowerCase().includes(q);
-        const matchesCustomer = (t.customerName || '').toLowerCase().includes(q);
-        const matchesPhone = (t.customerPhone || '').includes(q);
+        const matchesCustomer = ((t as any).customerName || '').toLowerCase().includes(q);
+        const matchesPhone = ((t as any).customerPhone || '').includes(q);
         const matchesNum = (t.ticketNumber || t.id).toLowerCase().includes(q);
 
         if (!matchesTitle && !matchesDesc && !matchesCustomer && !matchesPhone && !matchesNum) {
@@ -137,6 +173,39 @@ export function TicketsPage() {
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-16 select-none">
       <DataWarningBanner warnings={warnings} />
+      {/* Query failure looks failed: explicit error + retry, never an empty table. */}
+      {ticketsError && !isLoading && (
+        <div
+          role="alert"
+          className="flex items-center justify-between gap-3 rounded-2xl border border-rose-700/60 bg-rose-950/40 p-3.5 text-xs text-rose-200"
+        >
+          <span className="font-bold">Could not load tickets — check connection and retry.</span>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            className="shrink-0 px-3 py-1.5 rounded-xl bg-rose-900/60 hover:bg-rose-800/60 font-bold transition-colors cursor-pointer"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+      {/* Honest empty state: empty scope or no matches — not a system error. */}
+      {!isLoading && !ticketsError && tickets.length === 0 && (
+        <div className="text-center py-10 bg-[#090909] rounded-3xl border border-neutral-800 p-8 space-y-2">
+          <h3 className="font-bold text-white text-sm">No tickets in your current scope</h3>
+          <p className="text-xs text-neutral-400 max-w-md mx-auto">
+            Empty assignment or no matching tickets — this is an honest empty view, not a
+            system error. Adjust filters or retry below.
+          </p>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            className="mt-1 px-4 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-bold transition-colors cursor-pointer"
+          >
+            Retry
+          </button>
+        </div>
+      )}
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
         <div>

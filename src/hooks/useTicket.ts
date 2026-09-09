@@ -207,11 +207,27 @@ export function useTicket(ticketId: string) {
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
 
-      const docRef = doc(db, 'support_tickets', ticketId);
-      await updateDoc(docRef, {
-        timeline: arrayUnion(event),
-        updatedAt: Timestamp.now(),
-      });
+      // Legacy tickets live in `tickets`, not `support_tickets` — try the
+      // primary collection first, then fall back so replies never hard-fail
+      // on a collection miss. A failure in BOTH collections still throws, so
+      // a failed reply always looks failed (retry), never sent.
+      let docRef = doc(db, 'support_tickets', ticketId);
+      try {
+        await updateDoc(docRef, {
+          timeline: arrayUnion(event),
+          updatedAt: Timestamp.now(),
+        });
+      } catch (primaryErr) {
+        try {
+          docRef = doc(db, 'tickets', ticketId);
+          await updateDoc(docRef, {
+            timeline: arrayUnion(event),
+            updatedAt: Timestamp.now(),
+          });
+        } catch {
+          throw primaryErr;
+        }
+      }
 
       return event;
     },

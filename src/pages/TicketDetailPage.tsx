@@ -4,6 +4,7 @@ import { useTicket } from '@/hooks/useTicket';
 import { useAuthStore } from '@/stores/authStore';
 import { validatePartialRefundAmount } from '@/utils/refundValidation';
 import { normalizeTier, normalizeTimeline } from '@/utils/ticketContract';
+import { toast } from 'sonner';
 import {
   ArrowLeft,
   ShieldAlert,
@@ -126,35 +127,65 @@ export function TicketDetailPage() {
         });
         setSuccessMessage(`Goodwill ${goodwillType === 'coupon' ? 'Voucher' : 'Coins'} (₹100) recorded — pending backend issuance.`);
       } else if (activeActionTab === 'escalate_brand') {
+        if (
+          !window.confirm(
+            `Escalate ticket ${(ticket as any).ticketNumber || ticket.id} to Tier 2 (Brand Support)? The brand desk will be notified.`
+          )
+        ) {
+          return;
+        }
         await updateTicket.mutateAsync({
           status: 'in_progress',
           assignedToTier: 'brand_support',
           resolution: `Escalated to Tier 2 (Brand Support): ${resolutionNotes.trim() || 'Franchise/Brand policy review required'}`,
         });
+        toast.success('Escalated to Tier 2 (Brand Support Team).');
         setSuccessMessage('Successfully escalated to Tier 2 (Brand Support Team).');
       } else if (activeActionTab === 'escalate_dev') {
+        if (
+          !window.confirm(
+            `Dispatch a P0 snapshot for ticket ${(ticket as any).ticketNumber || ticket.id} to the Developer Team? This creates a diagnostic record.`
+          )
+        ) {
+          return;
+        }
         await updateTicket.mutateAsync({
           status: 'in_progress',
           assignedToTier: 'developer_team',
           resolution: `Escalated to Tier 3 (Developer Team): ${resolutionNotes.trim() || 'Technical investigation / API gateway timeout'}`,
         });
+        toast.success('Escalated to Tier 3 (Developer Team). P0 snapshot generated.');
         setSuccessMessage('Successfully escalated to Tier 3 (Developer Team). P0 Diagnostic snapshot generated.');
       } else {
+        if (
+          !window.confirm(
+            `Mark ticket ${(ticket as any).ticketNumber || ticket.id} as resolved? This closes the active incident.`
+          )
+        ) {
+          return;
+        }
         await updateTicket.mutateAsync({
           status: 'resolved',
           resolution: resolutionNotes.trim() || `Resolved by ${user?.name || 'Staff'} (${user?.role || 'team'})`,
         });
+        toast.success('Incident marked as resolved.');
         setSuccessMessage('Incident marked as resolved.');
       }
 
       setResolutionNotes('');
     } catch {
+      // Failed actions look failed, never done: no success copy, error stays
+      // until the operator retries. A failed P0 escalation is still Active.
+      toast.error('Action failed — ticket unchanged. Check connection and retry.');
       setErrorMessage('Action failed — Firestore rejected the update. Check your connection and retry.');
     }
   };
 
   const handleSendReply = async () => {
     if (!replyText.trim()) return;
+    if (!window.confirm('Send this reply to the customer thread?')) {
+      return;
+    }
     try {
       await addMessage.mutateAsync({
         text: replyText.trim(),
@@ -163,6 +194,7 @@ export function TicketDetailPage() {
       });
       setReplyText('');
     } catch {
+      toast.error('Failed to send message — check your connection and retry.');
       setErrorMessage('Failed to send message — check your connection and retry.');
     }
   };
@@ -180,6 +212,17 @@ export function TicketDetailPage() {
         </button>
 
         <div className="flex items-center space-x-2.5">
+          {/* Quarantined status (unknown backend value normalized to open):
+              visible review flag — never silently treated as clean data. */}
+          {(ticket as any).quarantineReason && (
+            <span
+              role="note"
+              title={`Ticket status quarantined: ${(ticket as any).quarantineReason}`}
+              className="inline-flex items-center px-3 py-1 rounded-full text-xs font-black bg-amber-950/80 text-amber-300 border border-amber-700/60"
+            >
+              ⚠ Needs review: unrecognized status
+            </span>
+          )}
           <span
             className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-black ${
               isResolved
@@ -389,9 +432,19 @@ export function TicketDetailPage() {
 
         {/* Error Alert Banner */}
         {errorMessage && (
-          <div role="alert" className="bg-rose-950 border border-rose-700 rounded-xl p-3.5 text-xs text-rose-300 font-bold flex items-center space-x-2 shadow-md">
-            <AlertCircle className="w-4 h-4 text-rose-400" />
-            <span>{errorMessage}</span>
+          <div role="alert" className="bg-rose-950 border border-rose-700 rounded-xl p-3.5 text-xs text-rose-300 font-bold flex items-center justify-between gap-3 shadow-md">
+            <span className="flex items-center space-x-2">
+              <AlertCircle className="w-4 h-4 text-rose-400" />
+              <span>{errorMessage}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => handleExecuteAction()}
+              disabled={updateTicket.isPending}
+              className="shrink-0 px-3 py-1.5 rounded-lg bg-rose-900/60 hover:bg-rose-800/60 text-rose-100 disabled:opacity-50 transition-colors cursor-pointer"
+            >
+              Retry
+            </button>
           </div>
         )}
 
