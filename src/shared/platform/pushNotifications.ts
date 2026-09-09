@@ -83,7 +83,9 @@ function desiredTopicsFor(user: User | null): string[] {
   if (user.role === 'brand_owner' || user.role === 'developer') {
     topics.push('superadmins');
   }
-  if (user.role !== 'customer') topics.push('tickets_escalated');
+  // Type-level only: UserRole has no 'customer' (server roles only), so the
+  // string-widened comparison preserves the runtime guard exactly as-is.
+  if ((user.role as string) !== 'customer') topics.push('tickets_escalated');
   return [...new Set(topics)];
 }
 

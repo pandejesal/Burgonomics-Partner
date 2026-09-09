@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { LoginPage } from '@/pages/LoginPage';
 import { DashboardPage } from '@/pages/DashboardPage';
@@ -33,11 +34,16 @@ const queryClient = new QueryClient({
   },
 });
 
+// Router shell only: BrowserRouter breaks on native file:/// URLs (no server
+// to resolve deep paths on cold start). HashRouter keeps routing client-side
+// on-device; web keeps BrowserRouter. No route/logic changes.
+const Router = Capacitor.isNativePlatform() ? HashRouter : BrowserRouter;
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <BrowserRouter>
+        <Router>
         <Routes>
           {/* Public routes */}
           <Route path="/login" element={<LoginPage />} />
@@ -108,7 +114,7 @@ function App() {
           {/* Default redirect */}
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
-      </BrowserRouter>
+      </Router>
       <Toaster position="top-right" richColors />
       </AuthProvider>
     </QueryClientProvider>

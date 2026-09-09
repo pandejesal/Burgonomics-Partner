@@ -35,7 +35,24 @@
         </provider>
     </application>
 
-    <!-- Permissions -->
+    <!-- Permissions.
+         Package/scheme alignment: applicationId com.glassdoorsstudio.burgonomics.partner
+         matches capacitor.config.ts appId; androidScheme https (no custom scheme:
+         no deep-link intent-filter ships — add one with the dispatch-tracking
+         feature, not before).
+         - POST_NOTIFICATIONS: required on Android 13+ for the FCM kitchen-order
+           pushes driven by shared/platform/pushNotifications.ts. Runtime prompt
+           fires on first requestPushPermissions(); deny = no pushes, app works.
+         - COARSE/FINE_LOCATION: declared for the @capacitor/geolocation plugin
+           (capacitor.config.ts). No src callers ship yet (loop-47), so the OS
+           never prompts until dispatch-tracking lands.
+         - google-services.json: NOT in repo (secret). Place it at
+           android/app/google-services.json before release builds; without it the
+           gradle google-services plugin is skipped (see android/app/build.gradle)
+           and pushes register locally only. -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 </manifest>

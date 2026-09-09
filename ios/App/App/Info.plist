@@ -79,7 +79,17 @@
 	<true/>
 	<!-- No NSCameraUsageDescription / NSPhotoLibraryUsageDescription: no camera
 	     or photo code ships (no @capacitor/camera, no picker). Declaring them
-	     invites App Store privacy questions. Re-add with the scanner feature.
-	     NSLocationWhenInUseUsageDescription removed likewise; re-add with dispatch-tracking. -->
+	     invites App Store privacy questions. Re-add with the scanner feature. -->
+	<!-- Location: @capacitor/geolocation is declared in capacitor.config.ts but
+	     no src callers ship yet (loop-47), so the OS never prompts. The key
+	     below exists so a future dispatch-tracking call fails closed with an
+	     honest prompt string instead of a crash. -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Your location is used only for live courier dispatch tracking while a delivery is active.</string>
+	<!-- Push/entitlements: UIBackgroundModes remote-notification is declared
+	     above for FCM kitchen-order pushes. aps-environment lives in the Xcode
+	     App.entitlements (added at `npx cap add ios` / Xcode open time — the
+	     .xcodeproj is not versioned here). sounds/new_order.wav must be added
+	     to the Xcode target bundle for custom push sounds on iOS. -->
 </dict>
 </plist>
