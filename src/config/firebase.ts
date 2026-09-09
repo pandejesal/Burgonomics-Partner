@@ -16,6 +16,11 @@ export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
+// Storage discipline (same as core): Firebase Auth owns token persistence —
+// NEVER copy ID/refresh tokens into secureStorage/localStorage. The
+// secureStorage cache holds only server-validated random session ids with
+// short TTLs; presence alone grants nothing.
+
 const fcmEnabled =
   import.meta.env.VITE_FCM_ENABLED === 'true' && !!import.meta.env.VITE_FCM_VAPID_KEY;
 

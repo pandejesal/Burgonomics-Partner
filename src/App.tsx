@@ -17,7 +17,7 @@ import { SettingsPage } from '@/pages/SettingsPage';
 import { DeliveryQueuePage } from '@/pages/DeliveryQueuePage';
 import { KDSPage } from '@/pages/KDSPage';
 import { AppLayout } from '@/components/layout/AppLayout';
-import { ProtectedRoute } from '@/components/ProtectedRoute';
+import { ProtectedRoute } from '@/core/auth/ProtectedRoute';
 import { AdminRoutes } from '@/pages/admin/AdminRoutes';
 import { ChatPage } from '@/pages/ChatPage';
 

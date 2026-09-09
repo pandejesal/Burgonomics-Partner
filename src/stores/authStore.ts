@@ -14,9 +14,78 @@ interface AuthState {
   firebaseUser: FirebaseUser | null;
   loading: boolean;
   error: string | null;
+  /** Visible offline-grace banner text; null when fully online/verified. */
+  offlineNotice: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   initialize: () => void;
+  clearOfflineNotice: () => void;
+}
+
+// Single generic message for ALL sign-in failures — credential mismatch,
+// unknown account, and missing operator role read identically, so login is
+// not a user-enumeration oracle. Never surface provider err.message.
+export const GENERIC_AUTH_ERROR =
+  'Invalid email or password, or your account lacks operator access.';
+
+// Offline bootstrap grace: a last-verified profile may stand in while the
+// network is unreachable, but only inside this TTL and always with a
+// visible banner — never silent trust.
+const OFFLINE_GRACE_TTL_MS = 12 * 60 * 60 * 1000;
+const CACHED_PROFILE_KEY = 'burg.partner.auth.cachedProfile';
+
+interface CachedProfile {
+  profile: Omit<User, 'createdAt'> & { createdAt?: unknown };
+  savedAt: number;
+}
+
+function readCachedProfile(): User | null {
+  try {
+    const raw = typeof window !== 'undefined' ? window.localStorage.getItem(CACHED_PROFILE_KEY) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedProfile;
+    if (!parsed?.profile || typeof parsed.savedAt !== 'number') return null;
+    if (Date.now() - parsed.savedAt > OFFLINE_GRACE_TTL_MS) return null;
+    return { ...parsed.profile, createdAt: Timestamp.now() } as User;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedProfile(profile: User): void {
+  try {
+    if (typeof window === 'undefined') return;
+    const { createdAt: _ignored, ...rest } = profile;
+    window.localStorage.setItem(
+      CACHED_PROFILE_KEY,
+      JSON.stringify({ profile: rest, savedAt: Date.now() } satisfies CachedProfile)
+    );
+  } catch {
+    /* quota exceeded or restricted — grace simply unavailable */
+  }
+}
+
+function clearCachedProfile(): void {
+  try {
+    if (typeof window !== 'undefined') window.localStorage.removeItem(CACHED_PROFILE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** True for network/offline failures as opposed to definitive authz denials. */
+export function isTransientAuthError(err: any): boolean {
+  const code = String(err?.code || '');
+  if (code === 'auth/network-request-failed') return true;
+  if (code.includes('unavailable') || code.includes('deadline-exceeded')) return true;
+  if (code.includes('network') || code.includes('offline') || code.includes('Failed to fetch')) return true;
+  const msg = String(err?.message || '');
+  return (
+    msg.includes('network') ||
+    msg.includes('offline') ||
+    msg.includes('Failed to fetch') ||
+    msg.includes('NetworkError')
+  );
 }
 
 const VALID_OPERATOR_ROLES: UserRole[] = [
@@ -43,7 +112,7 @@ export async function resolveUserProfile(firebaseUser: FirebaseUser): Promise<Us
       // privileged role. Returning null denies login (signIn throws, bootstrap
       // signs out) instead of silently escalating typos like 'Branch_Owner'
       // — or 'customer' — to superadmin.
-      if (!VALID_OPERATOR_ROLES.includes(rawRole as UserRole)) {
+      if (typeof rawRole !== 'string' || !VALID_OPERATOR_ROLES.includes(rawRole as UserRole)) {
         console.warn(`[auth] Denying login: unrecognized operator role "${String(rawRole)}"`);
         return null;
       }
@@ -88,7 +157,7 @@ export async function resolveUserProfile(firebaseUser: FirebaseUser): Promise<Us
       const role = rawRole as UserRole;
 
       // Ensure user is an authorized operator, not a generic customer
-      if (typeof rawRole === 'string' && VALID_OPERATOR_ROLES.includes(role) && role !== 'customer') {
+      if (typeof rawRole === 'string' && VALID_OPERATOR_ROLES.includes(role) && (rawRole as string) !== 'customer') {
         const branchIds: string[] = Array.isArray(data.branchIds)
           ? data.branchIds.filter((b): b is string => typeof b === 'string')
           : typeof data.branchId === 'string'
@@ -126,7 +195,7 @@ export async function resolveUserProfile(firebaseUser: FirebaseUser): Promise<Us
     // break `in` queries downstream (string slice / per-character match).
     const claimBranchIds = tokenResult.claims.branchIds;
     const claimCityIds = tokenResult.claims.cityIds;
-    if (typeof rawTokenRole === 'string' && VALID_OPERATOR_ROLES.includes(tokenRole) && tokenRole !== 'customer') {
+    if (typeof rawTokenRole === 'string' && VALID_OPERATOR_ROLES.includes(tokenRole) && (rawTokenRole as string) !== 'customer') {
       return {
         id: firebaseUser.uid,
         name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Operator',
@@ -149,6 +218,10 @@ export async function resolveUserProfile(firebaseUser: FirebaseUser): Promise<Us
 
     return null;
   } catch (err) {
+    // Transient (offline) failures are NOT denials: rethrow so callers can
+    // apply offline grace instead of signing the user out. Anything else is
+    // a definitive fail-closed denial.
+    if (isTransientAuthError(err)) throw err;
     console.error('Error resolving operator profile from Firestore:', err);
     return null;
   }
@@ -159,44 +232,63 @@ export async function resolveUserProfile(firebaseUser: FirebaseUser): Promise<Us
 // profile reads per sign-in event). Single registration per page load.
 let authListenerRegistered = false;
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   firebaseUser: null,
   loading: true,
   error: null,
+  offlineNotice: null,
+
+  clearOfflineNotice: () => set({ offlineNotice: null }),
 
   signIn: async (email: string, password: string) => {
     try {
-      set({ error: null, loading: true });
+      set({ error: null, loading: true, offlineNotice: null });
       const result = await signInWithEmailAndPassword(auth, email.trim(), password);
 
       // Verify legitimate operator role from Firestore / Auth token
-      const profile = await resolveUserProfile(result.user);
+      let profile: User | null;
+      try {
+        profile = await resolveUserProfile(result.user);
+      } catch (err) {
+        // Offline during verification: do NOT mint, do NOT sign out an
+        // existing session — surface a generic error and keep state.
+        if (isTransientAuthError(err)) {
+          const prev = get();
+          set({
+            error: 'Network unavailable. Check your connection and try again.',
+            loading: false,
+            user: prev.user,
+            firebaseUser: prev.firebaseUser ?? result.user,
+          });
+          throw err;
+        }
+        throw err;
+      }
 
       if (!profile) {
         await firebaseSignOut(auth);
-        throw new Error(
-          'Access Denied: Your account is not configured with operator privileges. Please contact Brand Administrator.'
-        );
+        clearCachedProfile();
+        throw new Error(GENERIC_AUTH_ERROR);
       }
 
+      writeCachedProfile(profile);
       set({
         user: profile,
         firebaseUser: result.user,
         loading: false,
         error: null,
+        offlineNotice: null,
       });
     } catch (err: any) {
-      let message = err.message || 'Authentication failed.';
-      if (
-        err.code === 'auth/invalid-credential' ||
-        err.code === 'auth/user-not-found' ||
-        err.code === 'auth/wrong-password' ||
-        err.code === 'auth/invalid-email'
-      ) {
-        message = 'Invalid email or password. Please verify your credentials.';
+      // Single generic message for every sign-in failure: no oracle.
+      // A preserved session above already set its state; don't clobber it.
+      const preserved = get().user !== null && isTransientAuthError(err);
+      if (!preserved) {
+        set({ error: GENERIC_AUTH_ERROR, loading: false, user: null, firebaseUser: null });
+      } else {
+        set({ loading: false });
       }
-      set({ error: message, loading: false, user: null, firebaseUser: null });
       throw err;
     }
   },
@@ -207,7 +299,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     } catch (err) {
       console.warn('SignOut error:', err);
     }
-    set({ user: null, firebaseUser: null, error: null, loading: false });
+    clearCachedProfile();
+    set({ user: null, firebaseUser: null, error: null, loading: false, offlineNotice: null });
   },
 
   initialize: () => {
@@ -223,22 +316,52 @@ export const useAuthStore = create<AuthState>((set) => ({
         } catch {
           // Offline refresh failure — fall through to cached claims.
         }
-        const profile = await resolveUserProfile(firebaseUser);
+        let profile: User | null = null;
+        let transient = false;
+        try {
+          profile = await resolveUserProfile(firebaseUser);
+        } catch (err) {
+          transient = isTransientAuthError(err);
+          if (!transient) {
+            console.error('Error resolving operator profile from Firestore:', err);
+          }
+        }
         if (profile) {
+          writeCachedProfile(profile);
           set({
             user: profile,
             firebaseUser,
             loading: false,
             error: null,
+            offlineNotice: null,
           });
+        } else if (transient) {
+          // Offline grace: restore the last VERIFIED profile inside its TTL
+          // with a visible banner. Expired/absent cache → loading clears
+          // with no session (never silent trust, never sign-out loop).
+          const cached = readCachedProfile();
+          if (cached) {
+            set({
+              user: cached,
+              firebaseUser,
+              loading: false,
+              error: null,
+              offlineNotice:
+                'Offline — showing your last verified session. Some actions may be unavailable until reconnected.',
+            });
+          } else {
+            set({ user: null, firebaseUser: null, loading: false, offlineNotice: null });
+          }
         } else {
           // Account signed in but lacking partner/admin role
           await firebaseSignOut(auth);
+          clearCachedProfile();
           set({
             user: null,
             firebaseUser: null,
             loading: false,
             error: 'Session expired or account lacking operator permissions.',
+            offlineNotice: null,
           });
         }
       } else {

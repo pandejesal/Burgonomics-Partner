@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Routes, Route, Outlet, useNavigate, useLocation } from "react-router-dom";
+import { Routes, Route, Outlet, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { useAdminAuthStore } from "@/admin/store/adminAuthStore";
 import { AdminLayout } from "@/admin/layouts/AdminLayout";
 import { PetpoojaOperationsLayout } from "@/admin/layouts/PetpoojaOperationsLayout";
@@ -54,7 +54,10 @@ export function AdminPortalLayout() {
   const { admin, bootstrap, isLoading } = useAdminAuthStore();
   const [isReady, setIsReady] = useState(false);
 
-  const isLoginPage = location.pathname === "/admin/login";
+  // Prefix match: "/admin/login", "/admin/login/", and nested login paths
+  // are public. Exact-match let "/admin/login/" slip through to bootstrap.
+  const isLoginPage =
+    location.pathname === "/admin/login" || location.pathname.startsWith("/admin/login/");
 
   useEffect(() => {
     if (isLoginPage) {
@@ -62,13 +65,21 @@ export function AdminPortalLayout() {
       return;
     }
 
+    let cancelled = false;
     bootstrap().then((loggedIn) => {
-      if (!loggedIn && !admin) {
+      if (cancelled) return;
+      if (!loggedIn) {
         navigate("/admin/login", { replace: true });
       }
       setIsReady(true);
     });
-  }, [bootstrap, navigate, isLoginPage, admin]);
+    return () => {
+      cancelled = true;
+    };
+    // NOTE: `admin` intentionally excluded — including it re-ran bootstrap
+    // on every auth-state settle (dep-loop re-bootstrap).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bootstrap, navigate, isLoginPage]);
 
   if (isLoginPage) {
     return <Outlet />;
@@ -90,7 +101,9 @@ export function AdminPortalLayout() {
   }
 
   if (!admin) {
-    return null;
+    // Fail-closed redirect instead of a blank render on the auth race:
+    // an unauthenticated visitor never sees an empty shell.
+    return <Navigate to="/admin/login" replace />;
   }
 
   return (
