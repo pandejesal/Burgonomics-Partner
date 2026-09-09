@@ -1,10 +1,27 @@
+import { useNavigate } from 'react-router-dom';
 import { useNotifications } from '@/hooks/useNotifications';
+import { notificationTarget } from '@/utils/notificationTarget';
+import type { Notification } from '@/types';
 import { Spinner } from '@/components/ui/Spinner';
 import { Bell, Check, CheckCheck, ShoppingBag, Ticket, Info } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
 export function NotificationsPage() {
   const { notifications, isLoading, markAsRead, markAllAsRead } = useNotifications();
+  const navigate = useNavigate();
+
+  // Batch-6 badge semantics: opening an inbox row clears it (badge drops via
+  // the landed Firestore read:true write), then lands on the linked record
+  // by id — never by subject. Untargeted rows just clear in place.
+  const handleOpen = (notif: Notification) => {
+    if (!notif.read) {
+      markAsRead.mutate(notif.id);
+    }
+    const to = notificationTarget(notif.type, notif.targetId);
+    if (to) {
+      navigate(to);
+    }
+  };
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
@@ -57,7 +74,16 @@ export function NotificationsPage() {
             return (
               <div
                 key={notif.id}
-                className={`flex items-start gap-4 p-4 sm:p-5 transition-colors ${
+                role="button"
+                tabIndex={0}
+                onClick={() => handleOpen(notif)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleOpen(notif);
+                  }
+                }}
+                className={`flex items-start gap-4 p-4 sm:p-5 transition-colors cursor-pointer ${
                   !notif.read ? 'bg-primary/5' : 'hover:bg-bg/40'
                 }`}
               >
@@ -96,7 +122,10 @@ export function NotificationsPage() {
 
                 {!notif.read && (
                   <button
-                    onClick={() => markAsRead.mutate(notif.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      markAsRead.mutate(notif.id);
+                    }}
                     disabled={markAsRead.isPending}
                     className="p-2 hover:bg-primary/10 rounded-xl text-primary transition-colors cursor-pointer shrink-0"
                     title="Mark as read"
