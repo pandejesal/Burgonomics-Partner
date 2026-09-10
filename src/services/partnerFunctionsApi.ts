@@ -208,4 +208,17 @@ export const partnerFunctionsApi = {
   }): Promise<{ success: boolean; ticketId: string; resolution?: Record<string, any> }> {
     return await apiRequest('/tickets/resolve', params);
   },
+
+  /**
+   * Staff broadcast fan-out to an FCM topic (e.g. upcoming_<branchId>).
+   * Returns the server's honest delivery outcome — never claim sent
+   * without it (Loop 5).
+   */
+  async broadcastToTopic(params: {
+    topic: string;
+    title: string;
+    body: string;
+  }): Promise<{ success: boolean }> {
+    return await apiRequest('/notifications/dispatch', params);
+  },
 };

@@ -26,6 +26,7 @@ export const LaunchBroadcastModal: React.FC<LaunchBroadcastModalProps> = ({
       : 'We are officially open for orders!'
   );
   const [sentSuccess, setSentSuccess] = useState(false);
+  const [broadcastError, setBroadcastError] = useState('');
 
   if (!isOpen || !branch) return null;
 
@@ -33,18 +34,26 @@ export const LaunchBroadcastModal: React.FC<LaunchBroadcastModalProps> = ({
     e.preventDefault();
     if (!title.trim() || !body.trim()) return;
 
-    await onBroadcast({
-      branchId: branch.id,
-      branchName: branch.name,
-      title: title.trim(),
-      body: body.trim(),
-    });
+    setBroadcastError('');
+    try {
+      await onBroadcast({
+        branchId: branch.id,
+        branchName: branch.name,
+        title: title.trim(),
+        body: body.trim(),
+      });
 
-    setSentSuccess(true);
-    setTimeout(() => {
-      setSentSuccess(false);
-      onClose();
-    }, 1800);
+      setSentSuccess(true);
+      setTimeout(() => {
+        setSentSuccess(false);
+        onClose();
+      }, 1800);
+    } catch (err) {
+      // Loop 5: fan-out failure must surface, never a success screen.
+      setBroadcastError(
+        err instanceof Error ? err.message : 'Broadcast failed — subscribers were NOT notified.'
+      );
+    }
   };
 
   return (
@@ -75,11 +84,10 @@ export const LaunchBroadcastModal: React.FC<LaunchBroadcastModalProps> = ({
         {sentSuccess ? (
           <div className="p-10 text-center space-y-3">
             <CheckCircle2 className="w-12 h-12 text-emerald-400 mx-auto" />
-            <h3 className="text-base font-bold text-white">Announcement saved!</h3>
+            <h3 className="text-base font-bold text-white">Broadcast sent!</h3>
             <p className="text-xs text-zinc-300">
-              Stored under <code className="text-amber-400 font-mono">upcoming_{branch.id}</code> for
-              the customer app to display. No push was sent — wire an FCM fan-out
-              before calling this a notification.
+              Fanned out over <code className="text-amber-400 font-mono">upcoming_{branch.id}</code> and
+              stored for the customer app to display.
             </p>
           </div>
         ) : (
@@ -91,7 +99,7 @@ export const LaunchBroadcastModal: React.FC<LaunchBroadcastModalProps> = ({
                 <span className="font-bold text-white">{branch.name}</span>
               </div>
               <span className="font-mono text-emerald-400 font-bold">
-                {branch.subscribersCount || 142} Subscribers
+                {branch.subscribersCount ?? 0} Subscribers
               </span>
             </div>
 
@@ -129,6 +137,11 @@ export const LaunchBroadcastModal: React.FC<LaunchBroadcastModalProps> = ({
             </div>
 
             {/* Footer */}
+            {broadcastError && (
+              <div role="alert" className="text-[11px] text-red-300 bg-red-950 border border-red-700 p-3 rounded-xl font-bold">
+                {broadcastError}
+              </div>
+            )}
             <div className="pt-3 flex items-center justify-end space-x-3 border-t border-border">
               <button
                 type="button"

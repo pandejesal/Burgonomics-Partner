@@ -190,6 +190,18 @@ export function useBranches() {
         targetTopic: `upcoming_${branchId}`,
         createdAt: Timestamp.now(),
       });
+      // Loop 5: the record alone notifies nobody — fan out over FCM and
+      // fail LOUD when the server refuses, so staff never celebrate an
+      // unsent broadcast. The doc above remains as the audit record.
+      const { partnerFunctionsApi } = await import('@/services/partnerFunctionsApi');
+      const result = await partnerFunctionsApi.broadcastToTopic({
+        topic: `upcoming_${branchId}`,
+        title,
+        body,
+      });
+      if (!result?.success) {
+        throw new Error('Announcement recorded, but push fan-out was refused by the server — subscribers were NOT notified.');
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['branches'] });
