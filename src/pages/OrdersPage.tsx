@@ -181,6 +181,11 @@ export function OrdersPage() {
         isLoading={isLoading}
         onPrintKot={handlePrintKot}
         onDispatchPorter={handleDispatchPorter}
+        onClearFilters={() => {
+          setChannelFilter('all');
+          setStatusFilter('all');
+          setSearchQuery('');
+        }}
       />
 
       {/* Walk-in Order Creation Modal */}

@@ -282,6 +282,16 @@ export function MenuPage() {
             <UtensilsCrossed className="w-10 h-10 mx-auto text-zinc-600" />
             <h3 className="font-bold text-white text-sm">No items matching filter</h3>
             <p className="text-xs text-zinc-400">Try adjusting your search query or category filter</p>
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery('');
+                setSelectedCategory('all');
+              }}
+              className="mt-3 px-4 py-2 rounded-xl bg-[#0E4825] hover:bg-[#135d30] text-emerald-300 text-xs font-bold transition-colors cursor-pointer min-h-[44px]"
+            >
+              Clear filters
+            </button>
           </div>
         ) : (
           filteredItems.map((item) => (

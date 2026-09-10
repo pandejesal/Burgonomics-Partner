@@ -246,6 +246,11 @@ export function TicketsPage() {
         tickets={filteredTickets}
         onOpenResolveModal={setResolvingTicket}
         onQuickEscalate={handleQuickEscalate}
+        onClearFilters={() => {
+          setActiveTierTab('all');
+          setCategoryFilter('all');
+          setSearchQuery('');
+        }}
       />
 
       {/* Resolve Ticket Modal */}

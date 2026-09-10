@@ -19,6 +19,7 @@ interface OrderTableListProps {
   onDispatchPorter?: (orderId: string) => void;
   isLoading?: boolean;
   className?: string;
+  onClearFilters?: () => void;
 }
 
 export function OrderTableList({
@@ -27,6 +28,7 @@ export function OrderTableList({
   onDispatchPorter,
   isLoading = false,
   className = '',
+  onClearFilters,
 }: OrderTableListProps) {
   if (isLoading) {
     return (
@@ -43,6 +45,15 @@ export function OrderTableList({
         <AlertCircle className="w-10 h-10 mx-auto mb-2 text-neutral-600" />
         <p className="text-sm font-bold text-white">No orders matching filter criteria.</p>
         <p className="text-xs text-neutral-500 mt-0.5">Try selecting another channel, status chip, or clearing search query.</p>
+        {onClearFilters && (
+          <button
+            type="button"
+            onClick={onClearFilters}
+            className="mt-3 px-4 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-bold transition-colors cursor-pointer min-h-[44px]"
+          >
+            Clear filters
+          </button>
+        )}
       </div>
     );
   }
