@@ -240,22 +240,22 @@ export const AdminRefundsPage: React.FC = () => {
           </span>
         </AdminCard>
 
-        <AdminCard className="relative overflow-hidden border-l-4 border-l-[#FF6600]">
+        <AdminCard className="relative overflow-hidden border-l-4 border-l-accent">
           <div className="absolute top-0 right-0 w-24 h-24 bg-orange-500/5 rounded-full blur-2xl" />
-          <span className="block text-[9px] font-black text-[#FF6600] uppercase tracking-widest font-mono">
+          <span className="block text-[9px] font-black text-accent dark:text-accent-light uppercase tracking-widest font-mono">
             AWAITING RELEASE
           </span>
           <span className="block text-2xl font-black font-mono tracking-tight text-gray-900 mt-1 dark:text-white">
             ₹{metrics.pendingVolume.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
           </span>
-          <span className="block text-[10px] text-[#FF6600] font-mono mt-1">
+          <span className="block text-[10px] text-accent dark:text-accent-light font-mono mt-1">
             {metrics.pendingCount} pending authorization
           </span>
         </AdminCard>
 
         <AdminCard className="relative overflow-hidden border-l-4 border-l-[#0E4825]">
-          <div className="absolute top-0 right-0 w-24 h-24 bg-[#0E4825]/5 rounded-full blur-2xl" />
-          <span className="block text-[9px] font-black text-[#0E4825] uppercase tracking-widest font-mono">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-primary/5 rounded-full blur-2xl" />
+          <span className="block text-[9px] font-black text-primary uppercase tracking-widest font-mono">
             COMPLETED SETTLEMENTS
           </span>
           <span className="block text-2xl font-black font-mono tracking-tight text-gray-900 mt-1 dark:text-white">
@@ -291,7 +291,7 @@ export const AdminRefundsPage: React.FC = () => {
                 onClick={() => setActiveTab(tab)}
                 className={`flex-1 sm:flex-initial px-4 py-2 rounded-xl text-xs font-bold transition-all uppercase font-mono ${
                   activeTab === tab
-                    ? "bg-[#0E4825] text-white shadow-sm"
+                    ? "bg-primary text-white shadow-sm"
                     : "text-gray-400 hover:text-gray-900 dark:hover:text-white"
                 }`}
               >
@@ -421,7 +421,7 @@ export const AdminRefundsPage: React.FC = () => {
                   <div className="flex items-center justify-between pt-3 border-t border-gray-50 dark:border-gray-800/40 gap-2">
                     <Link
                       to={`/admin/payments/${r.paymentId}`}
-                      className="text-[10px] font-black uppercase text-[#0E4825] dark:text-emerald-400 hover:underline font-mono"
+                      className="text-[10px] font-black uppercase text-primary dark:text-emerald-400 hover:underline font-mono"
                     >
                       View Original Txn ID
                     </Link>
@@ -439,7 +439,7 @@ export const AdminRefundsPage: React.FC = () => {
                               }
                               setRejectingRefund(r);
                             }}
-                            className="px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 text-[10px] font-extrabold uppercase transition-all cursor-pointer"
+                            className="px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 text-[10px] font-extrabold uppercase transition-all cursor-pointer min-h-[44px]"
                           >
                             Reject
                           </button>
@@ -454,7 +454,7 @@ export const AdminRefundsPage: React.FC = () => {
                               }
                               setApprovingRefund(r);
                             }}
-                            className="px-3 py-1.5 rounded-lg bg-[#0E4825] text-white hover:bg-[#0B3A1D] text-[10px] font-extrabold uppercase transition-all cursor-pointer shadow-sm"
+                            className="px-3 py-1.5 rounded-lg bg-primary text-white hover:bg-[#0B3A1D] text-[10px] font-extrabold uppercase transition-all cursor-pointer shadow-sm min-h-[44px]"
                           >
                             Approve Payout
                           </button>
@@ -464,7 +464,7 @@ export const AdminRefundsPage: React.FC = () => {
                       {isFailed && (
                         <button
                           onClick={() => handleRetryRefund(r.id)}
-                          className="px-3 py-1.5 rounded-lg bg-gray-900 text-white dark:bg-gray-850 hover:bg-gray-800 text-[10px] font-extrabold uppercase transition-all cursor-pointer shadow-sm flex items-center gap-1"
+                          className="px-3 py-1.5 rounded-lg bg-gray-900 text-white dark:bg-gray-850 hover:bg-gray-800 text-[10px] font-extrabold uppercase transition-all cursor-pointer shadow-sm flex items-center gap-1 min-h-[44px]"
                         >
                           <RefreshCw size={10} />
                           <span>Retry Release</span>

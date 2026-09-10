@@ -189,7 +189,7 @@ export function OrderCancelRefundModal({
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black uppercase tracking-wider flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black uppercase tracking-wider flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 min-h-[44px]"
               >
                 {isSubmitting ? (
                   <>

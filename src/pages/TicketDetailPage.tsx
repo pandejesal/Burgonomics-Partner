@@ -599,7 +599,7 @@ export function TicketDetailPage() {
             <button
               onClick={handleExecuteAction}
               disabled={updateTicket.isPending || isResolving || !!partialRefundError}
-              className="w-full py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-white font-black text-xs uppercase tracking-wider shadow-md transition-colors cursor-pointer"
+              className="w-full py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-white font-black text-xs uppercase tracking-wider shadow-md transition-colors cursor-pointer min-h-[44px]"
             >
               {isResolving ? 'Processing Server Action…' : (
                 <>
