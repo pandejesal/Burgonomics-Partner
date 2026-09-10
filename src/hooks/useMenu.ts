@@ -7,13 +7,11 @@ import {
   collection,
   getDocs,
   doc,
-  updateDoc,
   query,
   where,
   Timestamp,
 } from 'firebase/firestore';
 import type { MenuItem, MenuCategory } from '@/types';
-import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
 import {
   syncPetpoojaMenuForBranch,
   checkAndAutoSyncMenu,
@@ -163,49 +161,6 @@ export function useMenu() {
       });
   }, [branchId, queryClient]);
 
-  // Toggle item 86-ing / availability on the canonical `products` doc, then
-  // propagate to the physical Petpooja POS (best-effort — Firestore write is
-  // the instant UX, POS push is reconciled by the retry worker on failure).
-  const toggleAvailability = useMutation({
-    mutationFn: async ({
-      itemId,
-      available,
-    }: {
-      itemId: string;
-      available: boolean;
-    }) => {
-      if (!branchId) throw new Error('No branch selected');
-
-      const itemRef = doc(db, 'products', itemId);
-      await updateDoc(itemRef, {
-        inStock: available,
-        // Re-enabling must clear stale 86 metadata, or the item stays
-        // visually 86d while actually in stock.
-        ...(available
-          ? { disabledUntil: null, eightSixDuration: null, eightSixReason: null }
-          : {}),
-        lastSyncedAt: Timestamp.now(),
-      });
-
-      const cached = queryClient.getQueryData<MenuItem[]>(['menuItems', branchId]);
-      const petpoojaItemId = cached?.find((i) => i.id === itemId)?.petpoojaItemId;
-      if (!petpoojaItemId) {
-        // Never push a Firestore doc id to the POS as an item id — the KOT
-        // side would 86 the wrong item (or nothing) with a success response.
-        console.warn(`[useMenu] No petpoojaItemId for ${itemId} — POS push skipped`);
-        return;
-      }
-      try {
-        await partnerFunctionsApi.syncItemStock(branchId, petpoojaItemId, available);
-      } catch (err) {
-        console.warn('[useMenu] Petpooja stock push failed (Firestore state kept):', err);
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['menuItems', branchId] });
-    },
-  });
-
   // Manual Petpooja sync mutation
   const syncPetpooja = useMutation({
     mutationFn: async () => {
@@ -232,7 +187,6 @@ export function useMenu() {
     error: productsError,
     refetch: refetchProducts,
     lastSyncedAt,
-    toggleAvailability,
     syncPetpooja,
   };
 }

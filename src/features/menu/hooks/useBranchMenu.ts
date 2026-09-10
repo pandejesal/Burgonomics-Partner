@@ -29,18 +29,29 @@ async function pushStock(
   items: MenuItem[] | undefined,
   itemId: string,
   inStock: boolean
-) {
-  const petpoojaItemId = items?.find((i) => i.id === itemId)?.petpoojaItemId;
+): Promise<boolean> {
+  const menuItem = items?.find((i) => i.id === itemId);
+  // Loop 6: combos carry fabricated local ids (createComboMeal) unknown to
+  // Petpooja — pushing one as an item id could 86 an unrelated POS item on
+  // id collision, or silently no-op. Combos 86 on the customer app only;
+  // component-level POS 86ing is a product call.
+  if (menuItem?.isCombo) {
+    console.warn(`[useBranchMenu] Combo ${itemId} has no POS identity — POS push skipped (app-only 86)`);
+    return false;
+  }
+  const petpoojaItemId = menuItem?.petpoojaItemId;
   if (!petpoojaItemId) {
     // Never push a Firestore doc id to the POS as an item id — the KOT side
     // would 86 the wrong item (or nothing) with a success response.
     console.warn(`[useBranchMenu] No petpoojaItemId for ${itemId} — POS push skipped`);
-    return;
+    return false;
   }
   try {
     await partnerFunctionsApi.syncItemStock(branchId, petpoojaItemId, inStock);
+    return true;
   } catch (err) {
     console.warn('[useBranchMenu] Petpooja stock push failed (Firestore state kept):', err);
+    return false;
   }
 }
 
@@ -119,7 +130,9 @@ export function useBranchMenu() {
       await updateDoc(itemRef, payload).catch(async () => {
         await setDoc(itemRef, { ...payload, branchId }, { merge: true });
       });
-      await pushStock(branchId, baseMenu.items, itemId, false);
+      // Loop 6: report POS propagation honestly — the page toast must not
+      // claim "& POS" when the best-effort push failed or skipped.
+      return { posSynced: await pushStock(branchId, baseMenu.items, itemId, false) };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['menuItems', branchId] });
@@ -202,7 +215,9 @@ export function useBranchMenu() {
 
       await setDoc(itemRef, {
         id: comboId,
-        petpoojaItemId: comboId,
+        // Loop 6: NO fabricated petpoojaItemId — combos don't exist in
+        // Petpooja, and a fake id in the shared id space risks 86ing an
+        // unrelated POS item. pushStock skips docs without one (app-only 86).
         ...(restId ? { restId } : {}),
         name: comboData.name,
         description: comboData.description,

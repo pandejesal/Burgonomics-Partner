@@ -84,15 +84,23 @@ export function MenuPage() {
   };
 
   const handleConfirm86 = async (itemId: string, duration: EightSixDuration, reason: string) => {
+    let res: { posSynced: boolean } | undefined;
     try {
-      await markItem86.mutateAsync({ itemId, duration, reason });
-      showToast('Item marked out of stock on customer app & POS');
+      res = await markItem86.mutateAsync({ itemId, duration, reason });
     } catch (err) {
       console.error('86-ing failed:', err);
       showToast('Could not update stock — no changes were made.');
+      return;
     }
+    // Loop 6: success toast ONLY on success — the old fall-through toasted
+    // "marked 86ed" even after a failed write, so staff believed the item
+    // was off while it stayed orderable.
     const item = items?.find((i) => i.id === itemId);
-    showToast(`${item?.name || 'Item'} marked 86ed (${duration.replace('_', ' ')})`);
+    showToast(
+      res?.posSynced
+        ? `${item?.name || 'Item'} marked 86ed (${duration.replace('_', ' ')}) — customer app & POS`
+        : `${item?.name || 'Item'} marked 86ed on customer app — POS sync pending, retry from menu if it lingers`
+    );
   };
 
   const filteredItems = (items || []).filter((item) => {
