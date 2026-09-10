@@ -30,6 +30,7 @@ export function OrderCancelRefundModal({
   const [customNotes, setCustomNotes] = useState('');
   const [shouldRefund, setShouldRefund] = useState(order.paymentStatus === 'completed');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -58,11 +59,13 @@ export function OrderCancelRefundModal({
     if (!hasPermission) return;
 
     setIsSubmitting(true);
+    setSubmitError(null);
     try {
       await onConfirmCancel(selectedReason, customNotes, shouldRefund);
       onClose();
     } catch (err) {
       console.error('Cancellation failed:', err);
+      setSubmitError(err instanceof Error ? err.message : 'Cancellation failed — please retry.');
     } finally {
       setIsSubmitting(false);
     }
@@ -162,6 +165,14 @@ export function OrderCancelRefundModal({
                 <p className="text-[11px] text-neutral-400 pl-5">
                   Reverses customer transaction via Razorpay API route split back to the original payment source.
                 </p>
+              </div>
+            )}
+
+            {/* Submit Error */}
+            {submitError && (
+              <div role="alert" className="p-3 rounded-2xl bg-red-950/50 border border-red-900/60 text-rose-200 font-semibold flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>{submitError}</span>
               </div>
             )}
 
