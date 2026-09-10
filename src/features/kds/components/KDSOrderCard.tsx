@@ -13,6 +13,13 @@ import {
 import { KOTTimerBadge } from './KOTTimerBadge';
 import type { Order, OrderStatus } from '@/types';
 
+/** Loop 10 (DPDP): wall-screen phones show last-5 only; tap-to-call keeps full number in href. */
+function maskKitchenPhone(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length <= 5) return '•••••';
+  return `••••• ${digits.slice(-5)}`;
+}
+
 interface KDSOrderCardProps {
   order: Order;
   checkedItems: Record<string, boolean>;
@@ -109,9 +116,13 @@ export function KDSOrderCard({
         <div className="truncate">
           <span className="text-white font-bold">{order.customerName || 'Customer'}</span>
           {order.customerPhone && (
-            <span className="text-neutral-500 ml-1.5 font-mono text-[11px]">
-              ({order.customerPhone})
-            </span>
+            <a
+              href={`tel:${order.customerPhone.replace(/[^+\d]/g, '')}`}
+              className="text-neutral-500 ml-1.5 font-mono text-[11px] underline decoration-dotted underline-offset-2"
+              title="Tap to call customer"
+            >
+              ({maskKitchenPhone(order.customerPhone)})
+            </a>
           )}
         </div>
         <span className="font-mono font-bold text-neutral-400">
