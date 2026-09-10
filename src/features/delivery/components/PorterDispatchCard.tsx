@@ -105,6 +105,9 @@ export function PorterDispatchCard({
   // Loop 11: dispatch books a real paid courier — require explicit confirm
   // (every other money path already confirms). Fare shown before commit.
   const [confirmDispatch, setConfirmDispatch] = React.useState(false);
+  // Loop: cancelling kills a live courier booking (rider may be en route) —
+  // require explicit confirm, same as dispatch.
+  const [confirmCancel, setConfirmCancel] = React.useState(false);
   useEffect(() => {
     onFetchQuote(order);
   }, [order.id]);
@@ -284,15 +287,31 @@ export function PorterDispatchCard({
             </button>
           </>
         ) : (
-          /* Cancel / Re-dispatch button */
+          <>
+          /* Cancel / Re-dispatch button (confirmed — kills a live booking) */
           <button
             type="button"
-            onClick={() => onCancelPorter(order.id)}
-            className="w-full py-2 rounded-xl bg-rose-950/40 hover:bg-rose-950/80 border border-rose-800/60 text-rose-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+            onClick={() => setConfirmCancel(true)}
+            className="w-full py-2 rounded-xl bg-rose-950/40 hover:bg-rose-950/80 border border-rose-800/60 text-rose-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer min-h-[44px]"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span>Cancel Porter / Re-assign</span>
           </button>
+          {confirmCancel && (
+            <ConfirmDialog
+              isOpen={true}
+              onClose={() => setConfirmCancel(false)}
+              onConfirm={() => {
+                setConfirmCancel(false);
+                onCancelPorter(order.id);
+              }}
+              title="Cancel Porter booking?"
+              description={`This cancels the live courier for order ${shortCode} and reverts it to the Ready queue. The rider may already be en route.`}
+              confirmLabel="Cancel Booking"
+              isDestructive={true}
+            />
+          )}
+          </>
         )}
       </div>
     </div>
