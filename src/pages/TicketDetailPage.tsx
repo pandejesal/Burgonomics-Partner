@@ -513,6 +513,7 @@ export function TicketDetailPage() {
                         type="text"
                         inputMode="numeric"
                         placeholder="Amount to refund (e.g. 99)"
+                        aria-label="Partial refund amount in rupees"
                         value={refundAmountInput}
                         onChange={(e) => setRefundAmountInput(e.target.value)}
                         aria-invalid={!!partialRefundError}

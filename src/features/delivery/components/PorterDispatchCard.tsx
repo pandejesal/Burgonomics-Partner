@@ -16,6 +16,7 @@ import {
 import type { Order } from '@/types';
 import type { PorterDeliveryQuote } from '@/services/porterDelivery';
 import { isSafeTelNumber, isSafeTrackingUrl } from '@/utils/urlSafety';
+import { ConfirmDialog } from '../../../admin/components/Utilities';
 
 interface PorterDispatchCardProps {
   order: Order;
@@ -101,6 +102,9 @@ export function PorterDispatchCard({
   onOpenAssignModal,
   onCancelPorter,
 }: PorterDispatchCardProps) {
+  // Loop 11: dispatch books a real paid courier — require explicit confirm
+  // (every other money path already confirms). Fare shown before commit.
+  const [confirmDispatch, setConfirmDispatch] = React.useState(false);
   useEffect(() => {
     onFetchQuote(order);
   }, [order.id]);
@@ -244,16 +248,29 @@ export function PorterDispatchCard({
       <div className="flex items-center gap-2 pt-1">
         {!isDispatched ? (
           <>
-            {/* Primary Action: Book Porter Courier */}
+            {/* Primary Action: Book Porter Courier (confirmed — real paid booking) */}
             <button
               type="button"
               disabled={isDispatching}
-              onClick={() => onDispatchPorter(order)}
-              className="flex-1 py-2.5 rounded-xl bg-[#FF6600] hover:bg-[#e05a00] text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50"
+              onClick={() => setConfirmDispatch(true)}
+              className="flex-1 py-2.5 rounded-xl bg-[#FF6600] hover:bg-[#e05a00] text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50 min-h-[44px]"
             >
               <Zap className="w-3.5 h-3.5 fill-current" />
               <span>{isDispatching ? 'Booking...' : `Call Porter (${fareEstimate})`}</span>
             </button>
+            {confirmDispatch && (
+              <ConfirmDialog
+                isOpen={true}
+                onClose={() => setConfirmDispatch(false)}
+                onConfirm={() => {
+                  setConfirmDispatch(false);
+                  onDispatchPorter(order);
+                }}
+                title="Book Porter courier?"
+                description={`This books a real paid courier for order ${shortCode} at an estimated fare of ${fareEstimate}. This action spends money.`}
+                confirmLabel="Book Courier"
+              />
+            )}
 
             {/* Fallback Action: In-House Staff Assignment */}
             <button

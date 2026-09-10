@@ -8,6 +8,7 @@
 import { Capacitor } from '@capacitor/core';
 import { toast } from 'sonner';
 import { logger } from '@/core/logging/logger';
+import { isSafeDeepLink } from '@/utils/urlSafety';
 import type { User } from '@/types';
 
 let listenersAttached = false;
@@ -221,6 +222,23 @@ async function attachListenersOnce(): Promise<void> {
       });
     });
 
+    // Loop 11: map an allowlisted deep link to an in-app path.
+    // burgonomics://menu/offers → /menu/offers; owned https → its path.
+    // Returns null when nothing safe can be derived (caller skips).
+    const toInAppPath = (link: string): string | null => {
+      const appMatch = /^burgonomics:\/\/([^?#]+)((?:[?#].*)?)$/.exec(link.trim());
+      if (appMatch) return `/${appMatch[1]}${appMatch[2] || ''}`;
+      try {
+        const u = new URL(link.trim());
+        if (/^(burgonomics\.com|partner\.burgonomics\.com|burgonomics\.netlify\.app)$/.test(u.hostname)) {
+          return `${u.pathname}${u.search}${u.hash}` || '/';
+        }
+      } catch {
+        return null;
+      }
+      return null;
+    };
+
     // 5. System Tray Click Action Listener
     PushNotifications.addListener('pushNotificationActionPerformed', (action: any) => {
       const data = action?.notification?.data || {};
@@ -236,6 +254,17 @@ async function attachListenersOnce(): Promise<void> {
         setTimeout(() => {
           window.location.href = `/tickets/${ticketId}`;
         }, 100);
+      } else if (typeof data.deepLink === 'string' && isSafeDeepLink(data.deepLink)) {
+        // Loop 11: campaign deep links (burgonomics://menu, owned https) used
+        // to die — no native scheme handler exists. Route allowlisted links
+        // through the in-app router instead. Unknown schemes/hosts rejected
+        // by isSafeDeepLink, never navigated.
+        const path = toInAppPath(data.deepLink);
+        if (path) {
+          setTimeout(() => {
+            window.location.href = path;
+          }, 100);
+        }
       }
     });
 
