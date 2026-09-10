@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { OrderStatus } from '@/types';
+import { ConfirmDialog } from '../admin/components/Utilities';
 
 export function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -51,6 +52,9 @@ export function OrderDetailPage() {
   const [porterQuote, setPorterQuote] = useState<PorterDeliveryQuote | null>(null);
   const [loadingQuote, setLoadingQuote] = useState(false);
   const [isDispatchingPorter, setIsDispatchingPorter] = useState(false);
+  // Loop: dispatch books a real paid courier — confirm first (same as the
+  // PorterDispatchCard confirm; fare shown before commit).
+  const [confirmPorterDispatch, setConfirmPorterDispatch] = useState(false);
 
   useEffect(() => {
     if (order && (order.orderType === 'delivery' || (order as any).fulfillment === 'delivery')) {
@@ -447,12 +451,25 @@ export function OrderDetailPage() {
                 <button
                   type="button"
                   disabled={isDispatchingPorter || order.status === 'delivered' || order.status === 'cancelled'}
-                  onClick={handleDispatchPorterRider}
-                  className="w-full py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md transition-all cursor-pointer disabled:opacity-50"
+                  onClick={() => setConfirmPorterDispatch(true)}
+                  className="w-full py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md transition-all cursor-pointer disabled:opacity-50 min-h-[44px]"
                 >
                   <Bike className="w-4 h-4" />
                   <span>{isDispatchingPorter ? 'Dispatching...' : 'Dispatch Porter Rider'}</span>
                 </button>
+                {confirmPorterDispatch && (
+                  <ConfirmDialog
+                    isOpen={true}
+                    onClose={() => setConfirmPorterDispatch(false)}
+                    onConfirm={() => {
+                      setConfirmPorterDispatch(false);
+                      void handleDispatchPorterRider();
+                    }}
+                    title="Dispatch Porter rider?"
+                    description={`This books a real paid courier${porterQuote ? ` at an estimated fare of ₹${porterQuote.estimatedFare} (ETA ${porterQuote.estimatedPickupMinutes}m)` : ''}. This action spends money.`}
+                    confirmLabel="Dispatch Rider"
+                  />
+                )}
               </div>
             )}
           </div>
