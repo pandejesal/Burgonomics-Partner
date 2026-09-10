@@ -88,6 +88,13 @@ export const AdminReconciliationPage: React.FC = () => {
   };
 
   const handleRecheckDiscrepancy = (id: string) => {
+    if (!canPerformReconciliation) {
+      toast.error(
+        "Access Denied: Your administrative role is unauthorized to re-run financial discrepancy checks.",
+      );
+      return;
+    }
+
     paymentStorage.resolveDiscrepancy(id, "retry");
   };
 
@@ -150,8 +157,8 @@ export const AdminReconciliationPage: React.FC = () => {
           </span>
         </AdminCard>
 
-        <AdminCard className="relative overflow-hidden border-l-4 border-l-[#FF6600]">
-          <span className="block text-[9px] font-black text-[#FF6600] uppercase tracking-widest font-mono">
+        <AdminCard className="relative overflow-hidden border-l-4 border-l-accent">
+          <span className="block text-[9px] font-black text-accent dark:text-accent-light uppercase tracking-widest font-mono">
             DUPLICATE ALERTS
           </span>
           <span className="block text-2xl font-black font-mono tracking-tight text-gray-900 mt-1 dark:text-white">
@@ -174,7 +181,7 @@ export const AdminReconciliationPage: React.FC = () => {
           </span>
         </AdminCard>
 
-        <AdminCard className="relative overflow-hidden bg-gradient-to-br from-[#0E4825] to-[#0A321A] text-white">
+        <AdminCard className="relative overflow-hidden bg-gradient-to-br from-primary to-[#0A321A] text-white">
           <span className="block text-[9px] font-black text-green-200 uppercase tracking-widest font-mono">
             LEDGER COHERENCE
           </span>
@@ -227,7 +234,7 @@ export const AdminReconciliationPage: React.FC = () => {
           {/* Discrepancies stream */}
           <AdminCard
             title="Gateway vs Database Discrepancy Ledger"
-            subtitle={`Analyzing ${filteredDiscrepancies.length} discrepancy warnings across system threads`}
+            subtitle={`Analyzing ${filteredDiscrepancies.length} discrepancy warnings across system threads · Simulation — Sync Recheck / Force Settle act on local demo data only and settle nothing on the real ledger`}
           >
             {filteredDiscrepancies.length === 0 ? (
               <div className="py-8 text-center text-gray-400 font-mono">
@@ -297,7 +304,7 @@ export const AdminReconciliationPage: React.FC = () => {
                           <span className="block text-[9px] font-bold text-gray-400 uppercase">
                             Razorpay API Payload
                           </span>
-                          <span className="block font-black text-[#FF6600] mt-1 font-mono">
+                          <span className="block font-black text-accent dark:text-accent-light mt-1 font-mono">
                             ₹{(d.gatewayAmountPaise / 100).toFixed(2)}
                           </span>
                           <span className="block text-[9px] text-gray-400 font-mono mt-0.5">
@@ -337,7 +344,7 @@ export const AdminReconciliationPage: React.FC = () => {
                       <div className="flex items-center justify-between pt-3 border-t border-gray-50 dark:border-gray-800/40">
                         <Link
                           to={`/admin/payments/${d.paymentId}`}
-                          className="text-[10px] font-black uppercase text-[#0E4825] dark:text-emerald-400 hover:underline font-mono inline-flex items-center gap-1"
+                          className="text-[10px] font-black uppercase text-primary dark:text-emerald-400 hover:underline font-mono inline-flex items-center gap-1"
                         >
                           <Link2 size={10} />
                           <span>Audit Payment Flow</span>
@@ -353,7 +360,7 @@ export const AdminReconciliationPage: React.FC = () => {
                             </button>
                             <button
                               onClick={() => handleResolveDiscrepancy(d.id)}
-                              className="px-3 py-1.5 rounded-lg bg-[#0E4825] text-white hover:bg-[#0B3A1D] text-[10px] font-extrabold uppercase transition-all cursor-pointer shadow-sm font-sans"
+                              className="px-3 py-1.5 rounded-lg bg-primary text-white hover:bg-[#0B3A1D] text-[10px] font-extrabold uppercase transition-all cursor-pointer shadow-sm font-sans"
                             >
                               Force Settle
                             </button>
@@ -426,7 +433,7 @@ export const AdminReconciliationPage: React.FC = () => {
                           <span className="text-gray-400 font-sans font-medium">
                             Order Reference:
                           </span>
-                          <span className="font-bold text-[#FF6600]">{dup.orderId}</span>
+                          <span className="font-bold text-accent dark:text-accent-light">{dup.orderId}</span>
                         </div>
                         <div className="flex justify-between items-center font-mono">
                           <span className="text-gray-400 font-sans font-medium">Amount:</span>
@@ -459,7 +466,7 @@ export const AdminReconciliationPage: React.FC = () => {
                           </button>
                           <button
                             onClick={() => handleDuplicateAction(dup.orderId, "merge")}
-                            className="py-2 text-center bg-[#0E4825] text-white hover:bg-[#0B3A1D] font-bold rounded-lg text-[9px] uppercase transition-all cursor-pointer shadow-sm"
+                            className="py-2 text-center bg-primary text-white hover:bg-[#0B3A1D] font-bold rounded-lg text-[9px] uppercase transition-all cursor-pointer shadow-sm"
                           >
                             Merge Txns
                           </button>

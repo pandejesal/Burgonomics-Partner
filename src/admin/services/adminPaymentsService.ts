@@ -9,7 +9,6 @@ import {
   onSnapshot,
   doc,
   updateDoc,
-  setDoc,
 } from "firebase/firestore";
 import { TransactionDetails, RefundDetails, DiscrepancyDetails } from "../pages/paymentsData";
 
@@ -106,37 +105,6 @@ export const adminPaymentsService = {
       return true;
     } catch (e) {
       console.error("Failed to resolve discrepancy", e);
-      return false;
-    }
-  },
-
-  /**
-   * Initiate a manual refund
-   */
-  async processManualRefund(
-    paymentId: string,
-    amountPaise: number,
-    reason: string,
-    processedBy: string,
-  ): Promise<boolean> {
-    try {
-      // In a real app, this would trigger a Firebase Function to talk to Razorpay API
-      // For now, we mock the local state creation of a pending refund record
-      // to demonstrate the UI flow correctly connecting to Firestore
-      const newRefundRef = doc(collection(db, "refunds"));
-      await setDoc(newRefundRef, {
-        id: newRefundRef.id,
-        paymentId,
-        amountPaise,
-        reason,
-        status: "PENDING",
-        processedBy,
-        createdAt: new Date().toISOString(),
-        gatewayStatus: "initiated",
-      });
-      return true;
-    } catch (e) {
-      console.error("Failed to process manual refund", e);
       return false;
     }
   },
