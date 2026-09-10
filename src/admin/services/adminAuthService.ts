@@ -21,6 +21,18 @@ export interface LoginResponse {
   admin: AdminUser;
 }
 
+// Canonical admin roles (references/rbac.md, snake_case). login() and
+// checkAuthState() both deny unknown roles — a restore path must never be
+// more permissive than the login path.
+const KNOWN_ADMIN_ROLES = [
+  "brand_owner",
+  "developer",
+  "regional_manager",
+  "support",
+  "branch_owner",
+  "branch_staff",
+];
+
 class AdminAuthService {
   async login(email: string, password: string): Promise<LoginResponse> {
     try {
@@ -39,14 +51,24 @@ class AdminAuthService {
 
       const adminData = adminDocSnap.data();
 
+      // Loop 7: fail CLOSED on missing/malformed role — the old default
+      // granted Developer (top privilege) to any admins/{uid} doc without a
+      // role field. Unknown roles deny login; ops must provision explicitly.
+      if (!adminData.role || !KNOWN_ADMIN_ROLES.includes(adminData.role)) {
+        await signOut(auth);
+        throw new Error(
+          "Access Denied: admin role is missing or unrecognized — contact Brand to provision access."
+        );
+      }
+
       const adminUser: AdminUser = {
         id: user.uid,
         email: user.email || email,
         fullName: adminData.fullName || "Admin",
         avatar: adminData.avatar || null,
         role: {
-          name: adminData.role || "Developer",
-          permissions: adminData.permissions || ["admin.system", "admin.stores", "admin.orders"],
+          name: adminData.role,
+          permissions: Array.isArray(adminData.permissions) ? adminData.permissions : [],
         },
       };
 
@@ -117,6 +139,13 @@ class AdminAuthService {
 
             if (adminDocSnap.exists()) {
               const adminData = adminDocSnap.data();
+              // Loop 7: restore path matches login() strictness — an admins
+              // doc with a missing/unrecognized role restores nothing
+              // (fail closed), never a session with default permissions.
+              if (!adminData.role || !KNOWN_ADMIN_ROLES.includes(adminData.role)) {
+                resolve(null);
+                return;
+              }
               const accessToken = await user.getIdToken();
               resolve({
                 admin: {
@@ -125,12 +154,8 @@ class AdminAuthService {
                   fullName: adminData.fullName || "Admin",
                   avatar: adminData.avatar || null,
                   role: {
-                    name: adminData.role || "Admin",
-                    permissions: adminData.permissions || [
-                      "admin.system",
-                      "admin.stores",
-                      "admin.orders",
-                    ],
+                    name: adminData.role,
+                    permissions: Array.isArray(adminData.permissions) ? adminData.permissions : [],
                   },
                 },
                 accessToken,
