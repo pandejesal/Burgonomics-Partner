@@ -62,11 +62,13 @@ export function useTickets(params: UseTicketsParams = {}) {
       // (the old list.some() was O(n²) — ~4M comparisons at 2k+2k tickets).
       const buildConstraints = (): any[] => {
         const constraints: any[] = [
-          where('branchId', 'in', branchIds.slice(0, 10)),
-          orderBy('createdAt', 'desc'),
+          where("branchId", "in", branchIds.slice(0, 10)),
+          orderBy("createdAt", "desc"),
         ];
-        if (params.status && params.status !== 'all') {
-          constraints.unshift(where('status', '==', params.status));
+        if (params.status && params.status !== "all") {
+          // Firestore requires inequality filters before sort fields;
+          // pushing keeps createdAt last so the composite index is used.
+          constraints.push(where("status", "==", params.status));
         }
         return constraints;
       };

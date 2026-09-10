@@ -6,8 +6,6 @@
  * and foreground chime + toast alerts for incoming kitchen orders.
  */
 import { Capacitor } from '@capacitor/core';
-import { db } from '@/config/firebase';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { logger } from '@/core/logging/logger';
 import type { User } from '@/types';
@@ -162,20 +160,13 @@ async function attachListenersOnce(): Promise<void> {
 
       if (freshUser) {
         try {
-          await setDoc(
-            doc(db, 'device_tokens', token.value),
-            {
-              token: token.value,
-              userId: freshUser.id,
-              role: freshUser.role,
-              branchIds: freshUser.branchIds || [],
-              platform: Capacitor.getPlatform(),
-              updatedAt: serverTimestamp(),
-            },
-            { merge: true }
-          );
+          // device_tokens is server-owned (firestore.rules denies direct
+          // client writes) — register via the server endpoint so KOT pushes
+          // actually reach this terminal.
+          const { partnerFunctionsApi } = await import('@/services/partnerFunctionsApi');
+          await partnerFunctionsApi.registerDeviceToken(token.value, Capacitor.getPlatform());
         } catch (dbErr) {
-          console.warn('[Push] Failed to register token in Firestore:', dbErr);
+          console.warn('[Push] Failed to register token via server:', dbErr);
         }
       }
     });

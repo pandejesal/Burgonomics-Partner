@@ -163,6 +163,17 @@ export const partnerFunctionsApi = {
   },
 
   /**
+   * Registers this device token server-side (device_tokens is server-owned;
+   * direct client writes are denied by firestore.rules).
+   */
+  async registerDeviceToken(
+    token: string,
+    platform?: string
+  ): Promise<{ success: boolean }> {
+    return await apiRequest('/notifications/registerToken', { token, platform });
+  },
+
+  /**
    * Subscribes this device token to FCM topics (e.g. branch_<id>_orders for
    * KOT alerts). Topics can only be subscribed server-side.
    */

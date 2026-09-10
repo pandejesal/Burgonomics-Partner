@@ -52,20 +52,26 @@ class AdminAuthService {
 
       const accessToken = await user.getIdToken();
 
-      // Session Tracking
+      // Session Tracking (best-effort): admins/{uid}/sessions is server-minted
+      // only (firestore.rules denies client writes until the batch 4Z/5
+      // server mint lands). A denied write must never fail the login itself.
       const { device, browser, os } = getDeviceInfo();
-      const sessionRef = doc(collection(db, "admins", user.uid, "sessions"));
-      await setDoc(sessionRef, {
-        id: sessionRef.id,
-        device,
-        browser,
-        os,
-        ip: "Unknown",
-        country: "Unknown",
-        active: true,
-        lastSeen: new Date().toISOString(),
-      });
-      await secureStorage.set("admin_session_id", sessionRef.id);
+      try {
+        const sessionRef = doc(collection(db, "admins", user.uid, "sessions"));
+        await setDoc(sessionRef, {
+          id: sessionRef.id,
+          device,
+          browser,
+          os,
+          ip: "Unknown",
+          country: "Unknown",
+          active: true,
+          lastSeen: new Date().toISOString(),
+        });
+        await secureStorage.set("admin_session_id", sessionRef.id);
+      } catch (sessionErr) {
+        console.warn("Admin session tracking unavailable (server mint pending), login continues:", sessionErr);
+      }
 
       return {
         accessToken,
