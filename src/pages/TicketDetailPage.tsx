@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { useTicket } from '@/hooks/useTicket';
 import { useAuthStore } from '@/stores/authStore';
+import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
 import { validatePartialRefundAmount } from '@/utils/refundValidation';
 import { normalizeTier, normalizeTimeline } from '@/utils/ticketContract';
 import {
@@ -32,6 +34,7 @@ export function TicketDetailPage() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
   const { ticket, isLoading, updateTicket, addMessage } = useTicket(id || '');
+  const queryClient = useQueryClient();
 
   // 5 Tabs: 'refund' | 'goodwill' | 'escalate_brand' | 'escalate_dev' | 'standard'
   const [activeActionTab, setActiveActionTab] = useState<
@@ -45,6 +48,8 @@ export function TicketDetailPage() {
   const [replyText, setReplyText] = useState('');
   const [copiedPayload, setCopiedPayload] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [isResolving, setIsResolving] = useState(false);
 
   if (isLoading) {
     return (
@@ -100,24 +105,83 @@ export function TicketDetailPage() {
 
   const handleExecuteAction = async () => {
     setSuccessMessage('');
+    setActionError('');
+    // Server requires non-empty notes; never send a blank resolution.
+    const notes = resolutionNotes.trim() || 'Approved by operator';
+    const refreshTicket = async () => {
+      await queryClient.invalidateQueries({ queryKey: ['ticket', id] });
+      await queryClient.invalidateQueries({ queryKey: ['tickets'] });
+    };
 
+    // Loop 3: money-affecting actions resolve SERVER-side (POST
+    // /tickets/resolve runs autoRefund / loyalty ledger). A direct Firestore
+    // status flip moves no money — success is claimed only on server proof.
     if (activeActionTab === 'refund') {
       if (partialRefundError) return;
+      const action = refundType === 'full' ? 'full_refund' : 'partial_refund';
       const amount = refundType === 'partial' ? Number(refundAmountInput) : undefined;
-      await updateTicket.mutateAsync({
-        status: 'resolved',
-        resolutionAction: refundType === 'full' ? 'full_refund' : 'partial_refund',
-        refundAmount: amount,
-        resolution: `${refundType === 'full' ? '100% Full Refund' : `Partial Refund of ₹${amount}`} processed with Razorpay Route reversal. Notes: ${resolutionNotes.trim() || 'Approved by operator'}`,
-      });
-      setSuccessMessage(`Refund of ${refundType === 'full' ? '100% total' : `₹${amount}`} processed successfully with Route reversal.`);
+      setIsResolving(true);
+      try {
+        const result = await partnerFunctionsApi.resolveTicket({
+          ticketId: id || '',
+          action,
+          ...(amount !== undefined ? { amount } : {}),
+          notes,
+        });
+        const refundResult = (result as any)?.resolution?.refundResult;
+        const refundId = refundResult?.refundId || refundResult?.id;
+        await refreshTicket();
+        setSuccessMessage(
+          refundType === 'full'
+            ? `Full refund executed server-side${refundId ? ` (refund ${refundId})` : ''}. Ticket resolved.`
+            : `Partial refund of ₹${amount} executed server-side${refundId ? ` (refund ${refundId})` : ''}. Ticket resolved.`
+        );
+      } catch (err) {
+        setActionError(
+          err instanceof Error ? err.message : 'Refund failed server-side — ticket left open, no money moved. Retry or escalate.'
+        );
+      } finally {
+        setIsResolving(false);
+      }
+      setResolutionNotes('');
+      return;
     } else if (activeActionTab === 'goodwill') {
-      await updateTicket.mutateAsync({
-        status: 'resolved',
-        resolutionAction: goodwillType === 'coupon' ? 'discount_coupon' : 'loyalty_credit',
-        resolution: `Issued ₹100 Goodwill ${goodwillType === 'coupon' ? 'Promo Voucher' : 'Loyalty Grill Coins'}. Notes: ${resolutionNotes.trim() || 'Courtesy courtesy compensation'}`,
-      });
-      setSuccessMessage(`Goodwill ${goodwillType === 'coupon' ? 'Voucher' : 'Coins'} issued to customer.`);
+      setIsResolving(true);
+      try {
+        if (goodwillType === 'coins') {
+          // Server mints only when the ticket carries a customerId; guest
+          // tickets fail LOUD here instead of a fake "issued" banner.
+          if (!ticket?.customerId) {
+            throw new Error('Guest ticket has no customer profile — credit Grill Coins via the dashboard, ticket left open.');
+          }
+          await partnerFunctionsApi.resolveTicket({
+            ticketId: id || '',
+            action: 'loyalty_credit',
+            amount: 100,
+            notes,
+          });
+          await refreshTicket();
+          setSuccessMessage('100 Grill Coins credited server-side. Ticket resolved.');
+        } else {
+          // No coupon-mint endpoint exists server-side (resolve records the
+          // request only) — record honestly, never claim a voucher was issued.
+          await partnerFunctionsApi.resolveTicket({
+            ticketId: id || '',
+            action: 'discount_coupon',
+            notes: `Coupon request (₹100 goodwill): ${notes}`,
+          });
+          await refreshTicket();
+          setSuccessMessage('Coupon request recorded on the ticket — voucher NOT auto-minted (no issuance endpoint yet). Issue manually via dashboard.');
+        }
+      } catch (err) {
+        setActionError(
+          err instanceof Error ? err.message : 'Goodwill action failed server-side — ticket left open, nothing issued. Retry or escalate.'
+        );
+      } finally {
+        setIsResolving(false);
+      }
+      setResolutionNotes('');
+      return;
     } else if (activeActionTab === 'escalate_brand') {
       await updateTicket.mutateAsync({
         status: 'in_progress',
@@ -373,6 +437,14 @@ export function TicketDetailPage() {
           </div>
         )}
 
+        {/* Server-action failure banner — money did NOT move, ticket left open */}
+        {actionError && (
+          <div role="alert" className="bg-red-950 border border-red-700 rounded-xl p-3.5 text-xs text-red-300 font-bold flex items-center space-x-2 shadow-md">
+            <AlertCircle className="w-4 h-4 text-red-400" />
+            <span>{actionError}</span>
+          </div>
+        )}
+
         {/* Unified 5-Tab Action Panel (Active if not resolved or for updates) */}
         {!isResolved && (
           <div className="bg-bg border border-border rounded-2xl p-5 space-y-4">
@@ -525,14 +597,18 @@ export function TicketDetailPage() {
             {/* Submit Action Button */}
             <button
               onClick={handleExecuteAction}
-              disabled={updateTicket.isPending || !!partialRefundError}
+              disabled={updateTicket.isPending || isResolving || !!partialRefundError}
               className="w-full py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-white font-black text-xs uppercase tracking-wider shadow-md transition-colors cursor-pointer"
             >
-              {activeActionTab === 'refund' && 'Execute Refund & Resolve'}
-              {activeActionTab === 'goodwill' && 'Issue Goodwill & Resolve'}
-              {activeActionTab === 'escalate_brand' && 'Confirm Escalation to Brand Support'}
-              {activeActionTab === 'escalate_dev' && 'Dispatch P0 Snapshot to Developer Team'}
-              {activeActionTab === 'standard' && 'Confirm Resolution'}
+              {isResolving ? 'Processing Server Action…' : (
+                <>
+                  {activeActionTab === 'refund' && 'Execute Refund & Resolve'}
+                  {activeActionTab === 'goodwill' && 'Issue Goodwill & Resolve'}
+                  {activeActionTab === 'escalate_brand' && 'Confirm Escalation to Brand Support'}
+                  {activeActionTab === 'escalate_dev' && 'Dispatch P0 Snapshot to Developer Team'}
+                  {activeActionTab === 'standard' && 'Confirm Resolution'}
+                </>
+              )}
             </button>
           </div>
         )}

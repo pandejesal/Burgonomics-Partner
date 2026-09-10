@@ -193,4 +193,19 @@ export const partnerFunctionsApi = {
   ): Promise<{ success: boolean; unsubscribed: string[] }> {
     return await apiRequest('/notifications/unsubscribe', { token, topics });
   },
+
+  /**
+   * Resolves a support ticket server-side (refunds, loyalty credit, coupon
+   * record). Money-affecting actions MUST go through this — never flip ticket
+   * status with a direct Firestore write and claim money moved (Loop 3).
+   */
+  async resolveTicket(params: {
+    ticketId: string;
+    action: 'full_refund' | 'partial_refund' | 'discount_coupon' | 'loyalty_credit' | 'explanation';
+    amount?: number;
+    couponCode?: string;
+    notes: string;
+  }): Promise<{ success: boolean; ticketId: string; resolution?: Record<string, any> }> {
+    return await apiRequest('/tickets/resolve', params);
+  },
 };
