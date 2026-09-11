@@ -126,7 +126,10 @@ export function useBranches() {
         expectedLaunchDate: branchInput.expectedLaunchDate || null,
         bannerImage: branchInput.bannerImage || null,
         petpoojaStoreId: branchInput.petpoojaStoreId || null,
-        razorpayAccountId: branchInput.razorpayAccountId || `acc_Rzp_${Date.now().toString().slice(-6)}`,
+        // Loop: never fabricate a linked account id (the old default minted
+        // acc_Rzp_<timestamp>, routing real royalty splits at a nonexistent
+        // account). Absent → null; the Route worker skips with a log.
+        razorpayAccountId: branchInput.razorpayAccountId || null,
         brandRoyaltyPercent: branchInput.brandRoyaltyPercent || 5.0,
         deliveryRadiusKm: branchInput.deliveryRadiusKm || 7,
         prepTimeMinutes: branchInput.prepTimeMinutes || 20,
