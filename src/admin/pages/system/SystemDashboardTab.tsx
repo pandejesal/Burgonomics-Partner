@@ -11,7 +11,7 @@ import {
   Users,
   RefreshCw,
 } from "lucide-react";
-import { useAdminAuthStore } from "../../store/adminAuthStore";
+import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
 
 interface StatCardProps {
   title: string;
@@ -52,51 +52,38 @@ const MiniStatCard: React.FC<StatCardProps> = ({ title, value, icon: Icon, statu
 };
 
 export const SystemDashboardTab: React.FC = () => {
-  const { accessToken } = useAdminAuthStore();
   const [cpuVal, setCpuVal] = useState(24);
   const [memVal, setMemVal] = useState(48.5);
   const [activeUsers, setActiveUsers] = useState(115);
-  const [respTime, setRespTime] = useState(98);
+  // Loop 30/120: latency is MEASURED (null = no successful probe yet), never
+  // the old random walk.
+  const [respTime, setRespTime] = useState<number | null>(null);
+  const [apiReachable, setApiReachable] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Terminus dynamic health status states
-  const [dbStatus, setDbStatus] = useState<"healthy" | "critical">("healthy");
-  const [redisStatus, setRedisStatus] = useState<"healthy" | "critical">("healthy");
-  const [petpoojaStatus, setPetpoojaStatus] = useState<"healthy" | "critical" | "warning">(
-    "healthy",
-  );
-  const [razorpayStatus, setRazorpayStatus] = useState<"healthy" | "critical">("healthy");
-  const [firebaseStatus, setFirebaseStatus] = useState<"healthy" | "critical">("healthy");
+  // Terminus dynamic health status states — Loop 30/120: no live per-service
+  // probes exist (the old fetch hit a nonexistent endpoint and left everything
+  // stuck "healthy"). Unmonitored until real probes land; never claim knowledge.
+  type ServiceStatus = "healthy" | "critical" | "warning" | "unmonitored";
+  const [dbStatus, setDbStatus] = useState<ServiceStatus>("unmonitored");
+  const [redisStatus, setRedisStatus] = useState<ServiceStatus>("unmonitored");
+  const [petpoojaStatus, setPetpoojaStatus] = useState<ServiceStatus>("unmonitored");
+  const [razorpayStatus, setRazorpayStatus] = useState<ServiceStatus>("unmonitored");
+  // firebaseStatus folded into apiReachable (Firebase row derives from probe).
 
   const fetchHealthCheck = useCallback(async () => {
-    if (!accessToken) return;
     setIsLoading(true);
     try {
-      const response = await fetch("/api/v1/admin/dashboard/system-health", {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        const details = data.details || {};
-
-        setDbStatus(details.database?.status === "up" ? "healthy" : "critical");
-        setRedisStatus(details.redis?.status === "up" ? "healthy" : "critical");
-        setPetpoojaStatus(
-          details.petpooja?.status === "up"
-            ? "healthy"
-            : details.petpooja?.status === "warning"
-              ? "warning"
-              : "critical",
-        );
-        setRazorpayStatus(details.razorpay?.status === "up" ? "healthy" : "critical");
-        setFirebaseStatus(details.firebase?.status === "up" ? "healthy" : "critical");
-      }
+      const res = await partnerFunctionsApi.checkApiHealth();
+      setApiReachable(res.ok);
+      if (res.ok) setRespTime(Math.round(res.latencyMs));
     } catch (err) {
-      console.error("Failed to perform system Terminus health check", err);
+      setApiReachable(false);
+      console.error("API liveness probe failed", err);
     } finally {
       setIsLoading(false);
     }
-  }, [accessToken]);
+  }, []);
 
   useEffect(() => {
     fetchHealthCheck();
@@ -113,7 +100,7 @@ export const SystemDashboardTab: React.FC = () => {
         return Math.round(next * 10) / 10;
       });
       setActiveUsers((prev) => Math.max(90, prev + Math.floor(Math.random() * 3) - 1));
-      setRespTime((prev) => Math.max(70, prev + Math.floor(Math.random() * 9) - 4));
+      // Loop 30/120: latency is measured by the probe, not simulated.
     }, 4000);
     return () => clearInterval(interval);
   }, []);
@@ -141,42 +128,40 @@ export const SystemDashboardTab: React.FC = () => {
             <span>Critical</span>
           </span>
         );
+      case "unmonitored":
       default:
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-gray-500/10 text-gray-400 border border-gray-500/20 font-mono">
             <span className="h-1.5 w-1.5 rounded-full bg-gray-400" />
-            <span>Offline</span>
+            <span>Unmonitored</span>
           </span>
         );
     }
   };
 
+  // Loop 30/120: per-service numbers below were fiction ("Latency: 2.1ms",
+  // "Hit Ratio: 98.2%") on an endpoint that never existed. Unmonitored rows
+  // say so until real probes land.
   const healthChecks = [
     {
       name: "Database Cluster",
       status: dbStatus,
-      value: "PostgreSQL (Cloud SQL)",
-      details:
-        dbStatus === "healthy"
-          ? "Active connection pool OK. Latency: 2.1ms"
-          : "Connection failed or pooling depleted",
+      value: "Firestore (live reads)",
+      details: "No dedicated probe wired — Firestore reads succeed across the app.",
     },
     {
       name: "Redis Memory Cache",
       status: redisStatus,
-      value: "Redis v7 (Durable Server)",
-      details:
-        redisStatus === "healthy"
-          ? "Memory footprint optimal. Hit Ratio: 98.2%"
-          : "Redis connection timeout",
+      value: "No cache layer deployed",
+      details: "No Redis in this stack — nothing to monitor.",
     },
     {
       name: "Petpooja POS Bridge",
       status: petpoojaStatus,
       value: "POS Sync Gateway Node",
       details:
-        petpoojaStatus === "healthy"
-          ? "Signature verification & webhook queue online"
+        petpoojaStatus === "unmonitored"
+          ? "No live probe wired — see Petpooja sync logs for sync truth."
           : "Scraper endpoints slow or circuit-breaker open",
     },
     {
@@ -184,18 +169,20 @@ export const SystemDashboardTab: React.FC = () => {
       status: razorpayStatus,
       value: "Automated Checkout Ledger",
       details:
-        razorpayStatus === "healthy"
-          ? "Payment captures & instant refund triggers responsive"
+        razorpayStatus === "unmonitored"
+          ? "No live probe wired — see payment webhooks + audits for truth."
           : "Razorpay API handshake failure",
     },
     {
       name: "Firebase Service Suite",
-      status: firebaseStatus,
-      value: "Server-side Client Keys Engine",
+      status: apiReachable === null ? "unmonitored" : apiReachable ? "healthy" : "critical",
+      value: "Auth + Firestore + FCM",
       details:
-        firebaseStatus === "healthy"
-          ? "Auth challenge endpoints and user scopes synced"
-          : "Firebase API credentials invalid",
+        apiReachable === null
+          ? "API liveness probe has not run yet."
+          : apiReachable
+            ? "API reachable — Firebase services responding via live reads."
+            : "API UNREACHABLE — check connectivity and Functions deployment.",
     },
   ];
 
@@ -208,28 +195,28 @@ export const SystemDashboardTab: React.FC = () => {
           value={`${cpuVal}%`}
           icon={Cpu}
           status={cpuVal > 85 ? "critical" : cpuVal > 65 ? "warning" : "healthy"}
-          subtext="Quad-Core Server VM"
+          subtext="Simulated demo animation"
         />
         <MiniStatCard
           title="Server RAM Buffer"
           value={`${memVal}%`}
           icon={HardDrive}
           status="healthy"
-          subtext="Used: 3.88GB / 8GB"
+          subtext="Simulated demo animation"
         />
         <MiniStatCard
           title="Active Sessions"
           value={activeUsers}
           icon={Users}
           status="healthy"
-          subtext="Live websocket links"
+          subtext="Simulated demo animation"
         />
         <MiniStatCard
           title="Avg API Response Time"
-          value={`${respTime}ms`}
+          value={respTime === null ? "—" : `${respTime}ms`}
           icon={Activity}
-          status={respTime > 300 ? "warning" : "healthy"}
-          subtext="P95 Latency over 5m"
+          status={respTime !== null && respTime > 300 ? "warning" : "healthy"}
+          subtext={respTime === null ? "No successful probe yet" : "Measured API probe"}
         />
       </div>
 
@@ -238,10 +225,10 @@ export const SystemDashboardTab: React.FC = () => {
         <div className="flex items-center justify-between border-b border-gray-800 pb-4">
           <div>
             <h3 className="text-base font-black tracking-tight text-white font-mono">
-              LIVE SYSTEM HEALTH REGISTRIES
+              SYSTEM HEALTH REGISTRIES
             </h3>
             <p className="text-xs text-gray-400 uppercase tracking-widest mt-1 font-bold">
-              Automatic state checks executing every 30 seconds
+              API liveness probe every 30 seconds · per-service probes pending
             </p>
           </div>
           <div className="flex items-center gap-4">
