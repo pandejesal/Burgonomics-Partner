@@ -21,7 +21,9 @@ import type { Customer } from '@/types';
 
 export function CustomersPage() {
   const { user } = useAuthStore();
-  const { data: rawCustomers = [], isLoading } = useCustomers();
+  // Loop 40/120: surface query failure loudly — an erroring directory must
+  // never render as a confident empty list.
+  const { data: rawCustomers = [], isLoading, isError, error } = useCustomers();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [segmentFilter, setSegmentFilter] = useState<string>('all');
@@ -186,6 +188,16 @@ export function CustomersPage() {
           ))}
         </div>
       </div>
+
+      {/* Loop 40/120: query failure banner with recovery — never a silent
+          empty list when the directory errors (e.g. role-denied reads). */}
+      {isError && (
+        <div className="p-4 rounded-3xl bg-red-950/40 border border-red-800 text-xs text-red-300 font-semibold">
+          Couldn't load the customer directory
+          {error instanceof Error && error.message ? `: ${error.message}` : "."} Check
+          your connection and branch access, then reload.
+        </div>
+      )}
 
       {/* Customer CRM Table */}
       <CustomerTable
