@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Settings, ShieldCheck, Cpu, Mail, Zap, Lock, Save, CheckCircle2 } from "lucide-react";
+import { toast } from "sonner";
 
 export const SystemSettingsTab: React.FC = () => {
   const [smtpHost, setSmtpHost] = useState("smtp.postmarkapp.com");
@@ -10,9 +11,10 @@ export const SystemSettingsTab: React.FC = () => {
 
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
-    alert(
-      "System core settings saved successfully. Broadcasted configuration update signals to active production workers.",
-    );
+    // Loop: was alert() claiming settings saved + broadcast to production
+    // workers while persisting NOTHING (local useState only, no backend).
+    // Honest: local demo state.
+    toast.info("Settings kept for this view only — no backend connected, nothing broadcast.");
   };
 
   return (
@@ -178,7 +180,7 @@ export const SystemSettingsTab: React.FC = () => {
 
         <button
           type="submit"
-          className="px-6 py-2.5 bg-[#0E4825] hover:bg-[#156d39] text-white rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer self-end w-fit ml-auto"
+          className="px-6 py-2.5 bg-primary hover:bg-[#156d39] text-white rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer self-end w-fit ml-auto"
         >
           <Save size={14} /> Save Configuration Params
         </button>
