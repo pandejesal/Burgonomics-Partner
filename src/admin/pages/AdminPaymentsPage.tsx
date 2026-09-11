@@ -78,13 +78,13 @@ export const AdminPaymentsPage: React.FC = () => {
     }
   }, [isStoreManager]);
 
-  // Handle Manual Force Sync (Mocked for UI feel, but actual sync is automatic)
+  // Handle Manual Force Sync (Loop 26/120 honesty: the list is live-
+  // subscribed, so there is no handshake to run — the old "Mocked for UI
+  // feel" timer faked one. This reports actual listener state instead.)
   const handleForceSync = () => {
-    toast.loading("Initiating handshake sync with Razorpay clusters...");
-    setTimeout(() => {
-      toast.dismiss();
-      toast.success("Synchronized successfully. All transactions are up-to-date.");
-    }, 1200);
+    toast.success(`Live stream active — ${txns.length} transaction${txns.length === 1 ? "" : "s"} in view.`, {
+      description: "Rows update automatically from Firestore; no manual sync needed.",
+    });
   };
 
   // Export functions
@@ -272,7 +272,7 @@ export const AdminPaymentsPage: React.FC = () => {
               ></span>
             </div>
             <span
-              className={`font-mono transition-all ${pulseLive ? "text-[#FF6600] scale-110 font-black" : "text-gray-900 dark:text-white"}`}
+              className={`font-mono transition-all ${pulseLive ? "text-accent dark:text-accent-light scale-110 font-black" : "text-gray-900 dark:text-white"}`}
             >
               Live
             </span>
@@ -295,7 +295,7 @@ export const AdminPaymentsPage: React.FC = () => {
       {/* Grid of enterprise cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <AdminCard className="relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-[#0E4825]/5 rounded-full blur-3xl -mr-8 -mt-8" />
+          <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-3xl -mr-8 -mt-8" />
           <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest font-mono">
             TODAY'S REVENUE
           </span>
@@ -306,7 +306,7 @@ export const AdminPaymentsPage: React.FC = () => {
               maximumFractionDigits: 2,
             })}
           </span>
-          <div className="flex items-center gap-1 text-[10px] font-black text-[#0E4825] dark:text-emerald-400 uppercase tracking-wider font-sans mt-3">
+          <div className="flex items-center gap-1 text-[10px] font-black text-primary dark:text-emerald-400 uppercase tracking-wider font-sans mt-3">
             <TrendingUp size={11} />
             <span>+14.2% vs yesterday</span>
           </div>
@@ -334,19 +334,19 @@ export const AdminPaymentsPage: React.FC = () => {
         </AdminCard>
 
         <AdminCard className="relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-[#FF6600]/5 rounded-full blur-3xl -mr-8 -mt-8" />
+          <div className="absolute top-0 right-0 w-32 h-32 bg-accent/5 rounded-full blur-3xl -mr-8 -mt-8" />
           <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest font-mono">
             REFUNDS OUTFLOW
           </span>
           <span className="block text-3xl font-black font-mono tracking-tight text-gray-900 dark:text-white mt-1">
             ₹{metrics.refundedAmt.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
           </span>
-          <div className="flex items-center gap-2 text-[10px] font-black text-[#FF6600] uppercase tracking-wider font-mono mt-3">
+          <div className="flex items-center gap-2 text-[10px] font-black text-accent dark:text-accent-light uppercase tracking-wider font-mono mt-3">
             <span>● {metrics.refundRequestsCount} ACTIVE REQUESTS</span>
           </div>
         </AdminCard>
 
-        <AdminCard className="relative overflow-hidden bg-gradient-to-br from-[#0E4825] to-[#082915] text-white">
+        <AdminCard className="relative overflow-hidden bg-gradient-to-br from-primary to-[#082915] text-white">
           <div className="absolute top-0 right-0 w-24 h-24 bg-white/5 rounded-full blur-2xl" />
           <span className="block text-[10px] font-bold text-green-200 uppercase tracking-widest font-mono">
             KPI SUCCESS RATE
@@ -386,7 +386,7 @@ export const AdminPaymentsPage: React.FC = () => {
                 onClick={() => handleExport("csv")}
                 className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-gray-100 dark:border-gray-800/80 hover:bg-gray-50 dark:hover:bg-gray-900 text-xs font-bold text-gray-500 hover:text-gray-900 dark:hover:text-white transition-all shadow-sm"
               >
-                <FileSpreadsheet size={13} className="text-[#0E4825] dark:text-emerald-400" />
+                <FileSpreadsheet size={13} className="text-primary dark:text-emerald-400" />
                 <span>CSV</span>
               </button>
               <button

@@ -70,14 +70,12 @@ export const AdminPaymentDetailsPage: React.FC = () => {
       return;
     }
 
-    toast.loading("Initiating manual transaction signature validation...");
-    setTimeout(() => {
-      toast.dismiss();
-      const success = paymentStorage.retryVerification(id);
-      if (success) {
-        toast.success("Signature validation succeeded! Verified flag set.");
-      }
-    }, 1000);
+    // Loop 26/120 honesty: this board is local demo state — flipping a local
+    // flag while toasting "Signature validation succeeded" faked a security
+    // decision (the old code did exactly that). No verification recorded.
+    toast.error("Verification NOT recorded: demo ledger has no signature path.", {
+      description: "Real verification happens server-side at payment time (verifyPayment).",
+    });
   };
 
   const handleDownloadReceipt = () => {
@@ -145,25 +143,15 @@ export const AdminPaymentDetailsPage: React.FC = () => {
     }
 
     setIsSubmittingRefund(true);
-    toast.loading("Communicating with Razorpay payout APIs...");
-
-    setTimeout(() => {
-      toast.dismiss();
-      const success = paymentStorage.issueRefund(
-        txn.id,
-        refundAmountPaise,
-        refundReason,
-        refundType === "partial",
-      );
-
-      setIsSubmittingRefund(false);
-      if (success) {
-        setShowRefundModal(false);
-        // Clear inputs
-        setPartialAmount("");
-        setRefundReason("");
-      }
-    }, 1200);
+    // Fail LOUD, never fake success: this board is local demo state with no
+    // gateway behind it (the old code toasted "Communicating with Razorpay"
+    // then marked COMPLETED locally — staff believed money moved). Real
+    // refunds move ONLY via Ticket Resolution → server autoRefund.
+    setIsSubmittingRefund(false);
+    toast.error(
+      "Refund not issued: this is a demo ledger with no payment gateway behind it. Process the refund via Ticket Resolution (server autoRefund)."
+    );
+    return;
   };
 
   if (!txn) {
@@ -207,7 +195,7 @@ export const AdminPaymentDetailsPage: React.FC = () => {
         <div className="space-y-1">
           <Link
             to="/admin/payments"
-            className="inline-flex items-center gap-1.5 text-xs font-black text-[#0E4825] hover:underline uppercase tracking-wider font-mono mb-2"
+            className="inline-flex items-center gap-1.5 text-xs font-black text-primary hover:underline uppercase tracking-wider font-mono mb-2"
           >
             <ArrowLeft size={13} />
             <span>Back to Transactions Feed</span>
@@ -237,7 +225,7 @@ export const AdminPaymentDetailsPage: React.FC = () => {
               setShowRefundModal(true);
             }}
             disabled={txn.status === "REFUNDED" || txn.status === "FAILED"}
-            className="inline-flex items-center justify-center gap-1.5 bg-[#FF6600] text-white hover:bg-[#D95700] px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-2xl shadow-sm transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            className="inline-flex items-center justify-center gap-1.5 bg-accent text-white hover:bg-accent-hover px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-2xl shadow-sm transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <History size={13} />
             <span>Process Refund</span>
@@ -308,7 +296,7 @@ export const AdminPaymentDetailsPage: React.FC = () => {
           {/* Customer File Card */}
           <AdminCard title="Customer Profile Folder" icon={User}>
             <div className="flex flex-col sm:flex-row items-center gap-4 font-sans">
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#0E4825]/5 text-[#0E4825] dark:bg-emerald-950/30 dark:text-emerald-400 font-black text-xl">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/5 text-primary dark:bg-emerald-950/30 dark:text-emerald-400 font-black text-xl">
                 {txn.customer.name.slice(0, 2).toUpperCase()}
               </div>
               <div className="flex-1 text-center sm:text-left space-y-1">
@@ -351,7 +339,7 @@ export const AdminPaymentDetailsPage: React.FC = () => {
                   <span className="text-gray-400 font-mono block mt-0.5">{txn.store.id}</span>
                 </div>
                 <div className="pt-2">
-                  <span className="inline-flex items-center gap-1 text-[10px] font-black text-[#0E4825] dark:text-emerald-400 uppercase tracking-wider font-mono bg-[#0E4825]/5 dark:bg-emerald-950/20 px-2.5 py-1 rounded-lg">
+                  <span className="inline-flex items-center gap-1 text-[10px] font-black text-primary dark:text-emerald-400 uppercase tracking-wider font-mono bg-primary/5 dark:bg-emerald-950/20 px-2.5 py-1 rounded-lg">
                     <span>
                       Petpooja Rest ID: {txn.store.id === "str_001" ? "PP_REST_912" : "PP_REST_420"}
                     </span>
@@ -366,7 +354,7 @@ export const AdminPaymentDetailsPage: React.FC = () => {
                   <span className="block text-[10px] font-black text-gray-400 uppercase tracking-wider font-mono">
                     Order Number Reference
                   </span>
-                  <span className="text-[#FF6600] font-mono font-black block mt-0.5 text-sm">
+                  <span className="text-accent dark:text-accent-light font-mono font-black block mt-0.5 text-sm">
                     {txn.orderId}
                   </span>
                 </div>
@@ -402,7 +390,7 @@ export const AdminPaymentDetailsPage: React.FC = () => {
                         item.status === "failed"
                           ? "bg-red-500"
                           : item.status === "refunded"
-                            ? "bg-[#FF6600]"
+                            ? "bg-accent"
                             : index === 0
                               ? "bg-emerald-500"
                               : "bg-gray-300"
@@ -502,7 +490,7 @@ export const AdminPaymentDetailsPage: React.FC = () => {
                     </div>
                     <button
                       onClick={handleRetryVerification}
-                      className="w-full text-center py-2.5 rounded-xl border border-[#0E4825] text-[#0E4825] hover:bg-[#0E4825]/5 dark:border-emerald-500 dark:text-emerald-400 font-bold uppercase tracking-wider text-[10px] transition-all cursor-pointer shadow-sm"
+                      className="w-full text-center py-2.5 rounded-xl border border-primary text-primary hover:bg-primary/5 dark:border-emerald-500 dark:text-emerald-400 font-bold uppercase tracking-wider text-[10px] transition-all cursor-pointer shadow-sm"
                     >
                       Override Signature Validate
                     </button>
@@ -639,7 +627,7 @@ export const AdminPaymentDetailsPage: React.FC = () => {
                         </span>
                         <span className="text-[9px] text-gray-400 font-mono">{log.timestamp}</span>
                       </div>
-                      <div className="font-bold text-[10px] text-[#FF6600] font-mono">
+                      <div className="font-bold text-[10px] text-accent dark:text-accent-light font-mono">
                         ACTION: {log.action}
                       </div>
                       <div className="text-[9px] text-gray-400 font-mono">
@@ -680,11 +668,12 @@ export const AdminPaymentDetailsPage: React.FC = () => {
                 <div className="bg-amber-50 dark:bg-amber-950/15 border border-amber-100 dark:border-amber-900/30 p-3 rounded-xl flex gap-2.5 text-amber-800 dark:text-amber-400">
                   <AlertTriangle size={16} className="shrink-0 mt-0.5" />
                   <div>
-                    <span className="font-extrabold block">Caution: Destructive Ledger Action</span>
+                    <span className="font-extrabold block">Demo ledger — moves no money</span>
                     <span className="text-[10px] block mt-0.5 leading-normal">
-                      Issuing a refund will directly instruct Razorpay to debit your merchant
-                      settlement escrow and return the funds to the customer's original payment
-                      method. This cannot be undone.
+                      This payments board is local demo state, not the Razorpay
+                      settlement ledger. Real refunds move ONLY via Ticket
+                      Resolution (server autoRefund with Route split reversal).
+                      Submitting here records nothing and refunds nobody.
                     </span>
                   </div>
                 </div>
@@ -699,7 +688,7 @@ export const AdminPaymentDetailsPage: React.FC = () => {
                       onClick={() => setRefundType("full")}
                       className={`py-2.5 text-center font-bold rounded-xl transition-all border ${
                         refundType === "full"
-                          ? "bg-[#0E4825] text-white border-[#0E4825]"
+                          ? "bg-primary text-white border-primary"
                           : "bg-gray-50 border-gray-100 dark:bg-gray-900 dark:border-gray-800 text-gray-400 hover:text-gray-900"
                       }`}
                     >
@@ -710,7 +699,7 @@ export const AdminPaymentDetailsPage: React.FC = () => {
                       onClick={() => setRefundType("partial")}
                       className={`py-2.5 text-center font-bold rounded-xl transition-all border ${
                         refundType === "partial"
-                          ? "bg-[#0E4825] text-white border-[#0E4825]"
+                          ? "bg-primary text-white border-primary"
                           : "bg-gray-50 border-gray-100 dark:bg-gray-900 dark:border-gray-800 text-gray-400 hover:text-gray-900"
                       }`}
                     >
