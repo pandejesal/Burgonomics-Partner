@@ -12,6 +12,10 @@ interface PushLog {
   target: string;
   sentAt: string;
   successCount: number;
+  // Loop 22/120 honesty: nothing on this page has ever been dispatched —
+  // there is no customer broadcast endpoint. Seeds are fixtures, new rows
+  // are local drafts. Never present either as deliveries.
+  status: "fixture" | "draft";
 }
 
 const INITIAL_PUSH_LOGS: PushLog[] = [
@@ -22,6 +26,7 @@ const INITIAL_PUSH_LOGS: PushLog[] = [
     target: "All Registered Customers",
     sentAt: "2026-07-19 12:00",
     successCount: 1420,
+    status: "fixture",
   },
   {
     id: "push_2",
@@ -30,6 +35,7 @@ const INITIAL_PUSH_LOGS: PushLog[] = [
     target: "Koramangala Bangalore users",
     sentAt: "2026-07-18 17:30",
     successCount: 410,
+    status: "fixture",
   },
 ];
 
@@ -45,6 +51,10 @@ export const AdminNotificationsPage: React.FC = () => {
     e.preventDefault();
     if (!title.trim() || !body.trim()) return;
 
+    // Loop 22/120 honest fail-closed: there is NO customer broadcast channel
+    // (server dispatch is staff-topics only). Recording a local draft and
+    // saying so loudly beats fabricating 1850 deliveries. QUEUED: customer
+    // broadcast endpoint (token fan-out).
     setIsSending(true);
     setSendSuccess(false);
 
@@ -55,7 +65,8 @@ export const AdminNotificationsPage: React.FC = () => {
         body,
         target: target === "all" ? "All Registered Customers" : "High Frequency Buyers",
         sentAt: new Date().toISOString().replace("T", " ").substring(0, 16),
-        successCount: target === "all" ? 1850 : 290,
+        successCount: 0,
+        status: "draft",
       };
 
       setLogs([newLog, ...logs]);
@@ -77,12 +88,12 @@ export const AdminNotificationsPage: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <StatCard
           title="Total Tokens Synced"
-          value="1,850 devices"
+          value="—"
           icon={Users}
-          subtext="Firebase Cloud Messaging"
+          subtext="No live token count wired"
         />
-        <StatCard title="Avg Delivery Rate" value="98.4%" icon={CheckCircle} />
-        <StatCard title="Campaigns Dispatched" value={logs.length} icon={Megaphone} />
+        <StatCard title="Avg Delivery Rate" value="—" icon={CheckCircle} subtext="No dispatches yet" />
+        <StatCard title="Campaign Drafts" value={logs.length} icon={Megaphone} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -135,9 +146,9 @@ export const AdminNotificationsPage: React.FC = () => {
             </div>
 
             {sendSuccess && (
-              <div className="p-3.5 rounded-2xl bg-emerald-50 text-emerald-800 text-xs font-semibold flex items-center gap-2">
+              <div className="p-3.5 rounded-2xl bg-amber-50 text-amber-800 text-xs font-semibold flex items-center gap-2">
                 <CheckCircle size={15} />
-                <span>Success: Campaign dispatched and FCM tokens resolved successfully!</span>
+                <span>Saved as a local draft — NOT dispatched (no customer broadcast channel yet).</span>
               </div>
             )}
 
@@ -158,9 +169,9 @@ export const AdminNotificationsPage: React.FC = () => {
               <ActivityItem
                 key={log.id}
                 title={log.title}
-                description={`${log.body} \nTarget: ${log.target} · ${log.successCount} deliveries.`}
+                description={`${log.body} \nTarget: ${log.target} · ${log.status === "fixture" ? "Fixture entry — never dispatched" : "Draft — not dispatched"}.`}
                 time={log.sentAt}
-                variant="success"
+                variant={log.status === "fixture" ? "warning" : "info"}
                 icon={Bell}
               />
             ))}
