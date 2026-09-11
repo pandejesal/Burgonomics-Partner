@@ -38,7 +38,17 @@ export function TicketsPage() {
   });
 
   const handleRaiseTicket = async (ticketData: any) => {
-    await createTicket.mutateAsync(ticketData);
+    // Loop 55/120: creation can fail loud (rules bind, offline) — the old
+    // path left the modal hanging silently with no toast either way.
+    try {
+      await createTicket.mutateAsync(ticketData);
+      toast.success("Ticket raised and routed to the branch queue.");
+    } catch (err) {
+      toast.error("Ticket NOT raised — nothing was filed.", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
   };
 
   const handleQuickEscalate = async (ticket: Ticket) => {
@@ -57,12 +67,21 @@ export function TicketsPage() {
         ? 'L2_REGIONAL'
         : 'L3_EXECUTIVE';
 
-    await updateTicket.mutateAsync({
-      ticketId: ticket.id,
-      status: 'in_progress',
-      assignedToTier: nextTier,
-      resolution: `Manual escalation to ${nextLevel} by ${user?.name || 'Staff'}.`,
-    });
+    // Loop 55/120: escalation writes can fail loud (branch scope, offline)
+    // — report the outcome instead of silent nothing.
+    try {
+      await updateTicket.mutateAsync({
+        ticketId: ticket.id,
+        status: 'in_progress',
+        assignedToTier: nextTier,
+        resolution: `Manual escalation to ${nextLevel} by ${user?.name || 'Staff'}.`,
+      });
+      toast.success(`Escalated to ${nextLevel}.`);
+    } catch (err) {
+      toast.error("Escalation NOT recorded.", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    }
   };
 
   const handleConfirmResolution = async (payload: TicketResolutionPayload) => {
