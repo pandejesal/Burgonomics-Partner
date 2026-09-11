@@ -549,7 +549,9 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
             <span>{isSoundEnabled ? "Audio Chime ON" : "Audio Chime MUTED"}</span>
           </button>
 
-          {/* Simulator toggle */}
+          {/* Simulator toggle — Loop 31/120: dead switch (flips a label,
+              generates nothing). Demo tooling, DEV-only in prod builds. */}
+          {import.meta.env.DEV && (
           <button
             onClick={() => {
               setIsSimulatorEnabled(!isSimulatorEnabled);
@@ -564,6 +566,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
             <RefreshCw size={14} className={isSimulatorEnabled ? "animate-spin" : ""} />
             <span>{isSimulatorEnabled ? "Order Generator: ACTIVE" : "Simulator: INACTIVE"}</span>
           </button>
+          )}
         </div>
       </div>
 
