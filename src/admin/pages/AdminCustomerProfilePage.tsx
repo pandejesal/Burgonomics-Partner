@@ -769,8 +769,10 @@ export const AdminCustomerProfilePage: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50 dark:divide-gray-800/40">
-                        {/* We inject beautiful mock orders matching their profile */}
-                        {[
+                        {/* Loop: mock rows fabricated from real stats — DEV-only.
+                            Prod shows empty (no real order source wired). */}
+                        {(import.meta.env.DEV
+                          ? [
                           {
                             id: `BUR-${8200 + profile.ordersCount}`,
                             date: profile.lastOrderDate,
@@ -790,6 +792,8 @@ export const AdminCustomerProfilePage: React.FC = () => {
                             status: "Completed",
                           },
                         ]
+                          : []
+                          )
                           .slice(0, profile.ordersCount)
                           .map((ord) => (
                             <tr
@@ -856,7 +860,9 @@ export const AdminCustomerProfilePage: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50 dark:divide-gray-800/40">
-                        {[
+                        {/* Loop: mock payment rows (pay_Rzp mock ids) — DEV-only. */}
+                        {(import.meta.env.DEV
+                          ? [
                           {
                             id: "pay_Rzp110294da189",
                             order: `BUR-${8200 + profile.ordersCount}`,
@@ -872,6 +878,8 @@ export const AdminCustomerProfilePage: React.FC = () => {
                             status: "CAPTURED",
                           },
                         ]
+                          : []
+                          )
                           .slice(0, profile.ordersCount)
                           .map((p) => (
                             <tr
