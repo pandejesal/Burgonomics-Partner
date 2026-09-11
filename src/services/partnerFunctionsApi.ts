@@ -195,6 +195,20 @@ export const partnerFunctionsApi = {
   },
 
   /**
+   * Releases a Razorpay refund server-side (POST /payments/refund, staff-only,
+   * idempotent per order). Loop 5/120: the refunds page MUST use this — never
+   * flip local state and claim money moved.
+   */
+  async releaseRefund(params: {
+    orderId: string;
+    razorpayPaymentId: string;
+    amountRupees?: number;
+    reason?: string;
+  }): Promise<{ id?: string; status?: string; reused?: boolean }> {
+    return await apiRequest('/payments/refund', params);
+  },
+
+  /**
    * Resolves a support ticket server-side (refunds, loyalty credit, coupon
    * record). Money-affecting actions MUST go through this — never flip ticket
    * status with a direct Firestore write and claim money moved (Loop 3).

@@ -62,4 +62,39 @@ describe('partnerFunctionsApi gateway (real client, mocked transport)', () => {
       partnerFunctionsApi.adjustCustomerCoins({ customerId: 'cust_1', delta: 10, reason: 'x' })
     ).rejects.toThrow(/outside your assigned branches/);
   });
+
+  it('POSTs refund releases with order/payment/amount and surfaces server refusals', async () => {
+    const seen: { url?: string; init?: RequestInit } = {};
+    globalThis.fetch = (async (url: any, init: any) => {
+      seen.url = String(url);
+      seen.init = init;
+      return new Response(JSON.stringify({ id: 'rfnd_1', status: 'processed' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as any;
+
+    const res = await partnerFunctionsApi.releaseRefund({
+      orderId: 'ord_1',
+      razorpayPaymentId: 'pay_1',
+      amountRupees: 99.5,
+      reason: 'Item missing',
+    });
+    expect(seen.url).toMatch(/\/payments\/refund$/);
+    expect(JSON.parse(String(seen.init?.body))).toMatchObject({
+      orderId: 'ord_1',
+      razorpayPaymentId: 'pay_1',
+      amountRupees: 99.5,
+    });
+    expect(res.status).toBe('processed');
+
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: 'Refund refused: no captured payment matching pay_1' }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      })) as any;
+    await expect(
+      partnerFunctionsApi.releaseRefund({ orderId: 'ord_1', razorpayPaymentId: 'pay_1' })
+    ).rejects.toThrow(/no captured payment/);
+  });
 });

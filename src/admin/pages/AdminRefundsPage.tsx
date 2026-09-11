@@ -24,8 +24,9 @@ import { AdminCard } from "../components/Cards";
 import { AdminButton } from "../components/Buttons";
 import { StatusBadge } from "../components/Badges";
 import { ConfirmDialog } from "../components/Utilities";
-import { paymentStorage, RefundDetails, PaymentTransaction } from "./paymentsData";
+import { RefundDetails, PaymentTransaction } from "./paymentsData";
 import { adminPaymentsService } from "../services/adminPaymentsService";
+import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
 import { useAdmin } from "../hooks/useAdmin";
 import { toast } from "sonner";
 
@@ -54,6 +55,9 @@ export const AdminRefundsPage: React.FC = () => {
   const [approvingRefund, setApprovingRefund] = useState<RefundDetails | null>(null);
   const [rejectingRefund, setRejectingRefund] = useState<RefundDetails | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
+  // Loop 5/120: server release in flight — blocks double-submit of the
+  // money action (double POST is safe server-side too: idempotent per order).
+  const [isReleasing, setIsReleasing] = useState(false);
   const [isSubmittingRejection, setIsSubmittingRejection] = useState(false);
 
   // Store Managers restriction: only see their store
@@ -124,8 +128,32 @@ export const AdminRefundsPage: React.FC = () => {
   }, [refunds, isStoreManager]);
 
   // Handlers
-  const handleApproveRelease = () => {
-    if (!approvingRefund) return;
+  // Loop 5/120: approve = REAL server release (POST /payments/refund,
+  // staff-only, idempotent). The old local-only mutation claimed money moved
+  // while Razorpay + Firestore stayed untouched — never again.
+  const releaseRefundServer = async (r: RefundDetails): Promise<boolean> => {
+    try {
+      const res = await partnerFunctionsApi.releaseRefund({
+        orderId: r.orderId,
+        razorpayPaymentId: r.paymentId,
+        amountRupees: r.amountPaise / 100,
+        reason: r.reason,
+      });
+      toast.success(
+        `Refund released via Razorpay${(res as any)?.reused ? " (already processed — idempotent replay)" : ""}.`,
+        { description: `Refund ID: ${(res as any)?.id ?? r.id}` },
+      );
+      return true;
+    } catch (err) {
+      toast.error("Refund release failed — no money moved.", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+      return false;
+    }
+  };
+
+  const handleApproveRelease = async () => {
+    if (!approvingRefund || isReleasing) return;
 
     if (!canPerformRefundActions) {
       toast.error(
@@ -135,9 +163,12 @@ export const AdminRefundsPage: React.FC = () => {
       return;
     }
 
-    const success = paymentStorage.approveRefundRelease(approvingRefund.id);
-    if (success) {
-      setApprovingRefund(null);
+    setIsReleasing(true);
+    try {
+      const ok = await releaseRefundServer(approvingRefund);
+      if (ok) setApprovingRefund(null);
+    } finally {
+      setIsReleasing(false);
     }
   };
 
@@ -156,18 +187,24 @@ export const AdminRefundsPage: React.FC = () => {
       return;
     }
 
+    // Loop 5/120 honest fail-closed: refund-request disposition has NO server
+    // endpoint (refunds collection is server-owned; client writes denied by
+    // rules). The old local-only reject faked a decision. Record nothing,
+    // change nothing — loud, never silent. QUEUED: server disposition endpoint.
     setIsSubmittingRejection(true);
     setTimeout(() => {
-      const success = paymentStorage.rejectRefundRelease(rejectingRefund.id, rejectionReason);
       setIsSubmittingRejection(false);
-      if (success) {
-        setRejectingRefund(null);
-        setRejectionReason("");
-      }
-    }, 800);
+      setRejectingRefund(null);
+      setRejectionReason("");
+      toast.error("Rejection is not wired to the server yet — no change was made.", {
+        description: "Resolve via the support-ticket flow until the disposition endpoint lands.",
+      });
+    }, 300);
   };
 
-  const handleRetryRefund = (refundId: string) => {
+  // Loop 5/120: retry = re-attempt the REAL server release (idempotent —
+  // an already-processed order replays the stored refund instead of double-paying).
+  const handleRetryRefund = async (refundId: string) => {
     if (!canPerformRefundActions) {
       toast.error(
         "Access Denied: Your administrative role is unauthorized to retry refund payouts.",
@@ -175,7 +212,18 @@ export const AdminRefundsPage: React.FC = () => {
       return;
     }
 
-    paymentStorage.retryRefundRelease(refundId);
+    const target = refunds.find((r) => r.id === refundId);
+    if (!target) {
+      toast.error("Refund row not found — refresh the live stream and retry.");
+      return;
+    }
+    if (isReleasing) return;
+    setIsReleasing(true);
+    try {
+      await releaseRefundServer(target);
+    } finally {
+      setIsReleasing(false);
+    }
   };
 
   const handleDownloadReport = () => {
@@ -487,7 +535,7 @@ export const AdminRefundsPage: React.FC = () => {
           onConfirm={handleApproveRelease}
           title="Authorize Refund Clearance Payout?"
           description={`Are you sure you want to approve the refund payout of ₹${(approvingRefund.amountPaise / 100).toFixed(2)} for ${approvingRefund.customerName}? Payout will be processed back via Razorpay API instantly.`}
-          confirmLabel="Approve & Release"
+          confirmLabel={isReleasing ? "Releasing…" : "Approve & Release"}
         />
       )}
 
