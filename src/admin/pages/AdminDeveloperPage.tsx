@@ -109,7 +109,7 @@ export const AdminDeveloperPage: React.FC = () => {
     <div className="space-y-6">
       <PageHeader
         title="Developer Audit Logging Core"
-        description="Review security log registries, analyze administrative API transactions, trace authentication challenges, and secure systems."
+        description="Sample audit entries for UI review — no live audit writer exists yet (server admin_audit_logs unwritten). Wire before relying on this log."
         breadcrumbs={[{ label: "Developer Audit" }]}
       />
 
