@@ -114,19 +114,32 @@ export function usePorterLogistics() {
   }, [updateOrderStatus]);
 
   // Cancel Porter Ride
+  // Loop 17/120 honesty: there is NO server cancel endpoint (only rider-side
+  // cancellation webhooks + staff rebook). This flips the board back to Ready
+  // but must never claim the courier booking itself was cancelled — a live
+  // booking would dangle with a rider arriving for a "cancelled" order.
+  // QUEUED: POST /porter/cancel (provider cancel + fee handling).
   const cancelPorter = useCallback(async (orderId: string) => {
     try {
+      const order = orders.find((o) => o.id === orderId);
       if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
         await updateOrderStatus.mutateAsync({
           orderId,
           status: 'ready',
         });
       }
-      toast.info(`Porter dispatch cancelled for order #${orderId.slice(-6).toUpperCase()}. Reverted to Ready queue.`);
+      if (order?.porterOrderId) {
+        toast.warning(
+          `Reverted to Ready queue — courier booking ${order.porterOrderId} was NOT auto-cancelled.`,
+          { description: 'Cancel it with the provider before the rider arrives, or re-dispatch from Ready.' }
+        );
+      } else {
+        toast.info(`Porter dispatch cancelled for order #${orderId.slice(-6).toUpperCase()}. Reverted to Ready queue.`);
+      }
     } catch (err) {
       toast.error('Failed to cancel Porter dispatch');
     }
-  }, [updateOrderStatus]);
+  }, [updateOrderStatus, orders]);
 
   return {
     deliveryOrders: activeDeliveryOrders,
