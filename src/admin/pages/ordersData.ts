@@ -592,7 +592,7 @@ export function getThermalReceiptText(
     text += `STORE   : ${order.store.name}\n`;
     text += `ADDRESS : ${order.store.address}\n`;
     text += `PHONE   : ${order.store.phone}\n`;
-    text += `GSTIN   : 07AAACB2940D1Z2\n`;
+    text += `GSTIN   : [see outlet board / request tax invoice]\n`;
     text += lineSeparator + "\n";
     text += `INVOICE : ${order.id}\n`;
     text += `DATE    : ${order.placedAt ? new Date(order.placedAt).toLocaleString() : nowStr}\n`;
