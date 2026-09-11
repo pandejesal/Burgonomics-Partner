@@ -238,7 +238,7 @@ export const SystemApiTab: React.FC = () => {
                 onClick={() => setActiveGroup(g as any)}
                 className={`px-3 py-1 rounded text-[10px] font-black uppercase tracking-wider font-mono ${
                   activeGroup === g
-                    ? "bg-[#0E4825] text-white"
+                    ? "bg-primary text-white"
                     : "text-gray-500 hover:text-gray-300"
                 }`}
               >
@@ -254,7 +254,7 @@ export const SystemApiTab: React.FC = () => {
                 onClick={() => handleSelectApi(api)}
                 className={`p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
                   selectedApi?.route === api.route
-                    ? "bg-[#0E4825]/15 border-emerald-700/50"
+                    ? "bg-primary/15 border-emerald-700/50"
                     : "bg-black/30 border-gray-900/60 hover:border-gray-800"
                 }`}
               >
@@ -330,14 +330,19 @@ export const SystemApiTab: React.FC = () => {
                     </div>
                   )}
 
+                  {/* Loop: "Test Endpoint" fakes a 200 + OTP code with zero
+                      backend calls (see handleTriggerTest). Demo tooling,
+                      DEV-only; the explorer docs stay visible in prod. */}
+                  {import.meta.env.DEV && (
                   <button
                     onClick={handleTriggerTest}
                     disabled={isTesting}
-                    className="w-full py-2 bg-[#0E4825] hover:bg-[#156d39] disabled:opacity-40 text-white rounded-lg flex items-center justify-center gap-1.5 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer"
+                    className="w-full py-2 bg-primary hover:bg-[#156d39] disabled:opacity-40 text-white rounded-lg flex items-center justify-center gap-1.5 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer"
                   >
                     <Send size={12} className={isTesting ? "animate-spin" : ""} />
                     <span>{isTesting ? "Sending Request..." : "Test Endpoint"}</span>
                   </button>
+                  )}
                 </div>
               ) : (
                 <div className="py-20 text-center space-y-2">
