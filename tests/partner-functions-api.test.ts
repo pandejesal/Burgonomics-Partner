@@ -191,4 +191,21 @@ describe('partnerFunctionsApi gateway (real client, mocked transport)', () => {
       partnerFunctionsApi.resolveDiscrepancy({ discrepancyId: 'dis_done', resolution: 'resolved' })
     ).rejects.toThrow(/needs_review/);
   });
+
+  it('detaches device tokens via the unregister endpoint', async () => {
+    const seen: { url?: string; init?: RequestInit } = {};
+    globalThis.fetch = (async (url: any, init: any) => {
+      seen.url = String(url);
+      seen.init = init;
+      return new Response(JSON.stringify({ success: true, removedFromUsers: 1 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as any;
+
+    const res = await partnerFunctionsApi.unregisterDeviceToken('tok_abc');
+    expect(seen.url).toMatch(/\/notifications\/unregisterToken$/);
+    expect(JSON.parse(String(seen.init?.body))).toMatchObject({ token: 'tok_abc' });
+    expect(res.success).toBe(true);
+  });
 });

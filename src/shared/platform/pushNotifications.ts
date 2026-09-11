@@ -40,6 +40,12 @@ function setCachedToken(token: string | null) {
   }
 }
 
+// Loop 46/120: forget the device token on logout so a later user on shared
+// hardware never reuses (or inherits pushes for) the previous token.
+export function clearCachedToken(): void {
+  setCachedToken(null);
+}
+
 /**
  * Initializes notification channels and listeners. Listeners attach ONCE, but
  * topic subscription re-runs on every user/branch change: the old single

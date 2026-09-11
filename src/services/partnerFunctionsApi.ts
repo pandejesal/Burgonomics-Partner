@@ -174,6 +174,17 @@ export const partnerFunctionsApi = {
   },
 
   /**
+   * Detaches this device token on logout (Loop 46/120 — partner mirror of
+   * the Loop 37 core fix). Must be called pre-signout while authed; never
+   * blocks logout on failure.
+   */
+  async unregisterDeviceToken(
+    token: string
+  ): Promise<{ success: boolean; removedFromUsers?: number }> {
+    return await apiRequest('/notifications/unregisterToken', { token });
+  },
+
+  /**
    * Subscribes this device token to FCM topics (e.g. branch_<id>_orders for
    * KOT alerts). Topics can only be subscribed server-side.
    */

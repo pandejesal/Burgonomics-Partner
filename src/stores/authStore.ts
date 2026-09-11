@@ -202,6 +202,27 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   signOut: async () => {
+    // Loop 46/120: detach the device token server-side BEFORE signing out
+    // (the endpoint requires auth). Best-effort — logout never fails on
+    // push cleanup. Without this, the next user on shared hardware inherits
+    // this terminal's token identity and its pushes.
+    try {
+      const { getCachedToken, clearCachedToken } = await import(
+        '@/shared/platform/pushNotifications'
+      );
+      const { partnerFunctionsApi } = await import('@/services/partnerFunctionsApi');
+      const token = getCachedToken();
+      if (token) {
+        try {
+          await partnerFunctionsApi.unregisterDeviceToken(token);
+        } catch (err) {
+          console.warn('SignOut token detach failed (non-blocking):', err);
+        }
+        clearCachedToken();
+      }
+    } catch (err) {
+      console.warn('SignOut token cleanup skipped:', err);
+    }
     try {
       await firebaseSignOut(auth);
     } catch (err) {
