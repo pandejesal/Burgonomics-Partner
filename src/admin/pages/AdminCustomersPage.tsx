@@ -94,7 +94,14 @@ export const AdminCustomersPage: React.FC = () => {
   // Aggregate Metrics (HubSpot / McDonald's Level Intelligence)
   const stats = useMemo(() => {
     const total = customers.length;
-    const activeToday = Math.round(total * 0.4); // Simulated active profiles based on 40%
+    // Loop: was Math.round(total * 0.4) fiction. Count real profiles with
+    // an order in the last 24h from lastOrderDate (may be missing → skip).
+    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const activeToday = customers.filter((c) => {
+      if (!c.lastOrderDate) return false;
+      const t = new Date(c.lastOrderDate).getTime();
+      return Number.isFinite(t) && t >= dayAgo;
+    }).length;
     const goldOrAbove = customers.filter((c) =>
       ["Gold", "Platinum", "VIP"].includes(c.loyaltyTier),
     ).length;
@@ -312,7 +319,7 @@ export const AdminCustomersPage: React.FC = () => {
         <div className="flex items-center gap-2 self-start md:self-center">
           <Link to="/admin/customers/analytics">
             <AdminButton variant="outline" size="sm">
-              <TrendingUp size={13} className="mr-1.5 text-[#FF6600]" />
+              <TrendingUp size={13} className="mr-1.5 text-accent dark:text-accent-light" />
               <span>CRM Analytics</span>
             </AdminButton>
           </Link>
@@ -353,7 +360,7 @@ export const AdminCustomersPage: React.FC = () => {
 
         <AdminCard className="relative overflow-hidden border-l-4 border-l-[#0E4825]">
           <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-full blur-2xl" />
-          <span className="block text-[9px] font-black text-[#0E4825] dark:text-emerald-400 uppercase tracking-widest font-mono">
+          <span className="block text-[9px] font-black text-primary dark:text-emerald-400 uppercase tracking-widest font-mono">
             LIFETIME CRM REVENUE
           </span>
           <span className="block text-2xl font-black font-mono tracking-tight text-gray-900 mt-1 dark:text-white">
@@ -364,9 +371,9 @@ export const AdminCustomersPage: React.FC = () => {
           </span>
         </AdminCard>
 
-        <AdminCard className="relative overflow-hidden border-l-4 border-l-[#FF6600]">
+        <AdminCard className="relative overflow-hidden border-l-4 border-l-accent">
           <div className="absolute top-0 right-0 w-24 h-24 bg-orange-500/5 rounded-full blur-2xl" />
-          <span className="block text-[9px] font-black text-[#FF6600] uppercase tracking-widest font-mono">
+          <span className="block text-[9px] font-black text-accent dark:text-accent-light uppercase tracking-widest font-mono">
             REPEAT PURCHASE RATE
           </span>
           <span className="block text-2xl font-black font-mono tracking-tight text-gray-900 mt-1 dark:text-white">
@@ -401,7 +408,7 @@ export const AdminCustomersPage: React.FC = () => {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search by Customer Name, Phone, Email, Customer ID..."
-                className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-150 dark:border-gray-800 rounded-xl py-2 px-4 pl-10 text-xs font-semibold focus:outline-none focus:border-[#0E4825] dark:text-white"
+                className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-150 dark:border-gray-800 rounded-xl py-2 px-4 pl-10 text-xs font-semibold focus:outline-none focus:border-primary dark:text-white"
               />
               <Search
                 size={14}
@@ -621,7 +628,7 @@ export const AdminCustomersPage: React.FC = () => {
                       </td>
 
                       {/* Lifetime Spend */}
-                      <td className="py-4 px-4 text-right font-mono font-black text-[#0E4825] dark:text-emerald-400 text-[12px]">
+                      <td className="py-4 px-4 text-right font-mono font-black text-primary dark:text-emerald-400 text-[12px]">
                         ₹{c.totalSpent.toFixed(2)}
                       </td>
 
@@ -710,7 +717,7 @@ export const AdminCustomersPage: React.FC = () => {
                       onClick={() => setPointsAction(act)}
                       className={`py-1.5 rounded-lg text-[10px] font-black uppercase font-mono transition-all ${
                         pointsAction === act
-                          ? "bg-[#0E4825] text-white"
+                          ? "bg-primary text-white"
                           : "text-gray-400 hover:text-gray-900"
                       }`}
                     >
@@ -777,7 +784,7 @@ export const AdminCustomersPage: React.FC = () => {
             >
               <div className="flex items-center justify-between border-b border-gray-50 dark:border-gray-800/60 pb-3 mb-4">
                 <div className="space-y-0.5 flex items-center gap-1.5">
-                  <Sparkles size={14} className="text-[#FF6600]" />
+                  <Sparkles size={14} className="text-accent dark:text-accent-light" />
                   <h3 className="text-xs font-black text-gray-900 dark:text-white uppercase tracking-tight">
                     Broadcast Marketing Campaign
                   </h3>
@@ -794,7 +801,7 @@ export const AdminCustomersPage: React.FC = () => {
                       onClick={() => setCampaignType(type)}
                       className={`py-1.5 rounded-lg text-[9px] font-black uppercase font-mono transition-all ${
                         campaignType === type
-                          ? "bg-[#0E4825] text-white"
+                          ? "bg-primary text-white"
                           : "text-gray-400 hover:text-gray-900"
                       }`}
                     >
