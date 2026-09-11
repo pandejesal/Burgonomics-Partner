@@ -20,6 +20,8 @@ import {
 } from 'lucide-react';
 import type { Ticket } from '@/types';
 import { DataWarningBanner } from '@/components/ui/DataWarningBanner';
+import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
+import { toast } from 'sonner';
 
 export function TicketsPage() {
   const { user } = useAuthStore();
@@ -64,13 +66,54 @@ export function TicketsPage() {
   };
 
   const handleConfirmResolution = async (payload: TicketResolutionPayload) => {
-    await updateTicket.mutateAsync({
-      ticketId: payload.ticketId,
-      status: 'resolved',
-      resolution: `${payload.action}: ${payload.notes}${
-        payload.grillCoinsAmount ? ` (Credited ${payload.grillCoinsAmount} Grill Coins)` : ''
-      }`,
-    });
+    // Loop 33/120: money-affecting resolutions MUST execute server-side. The
+    // old path wrote status text directly ("Credited X Grill Coins") while
+    // crediting nothing, and refunds moved no money. Mirror TicketDetailPage:
+    // server resolveTicket first, loud failure leaves the ticket open.
+    const ticket = tickets.find((t) => t.id === payload.ticketId);
+    try {
+      if (payload.action === "CREDIT_GRILL_COINS") {
+        if (!ticket?.customerId) {
+          throw new Error(
+            "Guest ticket has no customer profile — credit Grill Coins via the dashboard, ticket left open."
+          );
+        }
+        if (!payload.grillCoinsAmount || payload.grillCoinsAmount <= 0) {
+          throw new Error("Specify a coin amount greater than zero.");
+        }
+        await partnerFunctionsApi.resolveTicket({
+          ticketId: payload.ticketId,
+          action: "loyalty_credit",
+          amount: Math.round(payload.grillCoinsAmount),
+          notes: payload.notes,
+        });
+        toast.success(
+          `${Math.round(payload.grillCoinsAmount)} Grill Coins credited server-side. Ticket resolved.`
+        );
+      } else if (payload.action === "REFUND_ORDER") {
+        await partnerFunctionsApi.resolveTicket({
+          ticketId: payload.ticketId,
+          action: "full_refund",
+          ...(payload.refundAmount && payload.refundAmount > 0
+            ? { action: "partial_refund" as const, amount: Math.round(payload.refundAmount) }
+            : {}),
+          notes: payload.notes,
+        });
+        toast.success("Refund executed server-side. Ticket resolved.");
+      } else {
+        await partnerFunctionsApi.resolveTicket({
+          ticketId: payload.ticketId,
+          action: "explanation",
+          notes: `${payload.action}: ${payload.notes}`,
+        });
+        toast.success("Ticket resolved with recorded explanation.");
+      }
+      setResolvingTicket(null);
+    } catch (err) {
+      toast.error("Resolution failed server-side — ticket left open, nothing applied.", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    }
   };
 
   const filteredTickets = useMemo(() => {
