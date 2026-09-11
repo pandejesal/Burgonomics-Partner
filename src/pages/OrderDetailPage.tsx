@@ -29,6 +29,7 @@ import {
 import { toast } from 'sonner';
 import type { OrderStatus } from '@/types';
 import { ConfirmDialog } from '../admin/components/Utilities';
+import { DeliveryOtpModal } from '@/components/DeliveryOtpModal';
 
 export function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -45,6 +46,10 @@ export function OrderDetailPage() {
   const [copiedId, setCopiedId] = useState(false);
   const [showKOTModal, setShowKOTModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
+  // Loop 12/120: delivery handover requires the customer OTP — the stepper
+  // must not flip delivery orders straight to DELIVERED (the OTP proof system
+  // with lockout is otherwise bypassable by any staffer).
+  const [showOtpModal, setShowOtpModal] = useState(false);
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [isSyncingPetpooja, setIsSyncingPetpooja] = useState(false);
 
@@ -119,6 +124,17 @@ export function OrderDetailPage() {
   };
 
   const handleStatusChange = async (nextStatus: OrderStatus) => {
+    // Delivery handover needs customer-possession proof: route through the
+    // OTP modal (server verifies + flips to DELIVERED). Takeaway/dine-in
+    // complete in person, so the stepper path stays.
+    if (
+      nextStatus === 'delivered' &&
+      order &&
+      (order.orderType === 'delivery' || (order as any).fulfillment === 'delivery')
+    ) {
+      setShowOtpModal(true);
+      return;
+    }
     setIsUpdatingStatus(true);
     try {
       if (updateStatus && typeof updateStatus.mutateAsync === 'function') {
@@ -490,6 +506,20 @@ export function OrderDetailPage() {
         onClose={() => setShowCancelModal(false)}
         onConfirmCancel={handleCancelAndRefund}
       />
+
+      {/* Handover OTP — the only path to DELIVERED for delivery orders */}
+      {showOtpModal && (
+        <DeliveryOtpModal
+          orderId={order.id}
+          customerName={order.customerName}
+          allowDemoSkip={import.meta.env.DEV}
+          onVerified={() => {
+            setShowOtpModal(false);
+            toast.success('Handover verified — order delivered.');
+          }}
+          onClose={() => setShowOtpModal(false)}
+        />
+      )}
     </div>
   );
 }
