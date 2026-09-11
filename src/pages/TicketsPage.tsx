@@ -310,6 +310,7 @@ export function TicketsPage() {
           isOpen={showRaiseModal}
           onClose={() => setShowRaiseModal(false)}
           onSubmit={handleRaiseTicket}
+          defaultBranchId={user?.branchIds?.[0]}
         />
       )}
     </div>

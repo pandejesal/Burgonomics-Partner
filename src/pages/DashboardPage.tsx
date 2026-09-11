@@ -22,7 +22,10 @@ export function DashboardPage() {
   const isSuperadmin = user?.role === 'brand_owner' || user?.role === 'developer';
 
   const [activeBranchId, setActiveBranchId] = useState<string>(
-    isSuperadmin ? selectedBranchId || 'all' : user?.branchIds?.[0] || 'branch_cg_road'
+    // Loop 49/120: no hardcoded fallback branch — staff without an assigned
+    // branch used to silently view branch_cg_road's data as if it were
+    // theirs. Unassigned sees everything ('all'), honestly.
+    isSuperadmin ? selectedBranchId || 'all' : user?.branchIds?.[0] || 'all'
   );
 
   // Single source of truth: header outlet switcher writes to appStore,

@@ -120,7 +120,17 @@ export function ManualOrderCreateModal({
     setIsSubmitting(true);
 
     const orderId = `ord_pos_${Date.now().toString().slice(-6)}`;
-    const branchId = selectedBranchId || user?.branchIds?.[0] || 'branch_surat_01';
+    // Loop 49/120: no fallback branch — a walk-in order stamped to the wrong
+    // outlet corrupts branch revenue, KDS routing, and Porter dispatch.
+    // Block loudly when the operator has no branch context.
+    const branchId = selectedBranchId || user?.branchIds?.[0];
+    if (!branchId) {
+      setSubmitError(
+        "No branch context — select your outlet (or ask your manager to assign one) before creating walk-in orders."
+      );
+      setIsSubmitting(false);
+      return;
+    }
 
     const orderItems: OrderItem[] = selectedItems.map((i) => ({
       itemId: i.item.id,
@@ -153,9 +163,10 @@ export function ManualOrderCreateModal({
       status: toDeliveryStatusMeta('pending') as unknown as OrderStatus,
       paymentMethod,
       paymentStatus: 'completed',
-      petpoojaOrderId: `PP-${orderId}`,
-      petpoojaSyncStatus: 'synced',
-      kotPrinted: true,
+      // Loop 49/120 honesty: no fabricated POS sync — the KOT reaches
+      // Petpooja only through the real push flow (row-level sync), and the
+      // kitchen prints from KDS. Claiming synced+printed here faked both.
+      petpoojaSyncStatus: 'pending',
       specialInstructions,
       createdAt: Timestamp.now(),
       updatedAt: Timestamp.now(),

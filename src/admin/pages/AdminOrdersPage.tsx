@@ -97,7 +97,9 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
     (admin?.role?.name as "Developer" | "Operations" | "Store Manager" | "Finance") || "Developer";
 
   // Real apps might store the assigned store in the user profile/claims
-  const managerAssignedStoreId = admin?.assignedStoreId || "st_cp_delhi";
+  // Loop 49/120: no hardcoded fallback store — an unassigned manager used
+  // to silently view Delhi's orders as their own. Null = unfiltered.
+  const managerAssignedStoreId = admin?.assignedStoreId || null;
 
   // Main states
   const [orders, setOrders] = useState<RichOrder[]>([]);
