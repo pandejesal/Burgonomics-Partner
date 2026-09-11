@@ -2,9 +2,15 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/authStore';
 import { useAppStore } from '@/stores/appStore';
 import { db } from '@/config/firebase';
-import { collection, query, getDocs, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, query, getDocs, orderBy, limit, Timestamp } from 'firebase/firestore';
 import type { Customer } from '@/types';
 import { isGlobalRole } from '@/utils/branchScope';
+
+// Loop 39/120: seed CRM fills ONLY an empty directory in DEV builds. Pure
+// gate so tests pin it: prod empty stays empty, errors throw in prod.
+export function shouldSeedDirectory(liveCount: number, isDev: boolean): boolean {
+  return liveCount === 0 && isDev;
+}
 
 export function useCustomers() {
   const { user } = useAuthStore();
@@ -14,8 +20,10 @@ export function useCustomers() {
     queryKey: ['customers', user?.id, user?.role, selectedCity, selectedBranchId],
     queryFn: async () => {
       try {
+        // Loop 39/120: bounded — the customers collection grows without
+        // bound; dashboard counts stay exact at real scale under this cap.
         const customersSnap = await getDocs(
-          query(collection(db, 'customers'), orderBy('createdAt', 'desc'))
+          query(collection(db, 'customers'), orderBy('createdAt', 'desc'), limit(500))
         );
 
         let list: Customer[] = customersSnap.docs.map((d) => ({
@@ -23,8 +31,10 @@ export function useCustomers() {
           ...d.data(),
         })) as Customer[];
 
-        // Seed rich CRM data if empty or sparse for live testing
-        if (list.length === 0) {
+        // Seed rich CRM data if empty or sparse for live testing — DEV ONLY.
+        // Loop 39/120: an empty prod collection must stay empty, never fill
+        // with fake people (names/phones/emails/home addresses as live rows).
+        if (shouldSeedDirectory(list.length, import.meta.env.DEV)) {
           list = [
             {
               id: 'cust_01',
