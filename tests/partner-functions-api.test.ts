@@ -165,4 +165,30 @@ describe('partnerFunctionsApi gateway (real client, mocked transport)', () => {
     globalThis.fetch = (async () => new Response('down', { status: 503 })) as any;
     await expect(partnerFunctionsApi.checkApiHealth()).rejects.toThrow(/503/);
   });
+
+  it('POSTs discrepancy resolutions with id/decision and surfaces 409 conflicts', async () => {
+    const seen: { url?: string; init?: RequestInit } = {};
+    globalThis.fetch = (async (url: any, init: any) => {
+      seen.url = String(url);
+      seen.init = init;
+      return new Response(JSON.stringify({ id: 'dis_1', status: 'RESOLVED' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as any;
+
+    const res = await partnerFunctionsApi.resolveDiscrepancy({ discrepancyId: 'dis_1', resolution: 'refunded' });
+    expect(seen.url).toMatch(/\/discrepancies\/resolve$/);
+    expect(JSON.parse(String(seen.init?.body))).toMatchObject({ discrepancyId: 'dis_1', resolution: 'refunded' });
+    expect(res.status).toBe('RESOLVED');
+
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: 'only needs_review rows can be resolved' }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      })) as any;
+    await expect(
+      partnerFunctionsApi.resolveDiscrepancy({ discrepancyId: 'dis_done', resolution: 'resolved' })
+    ).rejects.toThrow(/needs_review/);
+  });
 });

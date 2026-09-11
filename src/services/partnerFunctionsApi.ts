@@ -221,6 +221,19 @@ export const partnerFunctionsApi = {
   },
 
   /**
+   * Records a discrepancy resolution server-side (POST
+   * /discrepancies/resolve, staff-only). Loop 25/120: the reconciliation
+   * page MUST use this — never clear rows locally and claim ops reviewed.
+   */
+  async resolveDiscrepancy(params: {
+    discrepancyId: string;
+    resolution: string;
+    note?: string;
+  }): Promise<{ id: string; status: string }> {
+    return await apiRequest('/discrepancies/resolve', params);
+  },
+
+  /**
    * Liveness probe for the Cloud Functions API (Loop 24/120): the partner
    * health page MUST measure this instead of fabricating latency. Public
    * /health route — no auth needed, never reports healthy without it.

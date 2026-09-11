@@ -7,8 +7,6 @@ import {
   limit,
   getDocs,
   onSnapshot,
-  doc,
-  updateDoc,
 } from "firebase/firestore";
 import { TransactionDetails, RefundDetails, DiscrepancyDetails } from "../pages/paymentsData";
 
@@ -78,7 +76,9 @@ export const adminPaymentsService = {
       (snapshot) => {
         const liveDiscrepancies: DiscrepancyDetails[] = [];
         snapshot.forEach((docSnap) => {
-          liveDiscrepancies.push(docSnap.data() as DiscrepancyDetails);
+          // Loop 25/120: stamp the doc id — resolvers need it for POST
+          // /discrepancies/resolve, and server docs don't carry it inside.
+          liveDiscrepancies.push({ id: docSnap.id, ...(docSnap.data() as any) } as DiscrepancyDetails);
         });
         onUpdate(liveDiscrepancies);
       },
@@ -86,26 +86,8 @@ export const adminPaymentsService = {
     );
   },
 
-  /**
-   * Resolve a discrepancy manually
-   */
-  async resolveDiscrepancy(
-    discrepancyId: string,
-    resolvedBy: string,
-    notes: string,
-  ): Promise<boolean> {
-    try {
-      const docRef = doc(db, "payment_discrepancies", discrepancyId);
-      await updateDoc(docRef, {
-        status: "RESOLVED",
-        resolvedAt: new Date().toISOString(),
-        resolvedBy,
-        resolutionNotes: notes,
-      });
-      return true;
-    } catch (e) {
-      console.error("Failed to resolve discrepancy", e);
-      return false;
-    }
-  },
+  // Loop 25/120: REMOVED resolveDiscrepancy direct client write — it could
+  // never succeed (rules deny all client writes to payment_discrepancies)
+  // and had zero callers. Resolution flows through POST
+  // /discrepancies/resolve via partnerFunctionsApi.resolveDiscrepancy.
 };

@@ -24,23 +24,69 @@ import { AdminCard } from "../components/Cards";
 import { AdminButton } from "../components/Buttons";
 import { StatusBadge } from "../components/Badges";
 import { paymentStorage, DiscrepancyDetails, DuplicateAttempt } from "./paymentsData";
+import { adminPaymentsService } from "../services/adminPaymentsService";
+import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
 import { useAdmin } from "../hooks/useAdmin";
 import { toast } from "sonner";
+
+// Loop 25/120: maps server-parked payment_discrepancies docs (written by the
+// payments verifier) onto the page's display contract. Server reasons map
+// onto the closest review type; anything unrecognized lands in
+// VERIFICATION_FAILURE rather than inventing precision.
+export function mapServerDiscrepancy(id: string, d: any): DiscrepancyDetails {
+  const reason = String(d?.reason || "VERIFICATION_FAILURE");
+  const type: DiscrepancyDetails["type"] =
+    reason.includes("AMOUNT") ? "AMOUNT_MISMATCH"
+    : reason.includes("CAPTUR") ? "FAILED_CAPTURE"
+    : reason.includes("DUPLICATE") ? "DUPLICATE_PAYMENT"
+    : reason.includes("MISSING") ? "MISSING_PAYMENT"
+    : reason.includes("SETTLE") ? "SETTLEMENT_ISSUE"
+    : "VERIFICATION_FAILURE";
+  return {
+    id,
+    orderId: String(d?.orderId || ""),
+    paymentId: String(d?.razorpayPaymentId || ""),
+    type,
+    reason,
+    internalAmountPaise: Number(d?.expectedPaise || 0),
+    gatewayAmountPaise: Number(d?.actualPaise || 0),
+    status: d?.status === "needs_review" ? "UNRESOLVED" : "RESOLVED",
+    resolvedAt: typeof d?.resolution?.decidedAt === "string" ? d.resolution.decidedAt : undefined,
+    resolvedBy: typeof d?.resolution?.decidedBy === "string" ? d.resolution.decidedBy : undefined,
+  };
+}
 
 export const AdminReconciliationPage: React.FC = () => {
   const { role } = useAdmin();
 
-  // Real-time state subscription
-  const [discrepancies, setDiscrepancies] = useState<DiscrepancyDetails[]>(
-    paymentStorage.getDiscrepancies(),
-  );
+  // Real-time state subscription — Loop 25/120: discrepancies come from the
+  // LIVE server-parked queue (payment_discrepancies), never local fixtures.
+  // (Duplicates below stay a labeled local demo queue: no live source.)
+  const [discrepancies, setDiscrepancies] = useState<DiscrepancyDetails[]>([]);
   const [duplicates, setDuplicates] = useState<DuplicateAttempt[]>(paymentStorage.getDuplicates());
 
   useEffect(() => {
-    return paymentStorage.subscribe(() => {
-      setDiscrepancies([...paymentStorage.getDiscrepancies()]);
+    const unsubscribe = adminPaymentsService.listenLiveDiscrepancies(
+      (rows) => {
+        setDiscrepancies(
+          (rows || []).map((r: any) =>
+            mapServerDiscrepancy(String(r.id || r.orderId || Math.random()), r)
+          )
+        );
+      },
+      (err) => {
+        console.error("Live discrepancy listener error:", err);
+        toast.error("Failed to connect to the live discrepancy queue.");
+      },
+      100
+    );
+    const unsubLocal = paymentStorage.subscribe(() => {
       setDuplicates([...paymentStorage.getDuplicates()]);
     });
+    return () => {
+      if (typeof unsubscribe === "function") unsubscribe();
+      unsubLocal();
+    };
   }, []);
 
   // UI state
@@ -75,8 +121,11 @@ export const AdminReconciliationPage: React.FC = () => {
     });
   }, [discrepancies, searchQuery, selectedType]);
 
-  // Actions
-  const handleResolveDiscrepancy = (id: string) => {
+  // Actions — Loop 25/120: resolutions record server-side via POST
+  // /discrepancies/resolve. The old local-only clears faked ops review while
+  // server-parked rows sat unread. Failures stay loud with no state change
+  // (the live listener is the single source of truth).
+  const handleResolveDiscrepancy = async (id: string) => {
     if (!canPerformReconciliation) {
       toast.error(
         "Access Denied: Your administrative role is unauthorized to mark financial discrepancies as resolved.",
@@ -84,7 +133,14 @@ export const AdminReconciliationPage: React.FC = () => {
       return;
     }
 
-    paymentStorage.resolveDiscrepancy(id, "resolve");
+    try {
+      const res = await partnerFunctionsApi.resolveDiscrepancy({ discrepancyId: id, resolution: "resolved" });
+      toast.success(`Discrepancy ${res.id} resolved and recorded.`);
+    } catch (err) {
+      toast.error("Resolution was NOT recorded.", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    }
   };
 
   const handleRecheckDiscrepancy = (id: string) => {
@@ -95,7 +151,12 @@ export const AdminReconciliationPage: React.FC = () => {
       return;
     }
 
-    paymentStorage.resolveDiscrepancy(id, "retry");
+    // Loop 25/120 honesty: verification re-runs automatically on every
+    // payment event — there is no manual recheck to trigger, and recording
+    // anything here would wrongly resolve the row. Nothing changed.
+    toast.info("Re-checks run automatically on every payment event.", {
+      description: "This row stays under review until Resolved or refunded via Refunds.",
+    });
   };
 
   const handleDuplicateAction = (orderId: string, action: "merge" | "ignore" | "investigate") => {
@@ -110,14 +171,22 @@ export const AdminReconciliationPage: React.FC = () => {
   };
 
   const handleRunReconciliationRun = () => {
+    // Loop 25/120 honesty: the queue is live-subscribed, so a "scan" is a
+    // recompute over current rows — never a pipeline, never zero-by-timer.
     setIsSyncingLedger(true);
-    toast.loading("Initiating ledger comparison pipeline across 5 outlets...");
-
+    toast.loading("Recomputing from the live discrepancy queue...");
     setTimeout(() => {
       setIsSyncingLedger(false);
       toast.dismiss();
-      toast.success("Reconciliation scan finished. Detected 0 new ledger discrepancies.");
-    }, 2000);
+      const open = discrepancies.filter((d) => d.status === "UNRESOLVED").length;
+      if (open === 0) {
+        toast.success("Recomputed: no unresolved discrepancies in the live queue.");
+      } else {
+        toast.warning(`Recomputed: ${open} unresolved discrepanc${open === 1 ? "y" : "ies"} in the live queue.`, {
+          description: "Resolve each above or refund via Refunds.",
+        });
+      }
+    }, 800);
   };
 
   return (
@@ -386,7 +455,7 @@ export const AdminReconciliationPage: React.FC = () => {
         <div className="space-y-6">
           <AdminCard
             title="Deduplication Analytics Sandbox"
-            subtitle="Analyzing checkout attempts made in rapid succession from same network fingerprints"
+            subtitle="Local demo queue — no live duplicate source is wired yet. Actions here touch demo rows only."
           >
             {duplicates.length === 0 ? (
               <div className="py-6 text-center text-gray-400 font-mono">
