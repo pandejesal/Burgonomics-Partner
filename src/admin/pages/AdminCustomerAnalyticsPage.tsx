@@ -147,7 +147,7 @@ export const AdminCustomerAnalyticsPage: React.FC = () => {
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <PageHeader
           title="Customer CRM Analytics Console"
-          description="Examine cohort retention rates, customer lifetime valuation charts, geographic maps splits, and registrations growth."
+          description="Seed-directory analytics — charts aggregate local demo profiles until the live customer directory lands."
           breadcrumbs={[
             { label: "Customer CRM", to: "/admin/customers" },
             { label: "CRM Analytics" },

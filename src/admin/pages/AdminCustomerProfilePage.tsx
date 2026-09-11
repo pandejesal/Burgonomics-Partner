@@ -227,7 +227,7 @@ export const AdminCustomerProfilePage: React.FC = () => {
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <PageHeader
           title={`CRM Dossier: ${profile.fullName}`}
-          description={`Comprehensive CRM intelligence, transactional records, and loyalty wallets for ID: ${profile.id}`}
+          description={`Seed-directory profile (ID: ${profile.id}) — demo record until the live customer directory lands.`}
           breadcrumbs={[
             { label: "Customer CRM", to: "/admin/customers" },
             { label: profile.fullName },
