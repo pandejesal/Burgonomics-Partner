@@ -68,9 +68,12 @@ export const AdminReconciliationPage: React.FC = () => {
   useEffect(() => {
     const unsubscribe = adminPaymentsService.listenLiveDiscrepancies(
       (rows) => {
+        // Loop 52/120: deterministic ids — the service stamps doc ids, so
+        // fall back to order-derived ids, never random (stable keys keep
+        // React from remounting rows and audit trails addressable).
         setDiscrepancies(
-          (rows || []).map((r: any) =>
-            mapServerDiscrepancy(String(r.id || r.orderId || Math.random()), r)
+          (rows || []).map((r: any, i: number) =>
+            mapServerDiscrepancy(String(r.id || r.orderId || `row-${i}`), r)
           )
         );
       },

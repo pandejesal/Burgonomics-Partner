@@ -773,8 +773,11 @@ class MarketingDataStorage {
     return true;
   }
 
-  // Simulated Trigger Action
+  // Simulated Trigger Action — Loop 52/120 defense-in-depth: the caller
+  // button is DEV-gated, but this method fabricates "Delivered" history
+  // under REAL customer names, so it refuses outright outside dev builds.
   simulateAutomationTrigger(id: string) {
+    if (!import.meta.env.DEV) return false;
     const aut = this.automations.find((a) => a.id === id);
     if (aut) {
       aut.stats.triggered += 1;
