@@ -84,10 +84,11 @@ export function PetpoojaQueuesPage() {
       title,
       description,
       action: () => {
-        toast.info(`Triggering queue command: ${actionName.toUpperCase()}`);
+        // Loop: was info("Triggering...") + success("done") around callbacks
+        // that themselves report honest no-op states — the wrapper's
+        // "Success" overclaimed. Callbacks speak for themselves.
         setTimeout(() => {
           callback();
-          toast.success(`Success: ${title} done.`);
         }, 500);
       },
     });
@@ -106,12 +107,12 @@ export function PetpoojaQueuesPage() {
               onClick={() => setSelectedQueue(q.name)}
               className={`rounded-[20px] p-5 border text-left cursor-pointer transition-all duration-200 shadow-sm ${
                 isSelected
-                  ? "border-[#0E4825] bg-[#0E4825]/[0.02] dark:border-[#FF6600] dark:bg-[#FF6600]/[0.02] ring-2 ring-[#0E4825]/5 dark:ring-[#FF6600]/10"
+                  ? "border-primary bg-primary/[0.02] dark:border-accent dark:bg-accent/[0.02] ring-2 ring-[#0E4825]/5 dark:ring-accent/10"
                   : "border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] hover:border-gray-200"
               }`}
             >
               <div className="flex items-center justify-between mb-3 font-sans">
-                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gray-50 dark:bg-gray-900 text-[#0E4825] dark:text-emerald-400">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gray-50 dark:bg-gray-900 text-primary dark:text-emerald-400">
                   <Boxes size={18} />
                 </div>
                 <div className="flex gap-1.5 font-mono text-[9px] font-black uppercase tracking-wider">
@@ -138,7 +139,7 @@ export function PetpoojaQueuesPage() {
       {/* Control Actions toolbar */}
       <div className="bg-white dark:bg-[#1A1A1A] border border-gray-100 dark:border-gray-800 rounded-[20px] p-4 shadow-sm flex flex-wrap gap-3 items-center justify-between font-sans">
         <div className="flex items-center gap-2">
-          <Sliders size={14} className="text-[#0E4825] dark:text-emerald-400" />
+          <Sliders size={14} className="text-primary dark:text-emerald-400" />
           <span className="text-xs font-black uppercase tracking-wider text-gray-800 dark:text-gray-200">
             Queue Actions ({selectedQueue})
           </span>
@@ -232,7 +233,7 @@ export function PetpoojaQueuesPage() {
               onClick={() => setActiveTab(tab)}
               className={`px-4 py-3 border-b-2 text-[10px] font-black uppercase tracking-wider transition-all duration-150 cursor-pointer ${
                 isActive
-                  ? "border-[#0E4825] text-[#0E4825] dark:border-[#FF6600] dark:text-[#FF6600] font-black"
+                  ? "border-primary text-primary dark:border-accent dark:text-accent-light font-black"
                   : "border-transparent text-gray-400 hover:text-gray-700"
               }`}
             >
@@ -240,7 +241,7 @@ export function PetpoojaQueuesPage() {
                 <span>{tab}</span>
                 <span
                   className={`px-1.5 py-0.5 rounded text-[9px] font-bold font-mono ${
-                    isActive ? "bg-[#0E4825]/10 text-[#0E4825]" : "bg-gray-100 text-gray-500"
+                    isActive ? "bg-primary/10 text-primary" : "bg-gray-100 text-gray-500"
                   }`}
                 >
                   {count}
