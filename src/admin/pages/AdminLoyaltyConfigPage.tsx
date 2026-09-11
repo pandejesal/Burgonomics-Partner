@@ -26,7 +26,78 @@ import { PageHeader } from "../components/Headers";
 import { AdminCard } from "../components/Cards";
 import { AdminButton } from "../components/Buttons";
 import { customerStorage, CustomerProfile } from "./customersData";
+import { db } from "@/core/config/firebase";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { toast } from "sonner";
+
+// Loop 21/120: loyalty config persisted at app_settings/loyalty_config
+// (rules: brand-only writes). Same honest pattern as the Loop 8 settings
+// page — values are shared truth, but nothing consumes them live yet.
+export interface LoyaltyTierRule {
+  tier: string;
+  minPoints: number;
+  multiplier: number;
+  cashbackPercent: number;
+}
+
+export interface LoyaltyReward {
+  id: string;
+  name: string;
+  cost: number;
+  category: string;
+}
+
+export interface LoyaltyConfig {
+  walletPassName: string;
+  walletPassColor: string;
+  walletPassAccent: string;
+  barcodeType: string;
+  pushEnabled: boolean;
+  rules: LoyaltyTierRule[];
+  rewards: LoyaltyReward[];
+  pointsExpiryMonths: number;
+}
+
+export const LOYALTY_CONFIG_DOC = "loyalty_config";
+
+export const DEFAULT_LOYALTY_CONFIG: LoyaltyConfig = {
+  walletPassName: "Burgonomics Rewards",
+  walletPassColor: "#0E4825",
+  walletPassAccent: "#FF6600",
+  barcodeType: "QR_CODE",
+  pushEnabled: true,
+  rules: [
+    { tier: "Bronze", minPoints: 0, multiplier: 1.0, cashbackPercent: 5 },
+    { tier: "Silver", minPoints: 500, multiplier: 1.2, cashbackPercent: 6 },
+    { tier: "Gold", minPoints: 1500, multiplier: 1.5, cashbackPercent: 8 },
+    { tier: "Platinum", minPoints: 3000, multiplier: 1.8, cashbackPercent: 10 },
+    { tier: "VIP", minPoints: 5000, multiplier: 2.5, cashbackPercent: 15 },
+  ],
+  rewards: [
+    { id: "R-1", name: "Free Classic Veg Burger Combo", cost: 350, category: "Burgers" },
+    { id: "R-2", name: "Free Mocktail / Ice Cream Shake", cost: 180, category: "Beverages" },
+    { id: "R-3", name: "Free Large Peri Peri Fries", cost: 150, category: "Sides" },
+    { id: "R-4", name: "Free Cheeseburger Premium", cost: 240, category: "Burgers" },
+  ],
+  pointsExpiryMonths: 12,
+};
+
+/** Overlay saved values on defaults; garbage falls back to defaults. */
+export function mergeLoyaltyConfig(saved: Partial<LoyaltyConfig>): LoyaltyConfig {
+  const str = (v: unknown, fallback: string) => (typeof v === "string" ? v : fallback);
+  const num = (v: unknown, fallback: number) =>
+    typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : fallback;
+  return {
+    walletPassName: str(saved.walletPassName, DEFAULT_LOYALTY_CONFIG.walletPassName),
+    walletPassColor: str(saved.walletPassColor, DEFAULT_LOYALTY_CONFIG.walletPassColor),
+    walletPassAccent: str(saved.walletPassAccent, DEFAULT_LOYALTY_CONFIG.walletPassAccent),
+    barcodeType: str(saved.barcodeType, DEFAULT_LOYALTY_CONFIG.barcodeType),
+    pushEnabled: typeof saved.pushEnabled === "boolean" ? saved.pushEnabled : true,
+    rules: Array.isArray(saved.rules) ? (saved.rules as LoyaltyTierRule[]) : DEFAULT_LOYALTY_CONFIG.rules,
+    rewards: Array.isArray(saved.rewards) ? (saved.rewards as LoyaltyReward[]) : DEFAULT_LOYALTY_CONFIG.rewards,
+    pointsExpiryMonths: num(saved.pointsExpiryMonths, DEFAULT_LOYALTY_CONFIG.pointsExpiryMonths),
+  };
+}
 
 export const AdminLoyaltyConfigPage: React.FC = () => {
   const [customers, setCustomers] = useState<CustomerProfile[]>(customerStorage.getCustomers());
@@ -41,31 +112,44 @@ export const AdminLoyaltyConfigPage: React.FC = () => {
   }, []);
 
   // Apple & Google Wallet Config State
-  const [walletPassName, setWalletPassName] = useState("Burgonomics Rewards");
-  const [walletPassColor, setWalletPassColor] = useState("#0E4825");
-  const [walletPassAccent, setWalletPassAccent] = useState("#FF6600");
-  const [barcodeType, setBarcodeType] = useState("QR_CODE");
-  const [pushEnabled, setPushEnabled] = useState(true);
+  const [walletPassName, setWalletPassName] = useState(DEFAULT_LOYALTY_CONFIG.walletPassName);
+  const [walletPassColor, setWalletPassColor] = useState(DEFAULT_LOYALTY_CONFIG.walletPassColor);
+  const [walletPassAccent, setWalletPassAccent] = useState(DEFAULT_LOYALTY_CONFIG.walletPassAccent);
+  const [barcodeType, setBarcodeType] = useState(DEFAULT_LOYALTY_CONFIG.barcodeType);
+  const [pushEnabled, setPushEnabled] = useState(DEFAULT_LOYALTY_CONFIG.pushEnabled);
 
   // Global Points Multiplier Rules state
-  const [rules, setRules] = useState([
-    { tier: "Bronze", minPoints: 0, multiplier: 1.0, cashbackPercent: 5 },
-    { tier: "Silver", minPoints: 500, multiplier: 1.2, cashbackPercent: 6 },
-    { tier: "Gold", minPoints: 1500, multiplier: 1.5, cashbackPercent: 8 },
-    { tier: "Platinum", minPoints: 3000, multiplier: 1.8, cashbackPercent: 10 },
-    { tier: "VIP", minPoints: 5000, multiplier: 2.5, cashbackPercent: 15 },
-  ]);
+  const [rules, setRules] = useState<LoyaltyTierRule[]>(DEFAULT_LOYALTY_CONFIG.rules);
 
   // Redemption Rewards catalogues
-  const [rewards, setRewards] = useState([
-    { id: "R-1", name: "Free Classic Veg Burger Combo", cost: 350, category: "Burgers" },
-    { id: "R-2", name: "Free Mocktail / Ice Cream Shake", cost: 180, category: "Beverages" },
-    { id: "R-3", name: "Free Large Peri Peri Fries", cost: 150, category: "Sides" },
-    { id: "R-4", name: "Free Cheeseburger Premium", cost: 240, category: "Burgers" },
-  ]);
+  const [rewards, setRewards] = useState<LoyaltyReward[]>(DEFAULT_LOYALTY_CONFIG.rewards);
 
   // Expiration settings
-  const [pointsExpiryMonths, setPointsExpiryMonths] = useState(12);
+  const [pointsExpiryMonths, setPointsExpiryMonths] = useState(DEFAULT_LOYALTY_CONFIG.pointsExpiryMonths);
+
+  // Loop 21/120: load shared config on mount; saves below persist it back.
+  useEffect(() => {
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "app_settings", LOYALTY_CONFIG_DOC));
+        if (snap.exists()) {
+          const merged = mergeLoyaltyConfig((snap.data() || {}) as Partial<LoyaltyConfig>);
+          setWalletPassName(merged.walletPassName);
+          setWalletPassColor(merged.walletPassColor);
+          setWalletPassAccent(merged.walletPassAccent);
+          setBarcodeType(merged.barcodeType);
+          setPushEnabled(merged.pushEnabled);
+          setRules(merged.rules);
+          setRewards(merged.rewards);
+          setPointsExpiryMonths(merged.pointsExpiryMonths);
+        }
+      } catch (err) {
+        toast.error("Could not load shared loyalty config.", {
+          description: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })();
+  }, []);
 
   // Consolidated audit logs from every customer points adjustment
   const consolidatedLoyaltyAudit = useMemo(() => {
@@ -99,19 +183,30 @@ export const AdminLoyaltyConfigPage: React.FC = () => {
     return logs.sort((a, b) => b.date.localeCompare(a.date));
   }, [customers]);
 
-  // Actions
-  const handleSaveWalletPass = (e: React.FormEvent) => {
-    e.preventDefault();
-    toast.success(
-      "Wallet Pass schema compiled. Bundling cryptographic keys for iOS & Android Wallet distribution...",
-    );
-    setTimeout(() => {
-      toast.success("Apple & Google Wallet configurations pushed to edge servers successfully.");
-    }, 1000);
+  // Actions — Loop 21/120 honest persist: both saves write the shared doc
+  // and report the real outcome. Nothing here pushes to wallets/edge/POS —
+  // the old toasts claimed cryptographic bundling and edge distribution.
+  const persistConfig = async (patch: Partial<LoyaltyConfig>): Promise<boolean> => {
+    try {
+      await setDoc(doc(db, "app_settings", LOYALTY_CONFIG_DOC), patch, { merge: true });
+      return true;
+    } catch (err) {
+      toast.error("Loyalty config was NOT saved.", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+      return false;
+    }
   };
 
-  const handleSaveMultiplierRules = () => {
-    toast.success("Cashback multiplier rules saved to cloud database and synced to POS terminals.");
+  const handleSaveWalletPass = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const ok = await persistConfig({ walletPassName, walletPassColor, walletPassAccent, barcodeType, pushEnabled });
+    if (ok) toast.success("Wallet pass template saved to shared config.");
+  };
+
+  const handleSaveMultiplierRules = async () => {
+    const ok = await persistConfig({ rules, rewards, pointsExpiryMonths });
+    if (ok) toast.success("Cashback rules saved to shared config (POS sync pending).");
   };
 
   return (
@@ -218,7 +313,7 @@ export const AdminLoyaltyConfigPage: React.FC = () => {
           >
             <div className="space-y-4">
               <div className="p-3 bg-orange-50/5 text-orange-800 border border-orange-100 rounded-xl flex items-center gap-3">
-                <Clock size={15} className="shrink-0 text-[#FF6600]" />
+                <Clock size={15} className="shrink-0 text-accent dark:text-accent-light" />
                 <div className="space-y-0.5 leading-tight">
                   <span className="text-[9px] font-black uppercase font-mono tracking-wider">
                     Points Validity Rule
@@ -227,7 +322,7 @@ export const AdminLoyaltyConfigPage: React.FC = () => {
                     Points will expire automatically{" "}
                     <input
                       type="number"
-                      className="w-10 text-center bg-white border border-orange-200 rounded p-px text-xs font-mono font-bold text-[#FF6600]"
+                      className="w-10 text-center bg-white border border-orange-200 rounded p-px text-xs font-mono font-bold text-accent"
                       value={pointsExpiryMonths}
                       onChange={(e) => setPointsExpiryMonths(parseInt(e.target.value) || 12)}
                     />{" "}
@@ -256,7 +351,7 @@ export const AdminLoyaltyConfigPage: React.FC = () => {
                       <div className="flex items-center gap-2 font-mono">
                         <input
                           type="number"
-                          className="w-16 bg-gray-50 border border-gray-150 rounded text-center p-0.5 text-xs font-mono font-bold text-[#FF6600] dark:bg-gray-900 dark:border-gray-850"
+                          className="w-16 bg-gray-50 border border-gray-150 rounded text-center p-0.5 text-xs font-mono font-bold text-accent dark:text-accent-light dark:bg-gray-900 dark:border-gray-850"
                           value={reward.cost}
                           onChange={(e) => {
                             const updated = [...rewards];
@@ -349,8 +444,8 @@ export const AdminLoyaltyConfigPage: React.FC = () => {
           >
             <form onSubmit={handleSaveWalletPass} className="space-y-4 font-sans text-xs">
               <div className="p-3 bg-emerald-50/20 border border-emerald-100 rounded-xl flex items-center gap-3">
-                <Smartphone size={15} className="shrink-0 text-[#0E4825]" />
-                <div className="space-y-0.5 leading-tight text-[#0E4825]">
+                <Smartphone size={15} className="shrink-0 text-primary" />
+                <div className="space-y-0.5 leading-tight text-primary">
                   <span className="text-[9px] font-black uppercase font-mono tracking-wider">
                     Pass Distribution
                   </span>
