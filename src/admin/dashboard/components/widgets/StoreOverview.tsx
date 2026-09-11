@@ -73,7 +73,7 @@ export const StoreOverview: React.FC = () => {
         </div>
         <button
           onClick={() => navigate("/admin/stores" as any )}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-gray-100 dark:border-gray-800 hover:border-[#0E4825] dark:hover:border-emerald-800 text-xs font-bold text-gray-500 hover:text-gray-900 dark:hover:text-white transition-all cursor-pointer"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-gray-100 dark:border-gray-800 hover:border-primary dark:hover:border-emerald-800 text-xs font-bold text-gray-500 hover:text-gray-900 dark:hover:text-white transition-all cursor-pointer"
         >
           <span>All Stores</span>
           <ArrowRight size={12} />
@@ -99,14 +99,14 @@ export const StoreOverview: React.FC = () => {
             <div
               key={store.id}
               onClick={() => navigate(`/admin/stores` as any )} // clicking opens /admin/stores
-              className="group p-4 rounded-2xl border border-gray-50 dark:border-gray-900 bg-gray-50/20 dark:bg-[#1E1E1E]/20 hover:border-[#0E4825] dark:hover:border-emerald-800/60 hover:shadow-sm transition-all duration-300 cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4"
+              className="group p-4 rounded-2xl border border-gray-50 dark:border-gray-900 bg-gray-50/20 dark:bg-[#1E1E1E]/20 hover:border-primary dark:hover:border-emerald-800/60 hover:shadow-sm transition-all duration-300 cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4"
             >
               <div className="flex items-start gap-3.5">
-                <div className="p-2.5 rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 text-[#0E4825] dark:text-emerald-400 group-hover:bg-[#0E4825] group-hover:text-white dark:group-hover:bg-emerald-800 dark:group-hover:text-white transition-all shrink-0">
+                <div className="p-2.5 rounded-xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 text-primary dark:text-emerald-400 group-hover:bg-primary group-hover:text-white dark:group-hover:bg-emerald-800 dark:group-hover:text-white transition-all shrink-0">
                   <Store size={18} />
                 </div>
                 <div>
-                  <span className="block font-bold text-xs text-gray-900 dark:text-white group-hover:text-[#0E4825] dark:group-hover:text-emerald-400 transition-colors">
+                  <span className="block font-bold text-xs text-gray-900 dark:text-white group-hover:text-primary dark:group-hover:text-emerald-400 transition-colors">
                     {store.name}
                   </span>
                   <span className="block text-[10px] text-gray-400 font-semibold mt-0.5">
@@ -126,6 +126,13 @@ export const StoreOverview: React.FC = () => {
                       />
                       {isOpen ? "Open" : "Closed"}
                     </span>
+
+                    {/* Loop 3/120 honesty: fixture fallback stores are labeled, never live */}
+                    {store.isDemoFallback && (
+                      <span className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[9px] font-black uppercase bg-gray-800 text-amber-300 border border-amber-400/40 dark:bg-gray-900 dark:text-amber-300">
+                        Demo store
+                      </span>
+                    )}
 
                     {/* Busy badge */}
                     {isBusy && (
@@ -167,6 +174,11 @@ export const StoreOverview: React.FC = () => {
                     </span>
                     <span className="text-[10px] text-gray-400 font-semibold">
                       ({ordersCount} ord)
+                    </span>
+                    {/* Loop 3/120 honesty: card figures are id-hash
+                        illustrations, not ledger sales */}
+                    <span className="block text-[8px] text-gray-400 font-bold uppercase tracking-wider">
+                      Demo metrics
                     </span>
                   </div>
                 </div>

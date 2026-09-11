@@ -110,6 +110,12 @@ export interface StoreResponse {
   turnOnAt?: string | null;
   minPrepMinutes?: number | null;
   distanceKm?: number;
+  /**
+   * Loop 3/120 honesty flag: true ONLY for INITIAL_RICH_STORES fixtures
+   * served when admin_stores is empty/unreadable. UI must label these
+   * (StoreOverview "Demo store" badge) — never present fixtures as live.
+   */
+  isDemoFallback?: boolean;
 }
 
 export interface PaymentStats {

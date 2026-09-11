@@ -628,10 +628,12 @@ export class DashboardService {
         latitude: s.lat,
         longitude: s.lng,
         distanceKm: s.distanceKm,
+        isDemoFallback: true,
       }));
 
     try {
-      const snap = await getDocs(collection(db, "admin_stores"));
+      // Bounded: directory holds tens of stores; never pull unbounded.
+      const snap = await getDocs(query(collection(db, "admin_stores"), limit(100)));
       let stores: StoreResponse[] = [];
 
       if (!snap.empty) {
