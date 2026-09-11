@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Search, Plus, Trash2, Sparkles, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 import { useAdminAuthStore } from "../../store/adminAuthStore";
 
 interface FeatureFlag {
@@ -28,9 +29,12 @@ export const SystemFeatureFlagsTab: React.FC = () => {
       if (response.ok) {
         const data = await response.json();
         setFlags(data);
+      } else {
+        toast.error("Flag service unreachable — showing empty list.");
       }
     } catch (err) {
       console.error("Failed to fetch feature flags from backend", err);
+      toast.error("Flag service unreachable — showing empty list.");
     } finally {
       setIsLoading(false);
     }
@@ -57,9 +61,12 @@ export const SystemFeatureFlagsTab: React.FC = () => {
       });
       if (response.ok) {
         fetchFlags();
+      } else {
+        toast.error("Flag toggle failed — backend endpoint not connected.");
       }
     } catch (err) {
       console.error("Failed to toggle feature flag", err);
+      toast.error("Flag toggle failed — backend endpoint not connected.");
     }
   };
 
@@ -72,9 +79,12 @@ export const SystemFeatureFlagsTab: React.FC = () => {
       });
       if (response.ok) {
         fetchFlags();
+      } else {
+        toast.error("Flag delete failed — backend endpoint not connected.");
       }
     } catch (err) {
       console.error("Failed to delete feature flag", err);
+      toast.error("Flag delete failed — backend endpoint not connected.");
     }
   };
 
@@ -102,9 +112,12 @@ export const SystemFeatureFlagsTab: React.FC = () => {
         setNewKey("");
         setNewDesc("");
         setIsAdding(false);
+      } else {
+        toast.error("Flag create failed — backend endpoint not connected.");
       }
     } catch (err) {
       console.error("Failed to create feature flag", err);
+      toast.error("Flag create failed — backend endpoint not connected.");
     }
   };
 
@@ -140,7 +153,7 @@ export const SystemFeatureFlagsTab: React.FC = () => {
 
           <button
             onClick={() => setIsAdding(!isAdding)}
-            className="px-3 py-1.5 bg-[#0E4825] hover:bg-[#156d39] text-white text-[10px] font-black uppercase tracking-wider rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+            className="px-3 py-1.5 bg-primary hover:bg-[#156d39] text-white text-[10px] font-black uppercase tracking-wider rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Plus size={12} /> Create Flag
           </button>
@@ -200,7 +213,7 @@ export const SystemFeatureFlagsTab: React.FC = () => {
             </button>
             <button
               type="submit"
-              className="px-4 py-1.5 bg-[#0E4825] hover:bg-[#156d39] text-white rounded-lg cursor-pointer"
+              className="px-4 py-1.5 bg-primary hover:bg-[#156d39] text-white rounded-lg cursor-pointer"
             >
               Initialize Flag
             </button>
@@ -234,7 +247,7 @@ export const SystemFeatureFlagsTab: React.FC = () => {
                   <button
                     onClick={() => handleToggle(flag.key, flag.enabled, flag.description)}
                     className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      flag.enabled ? "bg-[#0E4825]" : "bg-gray-800"
+                      flag.enabled ? "bg-primary" : "bg-gray-800"
                     }`}
                   >
                     <span
