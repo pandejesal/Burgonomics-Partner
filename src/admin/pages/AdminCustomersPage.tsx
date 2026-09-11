@@ -38,8 +38,17 @@ import { customerStorage, CustomerProfile, SavedSegment } from "./customersData"
 import { useAdmin } from "../hooks/useAdmin";
 import { toast } from "sonner";
 
+// Loop 9/120: audit attribution names the ACTING admin — never a hardcoded identity.
+export function actorLabelFor(fullName: string | undefined, role: string): string {
+  return fullName && role ? `${fullName} (${role})` : role || "Staff";
+}
+
 export const AdminCustomersPage: React.FC = () => {
-  const { role } = useAdmin();
+  const { role, admin } = useAdmin();
+  // Loop 9/120: audit attribution must name the ACTING admin. The hardcoded
+  // "Super Admin (Jesal Pande)" stamped every loyalty/block/campaign record
+  // with the wrong identity for any other operator.
+  const actorLabel = actorLabelFor(admin?.fullName, role);
 
   // Storage Subscription
   const [customers, setCustomers] = useState<CustomerProfile[]>(customerStorage.getCustomers());
@@ -196,7 +205,7 @@ export const AdminCustomersPage: React.FC = () => {
       pointsAction,
       pointsAmount,
       pointsReason,
-      "Super Admin (Jesal Pande)",
+      actorLabel,
     );
 
     setPointsAdjustCust(null);
@@ -206,7 +215,7 @@ export const AdminCustomersPage: React.FC = () => {
 
   const handleToggleBlock = () => {
     if (!confirmBlockCust) return;
-    customerStorage.toggleBlockStatus(confirmBlockCust.id, "Super Admin (Jesal Pande)");
+    customerStorage.toggleBlockStatus(confirmBlockCust.id, actorLabel);
     setConfirmBlockCust(null);
   };
 
@@ -247,7 +256,7 @@ export const AdminCustomersPage: React.FC = () => {
       campaignTitle,
       campaignBody,
       targets,
-      "Super Admin (Jesal Pande)",
+      actorLabel,
     );
     setShowCampaignModal(false);
     setCampaignTitle("");
@@ -255,7 +264,9 @@ export const AdminCustomersPage: React.FC = () => {
   };
 
   const handleDownloadReport = (format: "CSV" | "EXCEL" | "PDF") => {
-    toast.success(`Compiling and cryptographically signing Customer ${format}...`);
+    // Loop 9/120 honest copy: this exports the LOCAL directory snapshot —
+    // the old toast claimed cryptographic signing that never happens.
+    toast.success(`Compiling Customer ${format} from the local directory...`);
 
     setTimeout(() => {
       if (format === "CSV" || format === "EXCEL") {
@@ -317,6 +328,12 @@ export const AdminCustomersPage: React.FC = () => {
         />
 
         <div className="flex items-center gap-2 self-start md:self-center">
+          {/* Loop 9/120 honesty: this directory is local seed data — no live
+              customers source is wired yet (server adjustCoins exists for the
+              day it is). Never present rows as live records. */}
+          <span className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[9px] font-black uppercase bg-gray-800 text-amber-300 border border-amber-400/40">
+            Local directory
+          </span>
           <Link to="/admin/customers/analytics">
             <AdminButton variant="outline" size="sm">
               <TrendingUp size={13} className="mr-1.5 text-accent dark:text-accent-light" />

@@ -40,11 +40,16 @@ import { AdminButton } from "../components/Buttons";
 import { StatusBadge } from "../components/Badges";
 import { ConfirmDialog } from "../components/Utilities";
 import { customerStorage, CustomerProfile, AddressSnapshot } from "./customersData";
+import { actorLabelFor } from "./AdminCustomersPage";
+import { useAdmin } from "../hooks/useAdmin";
 import { toast } from "sonner";
 
 export const AdminCustomerProfilePage: React.FC = () => {
   const { id = "" } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  // Loop 9/120: same acting-admin attribution as the directory page.
+  const { role, admin } = useAdmin();
+  const actorLabel = actorLabelFor(admin?.fullName, role);
 
   // Load profile from storage
   const [profile, setProfile] = useState<CustomerProfile | undefined>(
@@ -156,7 +161,7 @@ export const AdminCustomerProfilePage: React.FC = () => {
 
   // Handlers
   const handleSaveNotes = () => {
-    customerStorage.updateCustomerNotes(profile.id, notesText, "Super Admin (Jesal Pande)");
+    customerStorage.updateCustomerNotes(profile.id, notesText, actorLabel);
   };
 
   const handleAdjustPointsSubmit = (e: React.FormEvent) => {
@@ -170,7 +175,7 @@ export const AdminCustomerProfilePage: React.FC = () => {
       pointsAction,
       pointsAmount,
       pointsReason,
-      "Super Admin (Jesal Pande)",
+      actorLabel,
     );
     setPointsReason("");
     setPointsAmount(100);
@@ -178,7 +183,7 @@ export const AdminCustomerProfilePage: React.FC = () => {
 
   const handleForcedTierSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    customerStorage.adjustLoyaltyTier(profile.id, selectedTier, "Super Admin (Jesal Pande)");
+    customerStorage.adjustLoyaltyTier(profile.id, selectedTier, actorLabel);
   };
 
   const handleIssueCouponSubmit = (e: React.FormEvent) => {
@@ -190,7 +195,7 @@ export const AdminCustomerProfilePage: React.FC = () => {
     customerStorage.issueCoupon(
       profile.id,
       { code: couponCode, discount: couponDiscount, source: couponSource },
-      "Super Admin (Jesal Pande)",
+      actorLabel,
     );
     setCouponCode("");
   };
@@ -204,7 +209,7 @@ export const AdminCustomerProfilePage: React.FC = () => {
     customerStorage.sendDirectNotification(
       profile.id,
       { type: msgGateway, title: msgTitle, body: msgBody },
-      "Super Admin (Jesal Pande)",
+      actorLabel,
     );
     setShowMessageModal(false);
     setMsgTitle("");
@@ -212,7 +217,7 @@ export const AdminCustomerProfilePage: React.FC = () => {
   };
 
   const handleToggleBlock = () => {
-    customerStorage.toggleBlockStatus(profile.id, "Super Admin (Jesal Pande)");
+    customerStorage.toggleBlockStatus(profile.id, actorLabel);
     setShowBlockDialog(false);
   };
 
