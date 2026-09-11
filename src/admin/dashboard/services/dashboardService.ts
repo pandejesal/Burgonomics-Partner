@@ -90,10 +90,14 @@ export class DashboardService {
   protected async fetchOrders(storeId?: string): Promise<any[]> {
     try {
       let q;
+      // Loop 15/120: orders is the highest-volume collection — never pull it
+      // unbounded (same class as the Loop 3/11 fixes). 1000 keeps live
+      // counts exact at real scale while capping catastrophe.
+      const ORDER_LIMIT = 1000;
       if (storeId && storeId !== "all") {
-        q = query(collectionGroup(db, "orders"), where("store.id", "==", storeId));
+        q = query(collectionGroup(db, "orders"), where("store.id", "==", storeId), limit(ORDER_LIMIT));
       } else {
-        q = query(collectionGroup(db, "orders"));
+        q = query(collectionGroup(db, "orders"), limit(ORDER_LIMIT));
       }
 
       const snap = await getDocs(q);
@@ -108,7 +112,7 @@ export class DashboardService {
         err,
       );
       try {
-        const rootSnap = await getDocs(collection(db, "orders"));
+        const rootSnap = await getDocs(query(collection(db, "orders"), limit(1000)));
         const orders: any[] = [];
         rootSnap.forEach((doc) => {
           const data = doc.data();
@@ -199,14 +203,42 @@ export class DashboardService {
 
   /**
    * 1. Live Operations Counts (Firestore client-side aggregation)
+   *
+   * Loop 15/120: the "Payment/Petpooja Pending" gauges were hardcoded to 0 —
+   * stuck gauges hiding real webhook backlogs. They now count the actual
+   * unmatched parking docs (server-owned, brand-readable). Unreadable
+   * (role/denied) degrades to 0 with a loud warn, like siblings.
    */
+  protected async fetchUnmatchedWebhookCount(): Promise<number> {
+    try {
+      const snap = await getDocs(query(collection(db, "unmatched_payments"), limit(100)));
+      return snap.size;
+    } catch (err) {
+      console.warn("dashboardService.fetchUnmatchedWebhookCount failed:", err);
+      return 0;
+    }
+  }
+
+  protected async fetchUnmatchedPetpoojaCount(): Promise<number> {
+    try {
+      const snap = await getDocs(query(collection(db, "unmatched_petpooja_orders"), limit(100)));
+      return snap.size;
+    } catch (err) {
+      console.warn("dashboardService.fetchUnmatchedPetpoojaCount failed:", err);
+      return 0;
+    }
+  }
+
   async getLiveCounts(): Promise<DashboardCounts> {
-    const [orders, payments, refunds, stores] = await Promise.all([
-      this.fetchOrders(),
-      this.fetchPayments(),
-      this.fetchRefunds(),
-      this.getStores(),
-    ]);
+    const [orders, payments, refunds, stores, paymentWebhooksPending, petpoojaWebhooksPending] =
+      await Promise.all([
+        this.fetchOrders(),
+        this.fetchPayments(),
+        this.fetchRefunds(),
+        this.getStores(),
+        this.fetchUnmatchedWebhookCount(),
+        this.fetchUnmatchedPetpoojaCount(),
+      ]);
 
     const now = Date.now();
     const oneDayAgo = now - 24 * 60 * 60 * 1000;
@@ -241,8 +273,8 @@ export class DashboardService {
       ordersActive,
       paymentsCapturedLast24h,
       refundsPendingCount,
-      petpoojaWebhooksPending: 0,
-      paymentWebhooksPending: 0,
+      petpoojaWebhooksPending,
+      paymentWebhooksPending,
       realtimeSessionsActive: storesActive,
       storesActive,
     };
