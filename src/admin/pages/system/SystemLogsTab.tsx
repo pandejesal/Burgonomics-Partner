@@ -10,6 +10,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { useAdminAuthStore } from "../../store/adminAuthStore";
+import { toast } from "sonner";
 
 interface SystemLog {
   timestamp: string;
@@ -70,7 +71,11 @@ interface AuditRecord {
 
 export const SystemLogsTab: React.FC = () => {
   const { accessToken } = useAdminAuthStore();
-  const [logs, setLogs] = useState<SystemLog[]>(INITIAL_LOGS);
+  // Loop: the seed + 4s streaming interval fabricate log lines (wrong
+  // business facts included — Delhi/Gurgaon stores, fake refunds) with
+  // ERROR/CRITICAL levels staff could chase. DEV-only; prod shows the
+  // (real, possibly empty) audit trail + a real download of visible logs.
+  const [logs, setLogs] = useState<SystemLog[]>(import.meta.env.DEV ? INITIAL_LOGS : []);
   const [audits, setAudits] = useState<AuditRecord[]>([]);
   const [isStreaming, setIsStreaming] = useState(true);
   const [logLevelFilter, setLogLevelFilter] = useState<
@@ -86,7 +91,7 @@ export const SystemLogsTab: React.FC = () => {
 
   // Stream logs simulator for background container output (benign visual HMR)
   useEffect(() => {
-    if (!isStreaming) return;
+    if (!isStreaming || !import.meta.env.DEV) return;
 
     const interval = setInterval(() => {
       const timestamp = new Date().toLocaleTimeString();
@@ -166,9 +171,12 @@ export const SystemLogsTab: React.FC = () => {
       if (response.ok) {
         const data = await response.json();
         setAudits(data.items || []);
+      } else {
+        toast.error("Audit trail unreachable — backend endpoint not connected.");
       }
     } catch (err) {
       console.error("Failed to fetch administrative audits", err);
+      toast.error("Audit trail unreachable — backend endpoint not connected.");
     } finally {
       setIsLoadingAudits(false);
     }
@@ -186,7 +194,21 @@ export const SystemLogsTab: React.FC = () => {
   }, [logs]);
 
   const handleDownloadLogs = () => {
-    alert("Compiling logs stream... Downloaded burgonomics-system-logs.txt successfully.");
+    // Loop: was a bare alert() claiming a download that never happened.
+    // Download the actually-visible log lines as text (possibly empty).
+    try {
+      const lines = logs.map((l) => `${l.timestamp} [${l.level}] (${l.subsystem}) ${l.message}`);
+      const file = new Blob([lines.join("\n") || "No log lines in view."], { type: "text/plain" });
+      const element = document.createElement("a");
+      element.href = URL.createObjectURL(file);
+      element.download = `burgonomics-system-logs-${Date.now()}.txt`;
+      document.body.appendChild(element);
+      element.click();
+      element.remove();
+      toast.success("Log view downloaded.");
+    } catch {
+      toast.error("Could not download logs.");
+    }
   };
 
   const handleExportAudits = async () => {
@@ -204,9 +226,12 @@ export const SystemLogsTab: React.FC = () => {
         document.body.appendChild(a);
         a.click();
         a.remove();
+      } else {
+        toast.error("Audit export failed — backend endpoint not connected.");
       }
     } catch (err) {
       console.error(err);
+      toast.error("Audit export failed — backend endpoint not connected.");
     }
   };
 
@@ -274,7 +299,7 @@ export const SystemLogsTab: React.FC = () => {
               </button>
               <button
                 onClick={handleDownloadLogs}
-                className="p-1.5 rounded bg-[#0E4825]/20 border border-emerald-950 text-emerald-400 hover:bg-[#0E4825]/40 transition-all cursor-pointer"
+                className="p-1.5 rounded bg-primary/20 border border-emerald-950 text-emerald-400 hover:bg-primary/40 transition-all cursor-pointer"
               >
                 <Download size={12} />
               </button>
@@ -296,7 +321,7 @@ export const SystemLogsTab: React.FC = () => {
                 onClick={() => setLogLevelFilter(lvl as any)}
                 className={`px-2 py-0.5 rounded transition-all cursor-pointer uppercase ${
                   logLevelFilter === lvl
-                    ? "bg-[#0E4825] text-white border border-emerald-800"
+                    ? "bg-primary text-white border border-emerald-800"
                     : "hover:text-white"
                 }`}
               >
