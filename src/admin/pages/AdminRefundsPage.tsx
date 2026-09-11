@@ -172,7 +172,7 @@ export const AdminRefundsPage: React.FC = () => {
     }
   };
 
-  const handleRejectRefund = (e: React.FormEvent) => {
+  const handleRejectRefund = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!rejectingRefund) return;
 
@@ -187,19 +187,25 @@ export const AdminRefundsPage: React.FC = () => {
       return;
     }
 
-    // Loop 5/120 honest fail-closed: refund-request disposition has NO server
-    // endpoint (refunds collection is server-owned; client writes denied by
-    // rules). The old local-only reject faked a decision. Record nothing,
-    // change nothing — loud, never silent. QUEUED: server disposition endpoint.
+    // Loop 7/120: rejection records server-side via POST /refunds/dispose
+    // (closes the Loop 5 carryover). Loud failure, dialog stays open.
+    const target = rejectingRefund;
     setIsSubmittingRejection(true);
-    setTimeout(() => {
-      setIsSubmittingRejection(false);
+    try {
+      const res = await partnerFunctionsApi.disposeRefund({
+        refundId: target.id,
+        reason: rejectionReason.trim(),
+      });
       setRejectingRefund(null);
       setRejectionReason("");
-      toast.error("Rejection is not wired to the server yet — no change was made.", {
-        description: "Resolve via the support-ticket flow until the disposition endpoint lands.",
+      toast.success(`Refund request ${res.id} rejected and recorded.`);
+    } catch (err) {
+      toast.error("Rejection was not recorded — no change was made.", {
+        description: err instanceof Error ? err.message : String(err),
       });
-    }, 300);
+    } finally {
+      setIsSubmittingRejection(false);
+    }
   };
 
   // Loop 5/120: retry = re-attempt the REAL server release (idempotent —

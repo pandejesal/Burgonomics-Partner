@@ -97,4 +97,30 @@ describe('partnerFunctionsApi gateway (real client, mocked transport)', () => {
       partnerFunctionsApi.releaseRefund({ orderId: 'ord_1', razorpayPaymentId: 'pay_1' })
     ).rejects.toThrow(/no captured payment/);
   });
+
+  it('POSTs refund dispositions with id/reason and surfaces 409 conflicts', async () => {
+    const seen: { url?: string; init?: RequestInit } = {};
+    globalThis.fetch = (async (url: any, init: any) => {
+      seen.url = String(url);
+      seen.init = init;
+      return new Response(JSON.stringify({ id: 'rf_1', status: 'REJECTED' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as any;
+
+    const res = await partnerFunctionsApi.disposeRefund({ refundId: 'rf_1', reason: 'Duplicate' });
+    expect(seen.url).toMatch(/\/refunds\/dispose$/);
+    expect(JSON.parse(String(seen.init?.body))).toMatchObject({ refundId: 'rf_1', reason: 'Duplicate' });
+    expect(res.status).toBe('REJECTED');
+
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: 'only PENDING requests can be rejected' }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      })) as any;
+    await expect(
+      partnerFunctionsApi.disposeRefund({ refundId: 'rf_done', reason: 'x' })
+    ).rejects.toThrow(/only PENDING/);
+  });
 });

@@ -209,6 +209,18 @@ export const partnerFunctionsApi = {
   },
 
   /**
+   * Records a refund-request rejection server-side (POST /refunds/dispose,
+   * staff-only). Loop 7/120: closes the Loop 5 carryover — the reject dialog
+   * MUST use this, never a local-only mutation.
+   */
+  async disposeRefund(params: {
+    refundId: string;
+    reason: string;
+  }): Promise<{ id: string; status: string }> {
+    return await apiRequest('/refunds/dispose', params);
+  },
+
+  /**
    * Resolves a support ticket server-side (refunds, loyalty credit, coupon
    * record). Money-affecting actions MUST go through this — never flip ticket
    * status with a direct Firestore write and claim money moved (Loop 3).
