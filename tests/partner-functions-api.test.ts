@@ -123,4 +123,28 @@ describe('partnerFunctionsApi gateway (real client, mocked transport)', () => {
       partnerFunctionsApi.disposeRefund({ refundId: 'rf_done', reason: 'x' })
     ).rejects.toThrow(/only PENDING/);
   });
+
+  it('POSTs Porter bookings with order/staff and surfaces booking failures', async () => {
+    const seen: { url?: string; init?: RequestInit } = {};
+    globalThis.fetch = (async (url: any, init: any) => {
+      seen.url = String(url);
+      seen.init = init;
+      return new Response(
+        JSON.stringify({ porterOrderId: 'PRTR-1', riderName: 'Ramesh', riderPhone: 'x', riderVehicleNumber: 'y', trackingUrl: 'z', status: 'dispatched' }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }) as any;
+
+    const res = await partnerFunctionsApi.bookPorterRider('ord_9', 'Asha Manager');
+    expect(seen.url).toMatch(/\/porter\/book$/);
+    expect(JSON.parse(String(seen.init?.body))).toMatchObject({ orderId: 'ord_9', staffName: 'Asha Manager' });
+    expect(res.riderName).toBe('Ramesh');
+
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: 'Porter account not configured' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      })) as any;
+    await expect(partnerFunctionsApi.bookPorterRider('ord_9')).rejects.toThrow(/not configured/);
+  });
 });

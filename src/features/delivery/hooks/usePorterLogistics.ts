@@ -1,7 +1,9 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useOrders } from '@/hooks/useOrders';
 import { useAppStore } from '@/stores/appStore';
+import { useAuthStore } from '@/stores/authStore';
 import { getPorterDeliveryQuote, type PorterDeliveryQuote } from '@/services/porterDelivery';
+import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
 import { toast } from 'sonner';
 import { logger } from '@/core/logging/logger';
 import type { Order } from '@/types';
@@ -15,6 +17,7 @@ export interface InHouseRiderInfo {
 export function usePorterLogistics() {
   const { selectedBranchId } = useAppStore();
   const { orders = [], isLoading, updateOrderStatus } = useOrders();
+  const staffName = useAuthStore((s) => s.user?.name || s.user?.email) || 'Branch Staff';
 
   const [quotes, setQuotes] = useState<Record<string, PorterDeliveryQuote>>({});
   const [loadingQuotes, setLoadingQuotes] = useState<Record<string, boolean>>({});
@@ -65,11 +68,16 @@ export function usePorterLogistics() {
   }, [quotes, loadingQuotes]);
 
   // Dispatch Porter 2-Wheeler
+  // Loop 16/120: book the REAL courier FIRST via POST /porter/book. The old
+  // flow flipped status to out_for_delivery and toasted "dispatched" with a
+  // mere quote fare while booking nothing — a fake fulfillment signal. Status
+  // flips only after the server confirms the booking; failures stay loud
+  // with no status change. (Mock-mode servers return clearly-marked [TEST]
+  // riders, so both modes stay honest.)
   const dispatchPorter = useCallback(async (order: Order) => {
     setDispatchingOrderIds((prev) => ({ ...prev, [order.id]: true }));
     try {
-      const quote = quotes[order.id];
-      const fare = quote ? quote.estimatedFare : 45;
+      const booking = await partnerFunctionsApi.bookPorterRider(order.id, staffName);
 
       if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
         await updateOrderStatus.mutateAsync({
@@ -78,13 +86,17 @@ export function usePorterLogistics() {
         });
       }
 
-      toast.success(`Porter 2-Wheeler dispatched for Order #${order.id.slice(-6).toUpperCase()} (Est. ₹${fare})`);
+      toast.success(`Porter courier booked: ${booking.riderName}`, {
+        description: `Order #${order.id.slice(-6).toUpperCase()} · ${booking.porterOrderId}`,
+      });
     } catch (err) {
-      toast.error('Failed to dispatch Porter courier');
+      toast.error('Porter booking failed — no courier dispatched.', {
+        description: err instanceof Error ? err.message : 'Could not reach the dispatcher.',
+      });
     } finally {
       setDispatchingOrderIds((prev) => ({ ...prev, [order.id]: false }));
     }
-  }, [quotes, updateOrderStatus]);
+  }, [quotes, updateOrderStatus, staffName]);
 
   // Assign In-House Rider
   const assignInHouseRider = useCallback(async (orderId: string, rider: InHouseRiderInfo) => {
