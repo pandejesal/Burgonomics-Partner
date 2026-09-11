@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from "react";
+import { auth } from "@/core/config/firebase";
+import { EmailAuthProvider, reauthenticateWithCredential, updatePassword } from "firebase/auth";
 import {
   ShieldAlert,
   ShieldCheck,
@@ -14,7 +16,8 @@ import {
 } from "lucide-react";
 import { useAdminAuthStore } from "../store/adminAuthStore";
 import { db } from "@/core/config/firebase";
-import { collection, onSnapshot, query, orderBy, doc, updateDoc } from "firebase/firestore";
+import { toast } from "sonner";
+import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
 import { PageHeader } from "../components/Headers";
 import { StatCard, AdminCard } from "../components/Cards";
 import { AdminButton } from "../components/Buttons";
@@ -71,18 +74,49 @@ export const AdminProfilePage: React.FC = () => {
   const permissions = admin?.role?.permissions || [];
   const roleName = admin?.role?.name || "Administrator";
 
-  const handleChangePassword = (e: React.FormEvent) => {
+  const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPwdMessage(null);
     if (newPassword !== confirmPassword) {
       setPwdMessage({ text: "Passwords do not match.", type: "error" });
       return;
     }
+    if (newPassword.length < 8) {
+      setPwdMessage({ text: "New password must be at least 8 characters.", type: "error" });
+      return;
+    }
 
-    setPwdMessage({ text: "Password successfully modified!", type: "success" });
-    setCurrentPassword("");
-    setNewPassword("");
-    setConfirmPassword("");
+    // Loop 53/120: REAL credential change via Firebase (reauth + update).
+    // The old handler showed "successfully modified" while changing nothing
+    // — staff believed a rotated password while the old one still worked.
+    try {
+      const fbUser = auth.currentUser;
+      const email = admin?.email;
+      if (!fbUser || !email) {
+        setPwdMessage({ text: "No active session — sign in again.", type: "error" });
+        return;
+      }
+      const cred = EmailAuthProvider.credential(email, currentPassword);
+      await reauthenticateWithCredential(fbUser, cred);
+      await updatePassword(fbUser, newPassword);
+      setPwdMessage({ text: "Password successfully modified!", type: "success" });
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (err: any) {
+      const code = err?.code || "";
+      setPwdMessage({
+        text:
+          code.includes("wrong-password") || code.includes("invalid-credential")
+            ? "Current password is incorrect."
+            : code.includes("weak-password")
+              ? "New password is too weak."
+              : code.includes("requires-recent-login")
+                ? "Session expired — sign in again, then retry."
+                : "Password change failed. Please try again.",
+        type: "error",
+      });
+    }
   };
 
   return (
@@ -275,13 +309,18 @@ export const AdminProfilePage: React.FC = () => {
                   </div>
                   {!sess.active && (
                     <button
-                      onClick={() => {
-                        if (admin?.id) {
-                          updateDoc(doc(db, "admins", admin.id, "sessions", sess.id), {
-                            active: false,
-                          });
-                        }
-                      }}
+                      // Loop 53/120 honesty: session docs are server-minted
+                      // (rules deny all client writes) — there is no working
+                      // terminate path yet, so this says so instead of
+                      // silently doing nothing. QUEUED: server session-revoke
+                      // endpoint. Meanwhile: signing out everywhere starts
+                      // from the login screen's session controls.
+                      onClick={() =>
+                        toast.error("Session termination is not available yet.", {
+                          description:
+                            "Session records are server-managed. To lock an account out, revoke its role or contact Brand.",
+                        })
+                      }
                       className="flex h-8 w-8 items-center justify-center rounded-xl text-red-500 bg-red-50 hover:bg-red-100 dark:bg-red-950/15 transition-colors"
                       title="Terminate Session"
                     >
