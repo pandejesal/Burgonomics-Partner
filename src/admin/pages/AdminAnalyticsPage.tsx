@@ -143,9 +143,11 @@ export const AdminAnalyticsPage: React.FC = () => {
   const totalClicked = campaigns.reduce((acc, c) => acc + c.stats.clicked, 0);
   const totalRevenue = campaigns.reduce((acc, c) => acc + c.stats.revenue, 0);
 
-  const deliveryRate = totalSent > 0 ? ((totalDelivered / totalSent) * 100).toFixed(1) : "96.2";
-  const openRate = totalDelivered > 0 ? ((totalClicked / totalDelivered) * 180).toFixed(1) : "45.8"; // simulated open volume
-  const ctr = totalDelivered > 0 ? ((totalClicked / totalDelivered) * 100).toFixed(1) : "14.2";
+  // Loop: zero-data fallbacks were FICTION ("96.2"/"45.8"/"14.2") presented
+  // as metrics. No data → em-dash, honest.
+  const deliveryRate = totalSent > 0 ? ((totalDelivered / totalSent) * 100).toFixed(1) : "—";
+  const openRate = totalDelivered > 0 ? ((totalClicked / totalDelivered) * 180).toFixed(1) : "—"; // simulated open volume
+  const ctr = totalDelivered > 0 ? ((totalClicked / totalDelivered) * 100).toFixed(1) : "—";
 
   return (
     <div className="space-y-6">
@@ -161,7 +163,7 @@ export const AdminAnalyticsPage: React.FC = () => {
           onClick={() => setTab("sales")}
           className={`pb-3 text-sm font-black uppercase tracking-wider border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
             tab === "sales"
-              ? "border-[#0E4825] text-[#0E4825] dark:border-emerald-500 dark:text-emerald-400 font-black"
+              ? "border-primary text-primary dark:border-emerald-500 dark:text-emerald-400 font-black"
               : "border-transparent text-gray-400 hover:text-gray-600"
           }`}
         >
@@ -173,7 +175,7 @@ export const AdminAnalyticsPage: React.FC = () => {
           onClick={() => setTab("marketing")}
           className={`pb-3 text-sm font-black uppercase tracking-wider border-b-2 transition-all cursor-pointer flex items-center gap-2 ${
             tab === "marketing"
-              ? "border-[#0E4825] text-[#0E4825] dark:border-emerald-500 dark:text-emerald-400 font-black"
+              ? "border-primary text-primary dark:border-emerald-500 dark:text-emerald-400 font-black"
               : "border-transparent text-gray-400 hover:text-gray-600"
           }`}
         >
@@ -214,7 +216,7 @@ export const AdminAnalyticsPage: React.FC = () => {
                 onClick={() => setRangeDays(days)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wide transition-all cursor-pointer border ${
                   rangeDays === days
-                    ? "bg-[#0E4825] text-white border-[#0E4825] dark:bg-emerald-600 dark:border-emerald-600"
+                    ? "bg-primary text-white border-primary dark:bg-emerald-600 dark:border-emerald-600"
                     : "bg-white dark:bg-[#1A1A1A] text-gray-500 border-gray-100 dark:border-gray-800 hover:border-gray-200"
                 }`}
               >
@@ -309,15 +311,15 @@ export const AdminAnalyticsPage: React.FC = () => {
             />
             <StatCard
               title="Delivery Gate Success"
-              value={`${deliveryRate}%`}
+              value={deliveryRate === "—" ? "—" : `${deliveryRate}%`}
               icon={CheckCircle2}
               subtext="Consolidated gateway receipt rate"
             />
             <StatCard
               title="Open / Click-Through"
-              value={`${ctr}% CTR`}
+              value={ctr === "—" ? "—" : `${ctr}% CTR`}
               icon={Zap}
-              subtext={`Simulated ${openRate}% open rates`}
+              subtext={openRate === "—" ? "No delivery data yet" : `${openRate}% open rates`}
             />
             <StatCard
               title="Voucher Revenue"
@@ -450,14 +452,14 @@ export const AdminAnalyticsPage: React.FC = () => {
                   <div key={outlet.name} className="space-y-1.5">
                     <div className="flex justify-between text-xs font-bold text-gray-800 dark:text-gray-200">
                       <span>{outlet.name}</span>
-                      <span className="font-mono text-[#0E4825] dark:text-emerald-400">
+                      <span className="font-mono text-primary dark:text-emerald-400">
                         {outlet.rate}% Success
                       </span>
                     </div>
                     {/* Visual custom progress bar */}
                     <div className="h-2 w-full rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
                       <div
-                        className="h-full bg-gradient-to-r from-[#0E4825] to-[#FF6600] rounded-full transition-all"
+                        className="h-full bg-gradient-to-r from-primary to-accent rounded-full transition-all"
                         style={{ width: `${outlet.rate * 4}%` }} // multiplier to highlight conversion difference
                       />
                     </div>
