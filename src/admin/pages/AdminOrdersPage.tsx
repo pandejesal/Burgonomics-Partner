@@ -39,8 +39,10 @@ import { StatusBadge } from "../components/Badges";
 import { AdminButton } from "../components/Buttons";
 import { ConfirmDialog } from "../components/Utilities";
 import { motion, AnimatePresence } from "motion/react";
+import { toast } from "sonner";
 import { INITIAL_RICH_ORDERS, RichOrder, getThermalReceiptText } from "./ordersData";
 import { adminOrdersService } from "../services/adminOrdersService";
+import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
 import { useAdminAuthStore } from "@/admin/store/adminAuthStore";
 
 interface AdminOrdersPageProps {
@@ -899,7 +901,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                       <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400 font-bold">
                         <Mail size={13} className="text-gray-400" />
                         <span className="truncate">
-                          {selectedOrder.customerEmail || "no-email@burgonomics.com"}
+                          {selectedOrder.customerEmail || "No email on file"}
                         </span>
                       </div>
                     </div>
@@ -1369,59 +1371,86 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
           }
           onClose={() => setConfirmAction(null)}
           onConfirm={() => {
-            if (confirmAction.type === "accept") {
-              handleUpdateStatus(
-                confirmAction.orderId,
-                "Accepted",
-                "Store Manager (Rajesh)",
-                "Accepted order and pushed to kitchen printer",
-              );
-            } else if (confirmAction.type === "reject") {
-              handleUpdateStatus(
-                confirmAction.orderId,
-                "Cancelled",
-                "Store Manager (Rajesh)",
-                "Store manager rejected order due to high operational volume",
-              );
-            } else if (confirmAction.type === "cancel") {
-              handleUpdateStatus(
-                confirmAction.orderId,
-                "Cancelled",
-                "Store Manager (Rajesh)",
-                "Voided and cancelled session",
-              );
-            } else if (confirmAction.type === "refund") {
-              setOrders((prev) =>
-                prev.map((o) =>
-                  o.id === confirmAction.orderId
-                    ? { ...o, orderStatus: "Refunded", paymentStatus: "Refunded" }
-                    : o,
-                ),
-              );
-              // Update drawer details
-              if (selectedOrder && selectedOrder.id === confirmAction.orderId) {
-                setSelectedOrder((prev) =>
-                  prev ? { ...prev, orderStatus: "Refunded", paymentStatus: "Refunded" } : null,
+            // Loop 32/120: money/sync actions MUST hit the server (see refund
+            // + petpooja branches below) — never local flips with fake logs.
+            // Audit actor is the signed-in operator, never a hardcoded name.
+            const actorLabel =
+              admin?.fullName && selectedRole
+                ? `${admin.fullName} (${selectedRole})`
+                : selectedRole || "Staff";
+            const doConfirm = async () => {
+              if (confirmAction.type === "accept") {
+                handleUpdateStatus(
+                  confirmAction.orderId,
+                  "Accepted",
+                  actorLabel,
+                  "Accepted order and pushed to kitchen printer",
                 );
+              } else if (confirmAction.type === "reject") {
+                handleUpdateStatus(
+                  confirmAction.orderId,
+                  "Cancelled",
+                  actorLabel,
+                  "Store manager rejected order due to high operational volume",
+                );
+              } else if (confirmAction.type === "cancel") {
+                handleUpdateStatus(
+                  confirmAction.orderId,
+                  "Cancelled",
+                  actorLabel,
+                  "Voided and cancelled session",
+                );
+            } else if (confirmAction.type === "refund") {
+              const target = orders.find((o) => o.id === confirmAction.orderId);
+              const paymentId =
+                (target as any)?.payment?.razorpayPaymentId ||
+                (target as any)?.razorpayPaymentId ||
+                "";
+              const amountRupees =
+                Number((target as any)?.totals?.grandTotal) ||
+                Number((target as any)?.total) ||
+                0;
+              try {
+                const res = await partnerFunctionsApi.releaseRefund({
+                  orderId: confirmAction.orderId,
+                  razorpayPaymentId: paymentId,
+                  ...(amountRupees > 0 ? { amountRupees } : {}),
+                  reason: "Partner ops refund from order board",
+                });
+                toast.success(`Refund released via Razorpay (ID: ${(res as any)?.id ?? "confirmed"}).`);
+              } catch (err) {
+                toast.error("Refund NOT issued — no money moved.", {
+                  description: err instanceof Error ? err.message : String(err),
+                });
               }
-              console.log(
-                `[AUDIT LOG] Razorpay API refund generated of order ${confirmAction.orderId}`,
-              );
             } else if (confirmAction.type === "petpooja") {
-              setOrders((prev) =>
-                prev.map((o) =>
-                  o.id === confirmAction.orderId ? { ...o, petpoojaStatus: "Synced" } : o,
-                ),
-              );
-              if (selectedOrder && selectedOrder.id === confirmAction.orderId) {
-                setSelectedOrder((prev) => (prev ? { ...prev, petpoojaStatus: "Synced" } : null));
+              try {
+                const res = await partnerFunctionsApi.pushOrderToPetpooja(confirmAction.orderId);
+                if (res?.success) {
+                  setOrders((prev) =>
+                    prev.map((o) =>
+                      o.id === confirmAction.orderId ? { ...o, petpoojaStatus: "Synced" } : o,
+                    ),
+                  );
+                  if (selectedOrder && selectedOrder.id === confirmAction.orderId) {
+                    setSelectedOrder((prev) =>
+                      prev ? { ...prev, petpoojaStatus: "Synced" } : null,
+                    );
+                  }
+                  toast.success("KOT pushed to Petpooja (server confirmed).");
+                } else {
+                  toast.error("Petpooja push NOT confirmed by the server.");
+                }
+              } catch (err) {
+                toast.error("Petpooja push failed — nothing was sent.", {
+                  description: err instanceof Error ? err.message : String(err),
+                });
               }
-              console.log(
-                `[OMS] Manual Petpooja sync completed successfully for order ${confirmAction.orderId}`,
-              );
             }
             setConfirmAction(null);
-          }}
+            };
+            void doConfirm();
+            }}
           title={
             confirmAction.type === "accept"
               ? "Accept Incoming Order?"
