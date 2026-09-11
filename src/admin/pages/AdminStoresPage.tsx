@@ -63,6 +63,19 @@ import { adminStoresService } from "../services/adminStoresService";
 type ViewTab = "list" | "grid" | "radar";
 type RoleType = "Developer" | "Operations" | "Store Manager" | "Finance";
 
+// Loop 6/120: shared validator so store creation cannot persist fabricated
+// contact numbers. Returns normalized display form or null.
+export function normalizeIndianMobile(raw: string): string | null {
+  let d = raw.replace(/\D/g, "");
+  if (d.length === 12 && d.startsWith("91")) d = d.slice(2);
+  if (d.length === 11 && d.startsWith("0")) d = d.slice(1);
+  if (!/^[6-9]\d{9}$/.test(d)) return null;
+  // Reject fabricated/placeholder shapes: the retired "+91 98765 00000"
+  // default and all-same-digit numbers must never enter the live directory.
+  if (d === "9876500000" || /^(\d)\1{9}$/.test(d)) return null;
+  return `+91 ${d.slice(0, 5)} ${d.slice(5)}`;
+}
+
 export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boolean }> = ({
   defaultStoreId,
   isCreate: initialIsCreate,
@@ -85,11 +98,18 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
     void loadStores();
   }, []);
 
-  const saveStores = async (updated: RichStore[]) => {
+  const saveStores = async (updated: RichStore[]): Promise<boolean> => {
     setStores(updated);
     // In a real app we'd update specific stores, but for this prototype we'll bulk update
     // or we can just update the ones that changed. Let's do bulk for now since it mirrors the localstorage behavior
-    await adminStoresService.bulkUpsert(updated);
+    // Loop 6/120: return the real persist outcome so money/honesty-critical
+    // callers can report truthfully; fire-and-forget callers ignore it as before.
+    const res = await adminStoresService.bulkUpsert(updated);
+    if (!res.success) {
+      toast.error("Store directory save failed.", { description: res.error.message });
+      return false;
+    }
+    return true;
   };
 
   // Use real Admin Auth Role
@@ -355,18 +375,30 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
   };
 
   // Edit / Save Store Settings Form
-  const handleUpdateStoreSettings = (e: React.FormEvent) => {
+  // Loop 6/120 honest persist: the toggles only touch local state — flush to
+  // Firestore here and report the real outcome instead of a blind success.
+  const handleUpdateStoreSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isReadOnly) return;
+    // saveStores toasts loud on failure and returns false — only claim
+    // success when the directory actually persisted.
+    if (!(await saveStores(stores))) return;
     setIsEditMode(false);
     toast.success("Store configurations updated successfully!");
   };
 
   // Create Store
-  const handleCreateStore = (e: React.FormEvent) => {
+  // Loop 6/120: no fabricated contact data — a store ships with the real
+  // verified phone or it is not created.
+  const handleCreateStore = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newStoreName || !newStoreArea || !newStoreAddress) {
       toast.error("Please fill in all required fields.");
+      return;
+    }
+    const validPhone = normalizeIndianMobile(newStorePhone);
+    if (!validPhone) {
+      toast.error("Enter a valid 10-digit store phone — no placeholder numbers.");
       return;
     }
 
@@ -379,7 +411,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
       area: newStoreArea,
       lat: parseFloat(newStoreLat),
       lng: parseFloat(newStoreLng),
-      phone: newStorePhone || "+91 98765 00000",
+      phone: validPhone,
       imageUrl: null,
       hours: { open: "10:00", close: "23:00" },
       isOpen: true,
@@ -401,7 +433,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
       },
       email: `${newStoreName.toLowerCase().replace(/\s/g, "")}@burgonomics.com`,
       managerName: "Operational Lead",
-      managerPhone: newStorePhone || "+91 98765 00000",
+      managerPhone: validPhone,
       webhookUrl: `https://api.burgonomics.com/webhooks/petpooja/v1/${newId}`,
       webhookStatus: "active",
       circuitBreaker: "closed",
@@ -432,7 +464,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
           id: `STF-${newId}-01`,
           name: "Operational Lead",
           role: "Manager",
-          phone: newStorePhone || "+91 98765 00000",
+          phone: validPhone,
           email: "manager@burgonomics.com",
           isOnline: true,
         },
@@ -458,10 +490,12 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
     };
 
     const updated = [newStore, ...stores];
-    void saveStores(updated);
+    // Loop 6/120 honest persist: surface the real save outcome. (No Petpooja
+    // mapping call happens here — the old toast claimed one.)
+    if (!(await saveStores(updated))) return;
     setIsCreating(false);
     setActiveStoreId(newId);
-    toast.success(`Store "${newStoreName}" successfully registered on Petpooja mapping!`);
+    toast.success(`Store "${newStoreName}" saved to the store directory.`);
 
     // Reset Form
     setNewStoreName("");
@@ -632,7 +666,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         placeholder="Search by name, area, city, petpoojaRestId..."
-                        className="w-full rounded-xl border border-gray-200 py-2.5 pl-10 pr-4 text-sm font-semibold outline-none focus:border-[#0E4825] dark:border-gray-700 dark:bg-gray-800 focus:ring-1 focus:ring-[#0E4825]"
+                        className="w-full rounded-xl border border-gray-200 py-2.5 pl-10 pr-4 text-sm font-semibold outline-none focus:border-primary dark:border-gray-700 dark:bg-gray-800 focus:ring-1 focus:ring-[#0E4825]"
                       />
                     </div>
 
@@ -645,7 +679,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                             onClick={() => setViewTab(tab)}
                             className={`rounded-lg px-3 py-1.5 text-xs font-black capitalize transition-all ${
                               viewTab === tab
-                                ? "bg-white text-[#0E4825] shadow-sm dark:bg-[#1A1A1A] dark:text-emerald-400"
+                                ? "bg-white text-primary shadow-sm dark:bg-[#1A1A1A] dark:text-emerald-400"
                                 : "text-gray-500 hover:text-gray-900 dark:hover:text-white"
                             }`}
                           >
@@ -658,7 +692,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                       {!isReadOnly && (
                         <button
                           onClick={() => setIsCreating(true)}
-                          className="flex items-center gap-1.5 rounded-xl bg-[#0E4825] hover:bg-[#082E17] text-white px-4 py-2.5 text-xs font-black shadow-md transition-all shrink-0"
+                          className="flex items-center gap-1.5 rounded-xl bg-primary hover:bg-[#082E17] text-white px-4 py-2.5 text-xs font-black shadow-md transition-all shrink-0"
                         >
                           <Plus size={16} />
                           <span>REGISTER STORE</span>
@@ -730,7 +764,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                       <div className="h-4 w-[1px] bg-gray-200 dark:bg-gray-800" />
                       <button
                         onClick={() => handleExportDirectory("csv")}
-                        className="rounded-lg bg-gray-50 p-1 text-gray-400 hover:text-[#0E4825] dark:bg-gray-900"
+                        className="rounded-lg bg-gray-50 p-1 text-gray-400 hover:text-primary dark:bg-gray-900"
                         title="Export CSV"
                       >
                         <Download size={14} />
@@ -782,12 +816,12 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                             <div>
                               <div className="flex items-start justify-between gap-4">
                                 <div>
-                                  <span className="font-mono text-[10px] font-black tracking-widest text-[#FF6600]">
+                                  <span className="font-mono text-[10px] font-black tracking-widest text-accent dark:text-accent-light">
                                     {store.id}
                                   </span>
                                   <h3
                                     onClick={() => setActiveStoreId(store.id)}
-                                    className="cursor-pointer text-base font-black tracking-tight text-gray-900 hover:text-[#0E4825] dark:text-white dark:hover:text-emerald-400"
+                                    className="cursor-pointer text-base font-black tracking-tight text-gray-900 hover:text-primary dark:text-white dark:hover:text-emerald-400"
                                   >
                                     {store.name}
                                   </h3>
@@ -867,7 +901,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
 
                                 <button
                                   onClick={() => setActiveStoreId(store.id)}
-                                  className="flex items-center gap-1 font-black text-[#0E4825] hover:text-[#082E17] dark:text-emerald-400"
+                                  className="flex items-center gap-1 font-black text-primary hover:text-[#082E17] dark:text-emerald-400"
                                 >
                                   <span>ENTER CONSOLE</span>
                                   <ChevronRight size={14} />
@@ -906,7 +940,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                                   <div>
                                     <span
                                       onClick={() => setActiveStoreId(store.id)}
-                                      className="cursor-pointer block text-sm font-black text-gray-900 hover:text-[#0E4825] dark:text-white dark:hover:text-emerald-400"
+                                      className="cursor-pointer block text-sm font-black text-gray-900 hover:text-primary dark:text-white dark:hover:text-emerald-400"
                                     >
                                       {store.name}
                                     </span>
@@ -956,7 +990,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                                     <button
                                       onClick={() => handleSyncStore(store.id)}
                                       disabled={syncingStoreId === store.id}
-                                      className="rounded-lg p-1.5 text-gray-400 hover:text-[#0E4825]"
+                                      className="rounded-lg p-1.5 text-gray-400 hover:text-primary"
                                       title="Sync Menu"
                                     >
                                       <RotateCw
@@ -968,7 +1002,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                                     </button>
                                     <button
                                       onClick={() => setActiveStoreId(store.id)}
-                                      className="rounded-lg bg-gray-50 px-2.5 py-1 text-xs font-black text-[#0E4825] hover:bg-gray-100 dark:bg-gray-800 dark:text-emerald-400"
+                                      className="rounded-lg bg-gray-50 px-2.5 py-1 text-xs font-black text-primary hover:bg-gray-100 dark:bg-gray-800 dark:text-emerald-400"
                                     >
                                       CONSOLE
                                     </button>
@@ -1187,10 +1221,10 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                               <div
                                 key={store.id}
                                 onClick={() => setActiveStoreId(store.id)}
-                                className="cursor-pointer group flex items-center justify-between rounded-xl border border-gray-100 bg-gray-50/40 p-3 hover:border-[#0E4825]/35 hover:bg-[#0E4825]/5 dark:border-gray-800 dark:bg-gray-900/30 dark:hover:bg-emerald-950/10"
+                                className="cursor-pointer group flex items-center justify-between rounded-xl border border-gray-100 bg-gray-50/40 p-3 hover:border-primary/35 hover:bg-primary/5 dark:border-gray-800 dark:bg-gray-900/30 dark:hover:bg-emerald-950/10"
                               >
                                 <div>
-                                  <span className="block font-black text-sm text-gray-900 group-hover:text-[#0E4825] dark:text-white dark:group-hover:text-emerald-400">
+                                  <span className="block font-black text-sm text-gray-900 group-hover:text-primary dark:text-white dark:group-hover:text-emerald-400">
                                     {store.name}
                                   </span>
                                   <span className="block font-mono text-[9px] text-gray-400 font-bold">
@@ -1249,7 +1283,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                     value={newStoreName}
                     onChange={(e) => setNewStoreName(e.target.value)}
                     placeholder="e.g. Burgonomics Satellite"
-                    className="w-full rounded-xl border border-gray-200 py-2.5 px-4 text-sm font-semibold outline-none focus:border-[#0E4825] dark:border-gray-700 dark:bg-gray-800"
+                    className="w-full rounded-xl border border-gray-200 py-2.5 px-4 text-sm font-semibold outline-none focus:border-primary dark:border-gray-700 dark:bg-gray-800"
                   />
                 </div>
                 <div>
@@ -1259,7 +1293,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                   <select
                     value={newStoreCity}
                     onChange={(e) => setNewStoreCity(e.target.value)}
-                    className="w-full rounded-xl border border-gray-200 py-2.5 px-4 text-sm font-semibold outline-none focus:border-[#0E4825] dark:border-gray-700 dark:bg-gray-800"
+                    className="w-full rounded-xl border border-gray-200 py-2.5 px-4 text-sm font-semibold outline-none focus:border-primary dark:border-gray-700 dark:bg-gray-800"
                   >
                     <option value="Ahmedabad">Ahmedabad</option>
                     <option value="Vadodara">Vadodara</option>
@@ -1283,7 +1317,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                     value={newStoreArea}
                     onChange={(e) => setNewStoreArea(e.target.value)}
                     placeholder="e.g. Satellite"
-                    className="w-full rounded-xl border border-gray-200 py-2.5 px-4 text-sm font-semibold outline-none focus:border-[#0E4825] dark:border-gray-700 dark:bg-gray-800"
+                    className="w-full rounded-xl border border-gray-200 py-2.5 px-4 text-sm font-semibold outline-none focus:border-primary dark:border-gray-700 dark:bg-gray-800"
                   />
                 </div>
                 <div>
@@ -1295,7 +1329,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                     value={newStorePhone}
                     onChange={(e) => setNewStorePhone(e.target.value)}
                     placeholder="e.g. +91 78781 82109"
-                    className="w-full rounded-xl border border-gray-200 py-2.5 px-4 text-sm font-semibold outline-none focus:border-[#0E4825] dark:border-gray-700 dark:bg-gray-800"
+                    className="w-full rounded-xl border border-gray-200 py-2.5 px-4 text-sm font-semibold outline-none focus:border-primary dark:border-gray-700 dark:bg-gray-800"
                   />
                 </div>
               </div>
@@ -1310,7 +1344,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                   value={newStoreAddress}
                   onChange={(e) => setNewStoreAddress(e.target.value)}
                   placeholder="e.g. Shop GF-7 Saaman Complex, Near Mansi Circle, Satellite, Ahmedabad 380015"
-                  className="w-full rounded-xl border border-gray-200 py-2.5 px-4 text-sm font-semibold outline-none focus:border-[#0E4825] dark:border-gray-700 dark:bg-gray-800"
+                  className="w-full rounded-xl border border-gray-200 py-2.5 px-4 text-sm font-semibold outline-none focus:border-primary dark:border-gray-700 dark:bg-gray-800"
                 />
               </div>
 
@@ -1324,7 +1358,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                     value={newStorePetpoojaId}
                     onChange={(e) => setNewStorePetpoojaId(e.target.value)}
                     placeholder="e.g. rest_satellite_pos"
-                    className="w-full rounded-xl border border-gray-200 py-2.5 px-4 text-sm font-semibold outline-none focus:border-[#0E4825] dark:border-gray-700 dark:bg-gray-800"
+                    className="w-full rounded-xl border border-gray-200 py-2.5 px-4 text-sm font-semibold outline-none focus:border-primary dark:border-gray-700 dark:bg-gray-800"
                   />
                 </div>
                 <div>
@@ -1335,7 +1369,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                     type="text"
                     value={newStoreLat}
                     onChange={(e) => setNewStoreLat(e.target.value)}
-                    className="w-full rounded-xl border border-gray-200 py-2.5 px-4 text-sm font-semibold font-mono outline-none focus:border-[#0E4825] dark:border-gray-700 dark:bg-gray-800"
+                    className="w-full rounded-xl border border-gray-200 py-2.5 px-4 text-sm font-semibold font-mono outline-none focus:border-primary dark:border-gray-700 dark:bg-gray-800"
                   />
                 </div>
                 <div>
@@ -1346,7 +1380,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                     type="text"
                     value={newStoreLng}
                     onChange={(e) => setNewStoreLng(e.target.value)}
-                    className="w-full rounded-xl border border-gray-200 py-2.5 px-4 text-sm font-semibold font-mono outline-none focus:border-[#0E4825] dark:border-gray-700 dark:bg-gray-800"
+                    className="w-full rounded-xl border border-gray-200 py-2.5 px-4 text-sm font-semibold font-mono outline-none focus:border-primary dark:border-gray-700 dark:bg-gray-800"
                   />
                 </div>
               </div>
@@ -1361,7 +1395,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                 </button>
                 <button
                   type="submit"
-                  className="rounded-xl bg-[#0E4825] px-5 py-2.5 text-xs font-black text-white hover:bg-[#082E17]"
+                  className="rounded-xl bg-primary px-5 py-2.5 text-xs font-black text-white hover:bg-[#082E17]"
                 >
                   SAVE OUTLET REGISTRATION
                 </button>
@@ -1415,11 +1449,11 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                   {/* General Info Card */}
                   <div className="rounded-[20px] border border-gray-100 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-[#1C1C1E]">
                     <div className="flex items-start gap-4">
-                      <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-[#0E4825] text-white font-black text-2xl shrink-0">
+                      <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-white font-black text-2xl shrink-0">
                         B
                       </div>
                       <div className="flex-1 min-w-0">
-                        <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-[#FF6600]">
+                        <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-accent dark:text-accent-light">
                           <Sparkles size={10} />
                           Burgonomics Outlet
                         </span>
@@ -1486,7 +1520,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                       <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-wider">
                         Operating Shifts Weekly Schedule
                       </h3>
-                      <Calendar size={16} className="text-[#0E4825]" />
+                      <Calendar size={16} className="text-primary" />
                     </div>
 
                     <div className="divide-y divide-gray-50 dark:divide-gray-800 text-xs font-semibold">
@@ -1505,7 +1539,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                                 Shift 1: {s.open} - {s.close}
                               </span>
                               {s.secondShiftOpen && (
-                                <span className="font-mono bg-[#0E4825]/5 text-[#0E4825] px-2 py-0.5 rounded border border-[#0E4825]/10">
+                                <span className="font-mono bg-primary/5 text-primary px-2 py-0.5 rounded border border-primary/10">
                                   Shift 2: {s.secondShiftOpen} - {s.secondShiftClose}
                                 </span>
                               )}
@@ -1530,7 +1564,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                       {!isReadOnly && (
                         <button
                           onClick={() => setShowAddStaffModal(true)}
-                          className="flex items-center gap-1 rounded-lg bg-[#0E4825] px-2 py-1 text-[10px] font-black text-white hover:bg-[#082E17]"
+                          className="flex items-center gap-1 rounded-lg bg-primary px-2 py-1 text-[10px] font-black text-white hover:bg-[#082E17]"
                         >
                           <Plus size={10} />
                           <span>ASSIGN STAFF</span>
@@ -1546,7 +1580,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                         >
                           <div className="flex items-center gap-2.5">
                             <div className="relative">
-                              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-100 text-[#FF6600] font-black text-xs">
+                              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-100 text-accent font-black text-xs">
                                 {member.name
                                   .split(" ")
                                   .map((n) => n[0])
@@ -1588,7 +1622,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                       <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-wider">
                         Compliance Documents Vault
                       </h3>
-                      <FileText size={16} className="text-[#0E4825]" />
+                      <FileText size={16} className="text-primary" />
                     </div>
 
                     <div className="space-y-2">
@@ -1596,7 +1630,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                         <div
                           key={doc.id}
                           onClick={() => setViewDoc(doc)}
-                          className="cursor-pointer flex items-center justify-between rounded-xl border border-gray-50 bg-gray-50/20 p-2.5 hover:border-[#0E4825]/20 dark:border-gray-800 dark:bg-gray-900/10"
+                          className="cursor-pointer flex items-center justify-between rounded-xl border border-gray-50 bg-gray-50/20 p-2.5 hover:border-primary/20 dark:border-gray-800 dark:bg-gray-900/10"
                         >
                           <div className="flex items-center gap-2">
                             <FileText size={16} className="text-orange-500 shrink-0" />
@@ -1632,7 +1666,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                       <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-wider">
                         Immediate Operations & Status Controls
                       </h3>
-                      <Activity size={16} className="text-[#FF6600]" />
+                      <Activity size={16} className="text-accent dark:text-accent-light" />
                     </div>
 
                     {/* Status switches */}
@@ -1723,7 +1757,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                             }}
                             disabled={isReadOnly}
                             placeholder="Not Linked"
-                            className="w-full bg-transparent font-mono font-black border-b border-dashed border-gray-300 dark:border-gray-700 focus:border-[#0E4825] outline-none px-0 py-0.5 text-gray-900 dark:text-white focus:ring-0"
+                            className="w-full bg-transparent font-mono font-black border-b border-dashed border-gray-300 dark:border-gray-700 focus:border-primary outline-none px-0 py-0.5 text-gray-900 dark:text-white focus:ring-0"
                           />
                         </div>
                         <div className="flex justify-between">
@@ -1743,7 +1777,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                       <div className="space-y-2 rounded-xl bg-gray-50 p-3 dark:bg-gray-900/30">
                         <div className="flex justify-between">
                           <span className="text-gray-400">Menu Version:</span>
-                          <span className="font-mono font-bold text-[#FF6600]">
+                          <span className="font-mono font-bold text-accent dark:text-accent-light">
                             {activeStore.menuVersion}
                           </span>
                         </div>
@@ -1770,7 +1804,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                         <span className="truncate text-gray-500">{activeStore.webhookUrl}</span>
                         <button
                           onClick={() => handleCopyText(activeStore.webhookUrl, "Webhook URL")}
-                          className="text-[#0E4825] dark:text-emerald-400 hover:underline shrink-0 ml-2"
+                          className="text-primary dark:text-emerald-400 hover:underline shrink-0 ml-2"
                         >
                           COPY
                         </button>
@@ -1781,7 +1815,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                       <button
                         onClick={() => handleSyncStore(activeStore.id)}
                         disabled={syncingStoreId === activeStore.id || isReadOnly}
-                        className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-[#0E4825] text-white py-2 text-xs font-black hover:bg-[#082E17] disabled:bg-gray-100 disabled:text-gray-400"
+                        className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-primary text-white py-2 text-xs font-black hover:bg-[#082E17] disabled:bg-gray-100 disabled:text-gray-400"
                       >
                         <RotateCw
                           size={12}
@@ -1924,7 +1958,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                       <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-wider">
                         Outlet Sales & Traffic Analytics
                       </h3>
-                      <TrendingUp size={16} className="text-[#0E4825]" />
+                      <TrendingUp size={16} className="text-primary" />
                     </div>
 
                     <div className="grid grid-cols-2 gap-4 mb-4 text-xs font-semibold">
@@ -2009,7 +2043,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                               });
                               saveStores(updated);
                             }}
-                            className="h-4 w-4 text-[#0E4825]"
+                            className="h-4 w-4 text-primary"
                           />
                         </div>
 
@@ -2034,7 +2068,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                               });
                               saveStores(updated);
                             }}
-                            className="h-4 w-4 text-[#0E4825]"
+                            className="h-4 w-4 text-primary"
                           />
                         </div>
 
@@ -2059,7 +2093,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                               });
                               saveStores(updated);
                             }}
-                            className="h-4 w-4 text-[#0E4825]"
+                            className="h-4 w-4 text-primary"
                           />
                         </div>
 
@@ -2084,7 +2118,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                               });
                               saveStores(updated);
                             }}
-                            className="h-4 w-4 text-[#0E4825]"
+                            className="h-4 w-4 text-primary"
                           />
                         </div>
                       </div>
@@ -2115,7 +2149,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
           <div className="relative w-full max-w-xl rounded-2xl bg-white p-5 dark:bg-[#1C1C1E] shadow-xl border border-gray-100 dark:border-gray-800 animate-in fade-in zoom-in duration-150">
             <div className="flex items-center justify-between border-b border-gray-50 pb-3 dark:border-gray-800">
               <div className="flex items-center gap-2">
-                <FileText size={18} className="text-[#FF6600]" />
+                <FileText size={18} className="text-accent dark:text-accent-light" />
                 <h3 className="font-black text-sm text-gray-900 dark:text-white">{viewDoc.name}</h3>
               </div>
               <button
@@ -2164,7 +2198,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                   toast.success("Document downloaded securely onto administration terminal.");
                   setViewDoc(null);
                 }}
-                className="flex items-center gap-1.5 rounded-xl bg-[#0E4825] px-4 py-2 text-xs font-black text-white hover:bg-[#082E17]"
+                className="flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-black text-white hover:bg-[#082E17]"
               >
                 <Download size={14} />
                 <span>SECURE DOWNLOAD</span>
@@ -2201,7 +2235,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                   value={newStaffName}
                   onChange={(e) => setNewStaffName(e.target.value)}
                   placeholder="e.g. Ramesh Prajapati"
-                  className="w-full rounded-xl border border-gray-200 py-2 px-3 text-xs font-semibold outline-none focus:border-[#0E4825] dark:border-gray-700 dark:bg-gray-800"
+                  className="w-full rounded-xl border border-gray-200 py-2 px-3 text-xs font-semibold outline-none focus:border-primary dark:border-gray-700 dark:bg-gray-800"
                 />
               </div>
 
@@ -2213,7 +2247,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                   <select
                     value={newStaffRole}
                     onChange={(e) => setNewStaffRole(e.target.value as StaffMember["role"])}
-                    className="w-full rounded-xl border border-gray-200 py-2 px-3 text-xs font-semibold outline-none focus:border-[#0E4825] dark:border-gray-700 dark:bg-gray-800"
+                    className="w-full rounded-xl border border-gray-200 py-2 px-3 text-xs font-semibold outline-none focus:border-primary dark:border-gray-700 dark:bg-gray-800"
                   >
                     <option value="Chef">Chef / Cook</option>
                     <option value="Cashier">Cashier</option>
@@ -2231,7 +2265,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                     value={newStaffPhone}
                     onChange={(e) => setNewStaffPhone(e.target.value)}
                     placeholder="e.g. +91 98321 04221"
-                    className="w-full rounded-xl border border-gray-200 py-2 px-3 text-xs font-semibold outline-none focus:border-[#0E4825] dark:border-gray-700 dark:bg-gray-800"
+                    className="w-full rounded-xl border border-gray-200 py-2 px-3 text-xs font-semibold outline-none focus:border-primary dark:border-gray-700 dark:bg-gray-800"
                   />
                 </div>
               </div>
@@ -2245,7 +2279,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                   value={newStaffEmail}
                   onChange={(e) => setNewStaffEmail(e.target.value)}
                   placeholder="e.g. ramesh@burgonomics.com"
-                  className="w-full rounded-xl border border-gray-200 py-2 px-3 text-xs font-semibold outline-none focus:border-[#0E4825] dark:border-gray-700 dark:bg-gray-800"
+                  className="w-full rounded-xl border border-gray-200 py-2 px-3 text-xs font-semibold outline-none focus:border-primary dark:border-gray-700 dark:bg-gray-800"
                 />
               </div>
 
@@ -2259,7 +2293,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                 </button>
                 <button
                   type="submit"
-                  className="rounded-xl bg-[#0E4825] px-4 py-2 text-xs font-black text-white hover:bg-[#082E17]"
+                  className="rounded-xl bg-primary px-4 py-2 text-xs font-black text-white hover:bg-[#082E17]"
                 >
                   ASSIGN MEMBER
                 </button>
