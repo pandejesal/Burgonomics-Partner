@@ -147,4 +147,22 @@ describe('partnerFunctionsApi gateway (real client, mocked transport)', () => {
       })) as any;
     await expect(partnerFunctionsApi.bookPorterRider('ord_9')).rejects.toThrow(/not configured/);
   });
+
+  it('measures API health instead of fabricating latency', async () => {
+    globalThis.fetch = (async (url: any) => {
+      expect(String(url)).toMatch(/\/health$/);
+      return new Response(JSON.stringify({ status: 'healthy', service: 'burgonomics-api' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as any;
+
+    const res = await partnerFunctionsApi.checkApiHealth();
+    expect(res.ok).toBe(true);
+    expect(res.service).toBe('burgonomics-api');
+    expect(res.latencyMs).toBeGreaterThanOrEqual(0);
+
+    globalThis.fetch = (async () => new Response('down', { status: 503 })) as any;
+    await expect(partnerFunctionsApi.checkApiHealth()).rejects.toThrow(/503/);
+  });
 });

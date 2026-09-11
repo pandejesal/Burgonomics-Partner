@@ -221,6 +221,20 @@ export const partnerFunctionsApi = {
   },
 
   /**
+   * Liveness probe for the Cloud Functions API (Loop 24/120): the partner
+   * health page MUST measure this instead of fabricating latency. Public
+   * /health route — no auth needed, never reports healthy without it.
+   */
+  async checkApiHealth(): Promise<{ ok: boolean; latencyMs: number; service?: string }> {
+    const baseUrl = getFunctionsBaseUrl();
+    const started = Date.now();
+    const res = await fetch(`${baseUrl}/health`, { method: 'GET' });
+    if (!res.ok) throw new Error(`API health check failed with status ${res.status}`);
+    const body = (await res.json()) as { status?: string; service?: string };
+    return { ok: body.status === 'healthy', latencyMs: Date.now() - started, service: body.service };
+  },
+
+  /**
    * Resolves a support ticket server-side (refunds, loyalty credit, coupon
    * record). Money-affecting actions MUST go through this — never flip ticket
    * status with a direct Firestore write and claim money moved (Loop 3).

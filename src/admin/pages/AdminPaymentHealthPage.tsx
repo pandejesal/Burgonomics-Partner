@@ -26,6 +26,7 @@ import { StatusBadge } from "../components/Badges";
 import { useAdmin } from "../hooks/useAdmin";
 import { toast } from "sonner";
 import { adminPaymentsService } from "../services/adminPaymentsService";
+import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
 import {
   AreaChart,
   Area,
@@ -89,33 +90,50 @@ export const AdminPaymentHealthPage: React.FC = () => {
   }, []);
 
   // Actions
-  const handleRunProbes = () => {
+  // Loop 24/120: measures the REAL API liveness endpoint. The old version
+  // fabricated latency (210 + random*40) after a timer — a health page that
+  // cries healthy during an outage is worse than none.
+  const handleRunProbes = async () => {
     setIsRefreshing(true);
-    toast.loading("Pinging Razorpay cluster API gateways and testing webhook handshake...");
-
-    setTimeout(() => {
-      setIsRefreshing(false);
-      setApiPing(Math.round(210 + Math.random() * 40));
+    toast.loading("Probing the Burgonomics API...");
+    try {
+      const res = await partnerFunctionsApi.checkApiHealth();
+      setApiPing(Math.round(res.latencyMs));
       toast.dismiss();
-      toast.success("Health probes complete. Gateway responding normally.", {
-        description: `Average API latency: ${apiPing}ms`,
+      if (res.ok) {
+        toast.success("API responding normally.", {
+          description: `Measured latency: ${Math.round(res.latencyMs)}ms${res.service ? ` · ${res.service}` : ""}`,
+        });
+      } else {
+        toast.error("API answered but reported unhealthy — investigate before lunch rush.");
+      }
+    } catch (err) {
+      toast.dismiss();
+      toast.error("API unreachable — no health signal.", {
+        description: err instanceof Error ? err.message : String(err),
       });
-    }, 1200);
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
+  // Loop 24/120 honesty: there is no resolve-all endpoint — the old version
+  // zeroed the counter and declared victory while live rows stayed UNRESOLVED
+  // (the listener would even restore the count on next snapshot). This now
+  // re-reports the live count with resolution directions.
   const handleClearRetryQueue = () => {
     if (!canModifyInfrastructure) {
       toast.error("Access Denied: Your administrative role is unauthorized to clear queues.");
       return;
     }
 
-    toast.loading("Resolving all pending discrepancies...");
-    setTimeout(() => {
-      // In reality, this would loop through discrepancies and call resolveDiscrepancy
-      setRetryQueueCount(0);
-      toast.dismiss();
-      toast.success("Queues flushed successfully. 0 unacknowledged webhooks remain.");
-    }, 1000);
+    if (retryQueueCount === 0) {
+      toast.success("Retry queue already empty — nothing to resolve.");
+      return;
+    }
+    toast.warning(`Re-checked: ${retryQueueCount} unresolved discrepanc${retryQueueCount === 1 ? "y" : "ies"} remain.`, {
+      description: "Resolve each via Refunds (payout) or support Tickets — there is no bulk-resolve yet.",
+    });
   };
 
   const handleSimulateWarning = () => {
