@@ -5,6 +5,7 @@ import {
   collection,
   query,
   where,
+  limit,
   getDocs,
   doc,
   setDoc,
@@ -41,12 +42,16 @@ export function useUsers() {
     queryKey: ['team-users', user?.id],
     queryFn: async () => {
       try {
-        let usersQuery = query(collection(db, 'users'));
+        // Loop 43/120: bounded (same class as prior loops). Note: non-brand
+        // roles read near-nothing here by rules design (users/{uid} is
+        // owner-or-brand) — empty is honest, seeds stay DEV-only below.
+        let usersQuery = query(collection(db, 'users'), limit(500));
 
         if (user?.role === 'regional_manager' && user.cityIds?.length) {
           usersQuery = query(
             collection(db, 'users'),
-            where('cityIds', 'array-contains-any', user.cityIds)
+            where('cityIds', 'array-contains-any', user.cityIds),
+            limit(500)
           );
         }
 
@@ -229,8 +234,11 @@ export function useUsers() {
 
   const revokeUser = useMutation({
     mutationFn: async (userId: string) => {
+      // Loop 43/120: let denial reject loudly — the old catch swallowed the
+      // rules-denied delete and onSuccess still fired, so revoked users
+      // "vanished" until the next refetch resurrected them.
       const userRef = doc(db, 'users', userId);
-      await deleteDoc(userRef).catch((err) => console.warn('Revoked user locally:', err));
+      await deleteDoc(userRef);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['team-users'] });
