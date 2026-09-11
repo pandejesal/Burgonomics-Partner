@@ -59,6 +59,7 @@ import {
 } from "./storesData";
 import { useAdminAuthStore } from "@/admin/store/adminAuthStore";
 import { adminStoresService } from "../services/adminStoresService";
+import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
 
 type ViewTab = "list" | "grid" | "radar";
 type RoleType = "Developer" | "Operations" | "Store Manager" | "Finance";
@@ -74,6 +75,28 @@ export function normalizeIndianMobile(raw: string): string | null {
   // default and all-same-digit numbers must never enter the live directory.
   if (d === "9876500000" || /^(\d)\1{9}$/.test(d)) return null;
   return `+91 ${d.slice(0, 5)} ${d.slice(5)}`;
+}
+
+// Loop 57/120: pure mapper so genuinely-synced stores can be stamped without
+// touching stores whose sync failed or was never attempted. Unsynced rows
+// keep their existing state (no fabricated versions, no forced status).
+export function markStoresSynced(
+  stores: RichStore[],
+  syncedIds: ReadonlySet<string>,
+  syncedAt: string,
+): RichStore[] {
+  return stores.map((s) =>
+    syncedIds.has(s.id)
+      ? {
+          ...s,
+          lastSyncTime: syncedAt,
+          webhookStatus: "active" as const,
+          circuitBreaker: "closed" as const,
+          webhookFailures: 0,
+          retryCount: 0,
+        }
+      : s,
+  );
 }
 
 export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boolean }> = ({
@@ -315,63 +338,84 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
     }
   };
 
-  // Run synchronization for single store
+  // Run synchronization for single store — Loop 57/120: this was a 1200ms
+  // timer that fabricated menuVersion via Math.random, forced webhookStatus
+  // active, and toasted success with ZERO server contact. It now calls the
+  // real POST /petpooja/syncMenu; the server is fail-closed on unlinked
+  // branches, so failures toast loud and flip no state.
   const handleSyncStore = async (storeId: string) => {
     if (isReadOnly) {
       toast.error("Access Denied: Read-only role.");
       return;
     }
+    const target = stores.find((s) => s.id === storeId);
     setSyncingStoreId(storeId);
-    toast.loading("Pinging Petpooja server and pulling menu version...");
-
-    setTimeout(() => {
-      const updated = stores.map((s) => {
-        if (s.id === storeId) {
-          return {
-            ...s,
-            lastSyncTime: new Date().toISOString(),
-            webhookStatus: "active" as const,
-            circuitBreaker: "closed" as const,
-            webhookFailures: 0,
-            retryCount: 0,
-            menuVersion: `v3.12.${Math.floor(Math.random() * 90) + 10}`,
-          };
-        }
-        return s;
-      });
-      void saveStores(updated);
-      setSyncingStoreId(null);
+    toast.loading("Syncing menu from Petpooja...");
+    try {
+      const result = await partnerFunctionsApi.syncPetpoojaMenu(storeId);
+      const updated = markStoresSynced(
+        stores,
+        new Set([storeId]),
+        new Date().toISOString(),
+      );
+      const ok = await saveStores(updated);
       toast.dismiss();
-      toast.success("Petpooja Menu synced successfully!");
-    }, 1200);
+      if (ok) {
+        toast.success(
+          `Petpooja menu synced for ${target?.name ?? storeId}: ${result.itemCount} items, ${result.categoriesCount} categories.`,
+        );
+      }
+    } catch (err: unknown) {
+      toast.dismiss();
+      toast.error(
+        `Petpooja sync failed for ${target?.name ?? storeId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      setSyncingStoreId(null);
+    }
   };
 
-  // Global sync
-  const handleSyncAllStores = () => {
+  // Global sync — Loop 57/120: this was an 1800ms timer stamping every open
+  // store active with zero server contact. It now syncs each open store via
+  // POST /petpooja/syncMenu and reports an honest summary; failed stores
+  // keep their existing state.
+  const handleSyncAllStores = async () => {
     if (isReadOnly) {
       toast.error("Access Denied: Read-only role.");
       return;
     }
+    const targets = stores.filter((s) => s.isOpen);
     setIsSyncingAll(true);
-    toast.loading("Starting batch sync for all active stores...");
-    setTimeout(() => {
-      const updated = stores.map((s) => {
-        if (s.isOpen) {
-          return {
-            ...s,
-            lastSyncTime: new Date().toISOString(),
-            webhookStatus: "active" as const,
-            circuitBreaker: "closed" as const,
-            webhookFailures: 0,
-          };
-        }
-        return s;
-      });
-      void saveStores(updated);
-      setIsSyncingAll(false);
-      toast.dismiss();
-      toast.success(`Batch synchronization completed for ${filteredStores.length} stores.`);
-    }, 1800);
+    toast.loading(`Syncing menus from Petpooja for ${targets.length} stores...`);
+    const syncedIds = new Set<string>();
+    const failed: string[] = [];
+    for (const store of targets) {
+      try {
+        await partnerFunctionsApi.syncPetpoojaMenu(store.id);
+        syncedIds.add(store.id);
+      } catch (err: unknown) {
+        failed.push(
+          `${store.name}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    if (syncedIds.size > 0) {
+      await saveStores(
+        markStoresSynced(stores, syncedIds, new Date().toISOString()),
+      );
+    }
+    setIsSyncingAll(false);
+    toast.dismiss();
+    if (failed.length === 0) {
+      toast.success(`Petpooja menus synced for ${syncedIds.size} stores.`);
+    } else {
+      console.error("Petpooja batch sync failures:", failed);
+      toast.error(
+        `${syncedIds.size} synced, ${failed.length} failed — ${failed[0]}${
+          failed.length > 1 ? ` (+${failed.length - 1} more, see console)` : ""
+        }`,
+      );
+    }
   };
 
   // Edit / Save Store Settings Form
