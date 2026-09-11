@@ -143,12 +143,12 @@ export const AdminAutomationPage: React.FC = () => {
             <span className="block text-xs font-bold text-gray-400 uppercase tracking-widest">
               Journey Conversion Rate
             </span>
-            <span className="block text-2xl font-black text-[#FF6600] mt-1 font-mono">34.2%</span>
+            <span className="block text-2xl font-black text-accent dark:text-accent-light mt-1 font-mono">34.2%</span>
             <p className="text-[10px] text-gray-400 mt-0.5">
               Weighted conversion from initial triggers.
             </p>
           </div>
-          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-orange-50 text-[#FF6600]">
+          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-orange-50 text-accent">
             <Sparkles size={20} />
           </span>
         </AdminCard>
@@ -171,14 +171,14 @@ export const AdminAutomationPage: React.FC = () => {
                   onClick={() => setSelectedFlow(flow)}
                   className={`rounded-2xl border p-4 text-left cursor-pointer transition-all space-y-3 relative group ${
                     isActiveFlow
-                      ? "border-[#0E4825] bg-[#0E4825]/5 dark:border-emerald-500 dark:bg-emerald-950/15 shadow-sm"
+                      ? "border-primary bg-primary/5 dark:border-emerald-500 dark:bg-emerald-950/15 shadow-sm"
                       : "border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900 bg-white dark:bg-[#1A1A1A]"
                   }`}
                 >
                   <div className="flex items-start justify-between">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="px-2 py-0.5 rounded bg-[#FF6600]/10 text-[#FF6600] text-[9px] font-black uppercase tracking-wider font-mono">
+                        <span className="px-2 py-0.5 rounded bg-accent/10 text-accent dark:text-accent-light text-[9px] font-black uppercase tracking-wider font-mono">
                           Trigger: {flow.triggerType}
                         </span>
                         <StatusBadge
@@ -215,7 +215,7 @@ export const AdminAutomationPage: React.FC = () => {
                       <span className="block text-[9px] text-gray-400 font-bold uppercase tracking-widest">
                         Sales
                       </span>
-                      <span className="font-bold text-[#FF6600]">{flow.stats.conversions}</span>
+                      <span className="font-bold text-accent dark:text-accent-light">{flow.stats.conversions}</span>
                     </div>
                   </div>
 
@@ -228,7 +228,7 @@ export const AdminAutomationPage: React.FC = () => {
                           handleToggleStatus(flow.id);
                         }}
                         className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1 cursor-pointer ${
-                          flow.status === "Active" ? "text-[#FF6600]" : "text-[#0E4825]"
+                          flow.status === "Active" ? "text-accent dark:text-accent-light" : "text-primary"
                         }`}
                       >
                         {flow.status === "Active" ? <Pause size={12} /> : <Play size={12} />}
@@ -261,16 +261,21 @@ export const AdminAutomationPage: React.FC = () => {
               title={`Visual Canvas: ${selectedFlow.name}`}
               subtitle="Sequence of event triggers, queue delay parameters, and dispatch filters"
               extra={
+                /* Loop: simulate writes a FAKE Delivered journey entry under a
+                   REAL customer name + bumps stats with Math.random — demo
+                   tooling, DEV-only in prod builds. */
+                import.meta.env.DEV ? (
                 <AdminButton
                   variant="secondary"
                   size="sm"
                   onClick={() => handleSimulateTrigger(selectedFlow.id)}
                   disabled={selectedFlow.status !== "Active"}
-                  className="bg-orange-50 hover:bg-orange-100 border border-orange-200 text-[#FF6600]"
+                  className="bg-orange-50 hover:bg-orange-100 border border-orange-200 text-accent"
                 >
                   <Send size={12} />
                   <span>Simulate Real Trigger</span>
                 </AdminButton>
+                ) : undefined
               }
             >
               {/* Interactive Visual Node Timeline graph representation */}
@@ -286,7 +291,7 @@ export const AdminAutomationPage: React.FC = () => {
                       {/* Connection Line Arrow */}
                       {index > 0 && (
                         <div className="flex flex-col items-center">
-                          <ArrowDown size={18} className="text-[#0E4825] animate-pulse" />
+                          <ArrowDown size={18} className="text-primary animate-pulse" />
                         </div>
                       )}
 
@@ -296,7 +301,7 @@ export const AdminAutomationPage: React.FC = () => {
                           isTrigger
                             ? "border-orange-200 bg-orange-50/5 dark:border-orange-950/30"
                             : isAction
-                              ? "border-[#0E4825]/30 bg-[#0E4825]/5 dark:border-emerald-950/20"
+                              ? "border-primary/30 bg-primary/5 dark:border-emerald-950/20"
                               : isWait
                                 ? "border-amber-200 bg-amber-50/5 dark:border-amber-950/30"
                                 : "border-blue-200 bg-blue-50/5 dark:border-blue-950/30"
@@ -306,9 +311,9 @@ export const AdminAutomationPage: React.FC = () => {
                         <div
                           className={`absolute top-0 bottom-0 left-0 w-2 ${
                             isTrigger
-                              ? "bg-[#FF6600]"
+                              ? "bg-accent"
                               : isAction
-                                ? "bg-[#0E4825]"
+                                ? "bg-primary"
                                 : isWait
                                   ? "bg-amber-500"
                                   : "bg-blue-500"
@@ -339,9 +344,9 @@ export const AdminAutomationPage: React.FC = () => {
                           <span
                             className={`p-1.5 rounded-xl shrink-0 ${
                               isTrigger
-                                ? "bg-orange-50 text-[#FF6600] dark:bg-orange-950/30"
+                                ? "bg-orange-50 text-accent dark:bg-orange-950/30"
                                 : isAction
-                                  ? "bg-green-50 text-[#0E4825] dark:bg-emerald-950/30"
+                                  ? "bg-green-50 text-primary dark:bg-emerald-950/30"
                                   : isWait
                                     ? "bg-amber-50 text-amber-600 dark:bg-amber-950/30"
                                     : "bg-blue-50 text-blue-600 dark:bg-blue-950/30"
