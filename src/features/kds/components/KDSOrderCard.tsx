@@ -99,12 +99,12 @@ export function KDSOrderCard({
               <span>Takeaway</span>
             </span>
           )}
-          {isDineIn && (
+          {isDineIn && order.tableNumber ? (
             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 text-[10px] sm:text-xs font-black uppercase tracking-wider shrink-0">
               <UtensilsCrossed className="w-3 h-3" />
-              <span>Table {order.tableNumber || '01'}</span>
+              <span>Table {order.tableNumber}</span>
             </span>
-          )}
+          ) : null}
         </div>
 
         {/* Live SLA Countdown Timer Badge */}
