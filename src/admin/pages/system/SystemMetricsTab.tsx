@@ -130,13 +130,18 @@ export const SystemMetricsTab: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Loop: all charts below are static mock data (see mock comment
+          above) — badge it so nobody mistakes it for live monitoring. */}
+      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20 w-fit">
+        Simulated data — not live metrics
+      </div>
       {/* Category Toggles */}
       <div className="flex items-center gap-2 bg-[#0c130e] border border-gray-800 p-1.5 rounded-xl self-start w-fit">
         <button
           onClick={() => setMetricView("http")}
           className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
             metricView === "http"
-              ? "bg-[#0E4825] text-white shadow"
+              ? "bg-primary text-white shadow"
               : "text-gray-400 hover:text-white"
           }`}
         >
@@ -146,7 +151,7 @@ export const SystemMetricsTab: React.FC = () => {
           onClick={() => setMetricView("infrastructure")}
           className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
             metricView === "infrastructure"
-              ? "bg-[#0E4825] text-white shadow"
+              ? "bg-primary text-white shadow"
               : "text-gray-400 hover:text-white"
           }`}
         >
@@ -156,7 +161,7 @@ export const SystemMetricsTab: React.FC = () => {
           onClick={() => setMetricView("integration")}
           className={`px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
             metricView === "integration"
-              ? "bg-[#0E4825] text-white shadow"
+              ? "bg-primary text-white shadow"
               : "text-gray-400 hover:text-white"
           }`}
         >

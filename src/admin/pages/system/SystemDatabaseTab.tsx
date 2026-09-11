@@ -103,6 +103,11 @@ export const SystemDatabaseTab: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Loop: EXPLAIN plans below are static mock data, and the backend is
+          Firestore (not Postgres) — badge it. */}
+      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20 w-fit">
+        Simulated data — not live metrics
+      </div>
       {/* Upper overview status */}
       <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-gray-800 pb-4 shrink-0 gap-4">
         <div>
@@ -149,7 +154,7 @@ export const SystemDatabaseTab: React.FC = () => {
                     key={tbl.name}
                     onClick={() => setSelectedTable(tbl)}
                     className={`hover:bg-black/20 cursor-pointer ${
-                      selectedTable?.name === tbl.name ? "bg-[#0E4825]/10" : ""
+                      selectedTable?.name === tbl.name ? "bg-primary/10" : ""
                     }`}
                   >
                     <td className="py-3 px-3 font-bold text-white flex items-center gap-2">
@@ -269,7 +274,7 @@ export const SystemDatabaseTab: React.FC = () => {
             <button
               onClick={handleExplain}
               disabled={!explainQuery.trim()}
-              className="px-4 py-2 bg-[#0E4825] hover:bg-[#156d39] text-white rounded-lg flex items-center gap-1.5 text-xs font-black uppercase tracking-wider transition-colors disabled:opacity-40 disabled:hover:bg-[#0E4825] cursor-pointer"
+              className="px-4 py-2 bg-primary hover:bg-[#156d39] text-white rounded-lg flex items-center gap-1.5 text-xs font-black uppercase tracking-wider transition-colors disabled:opacity-40 disabled:hover:bg-primary cursor-pointer"
             >
               <Play size={12} /> Run Explain
             </button>
