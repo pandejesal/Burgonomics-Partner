@@ -103,7 +103,7 @@ export const AdminOffersPage: React.FC = () => {
       header: "Offer Type",
       accessorKey: "type",
       cell: (row) => (
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-50 dark:bg-orange-950/20 border border-orange-200/20 px-2.5 py-1 text-xs font-bold text-[#FF6600]">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-50 dark:bg-orange-950/20 border border-orange-200/20 px-2.5 py-1 text-xs font-bold text-accent dark:text-accent-light">
           <Tag size={12} />
           {row.type}
         </span>
@@ -164,11 +164,11 @@ export const AdminOffersPage: React.FC = () => {
         <div className="flex items-center gap-1">
           <button
             onClick={() => toggleOfferStatus(row.id)}
-            className="p-1.5 hover:text-[#0E4825] cursor-pointer"
+            className="p-1.5 hover:text-primary cursor-pointer"
             title={row.status === "Active" ? "Suspend Offer" : "Activate Offer"}
           >
             {row.status === "Active" ? (
-              <ToggleRight size={28} className="text-[#0E4825]" />
+              <ToggleRight size={28} className="text-primary" />
             ) : (
               <ToggleLeft size={28} className="text-gray-300" />
             )}
@@ -203,23 +203,24 @@ export const AdminOffersPage: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <StatCard title="Total Configured Offers" value={offers.length} icon={Gift} />
         <StatCard
-          title="Active Live Offers"
+          title="Active Draft Offers"
           value={`${activeCount} / ${offers.length}`}
           icon={Percent}
+          subtext="Local list — not synced to checkout"
         />
         <AdminCard className="flex items-center justify-between">
           <div>
             <span className="block text-xs font-bold text-gray-400 uppercase tracking-widest">
               Store Specific Limits
             </span>
-            <span className="block text-2xl font-black text-[#0E4825] dark:text-emerald-400 mt-1">
+            <span className="block text-2xl font-black text-primary dark:text-emerald-400 mt-1">
               Geo-Fenced
             </span>
             <p className="text-[10px] text-gray-400 mt-0.5">
               Geo-boundary targeting active on 1 outlet.
             </p>
           </div>
-          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-orange-50 text-[#FF6600]">
+          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-orange-50 text-accent">
             <Store size={20} />
           </span>
         </AdminCard>
@@ -239,15 +240,15 @@ export const AdminOffersPage: React.FC = () => {
               .map((offer) => (
                 <div
                   key={offer.id}
-                  className="rounded-2xl p-4 border border-[#0E4825]/15 bg-gradient-to-br from-[#0E4825]/5 to-transparent relative overflow-hidden flex flex-col justify-between h-40 shadow-sm"
+                  className="rounded-2xl p-4 border border-primary/15 bg-gradient-to-br from-primary/5 to-transparent relative overflow-hidden flex flex-col justify-between h-40 shadow-sm"
                 >
                   {/* Diagonal background accent badge */}
-                  <div className="absolute top-0 right-0 h-16 w-16 bg-[#FF6600]/10 rounded-bl-full flex items-center justify-end p-2.5 text-[#FF6600]">
+                  <div className="absolute top-0 right-0 h-16 w-16 bg-accent/10 rounded-bl-full flex items-center justify-end p-2.5 text-accent dark:text-accent-light">
                     <Sparkles size={16} />
                   </div>
 
                   <div className="space-y-1">
-                    <span className="inline-block px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-emerald-50 dark:bg-emerald-950/20 text-[#0E4825]">
+                    <span className="inline-block px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-emerald-50 dark:bg-emerald-950/20 text-primary">
                       {offer.type}
                     </span>
                     <h4 className="font-extrabold text-sm text-gray-900 dark:text-white line-clamp-1 max-w-[200px]">
@@ -264,7 +265,7 @@ export const AdminOffersPage: React.FC = () => {
                       Valid till: {offer.validTo}
                     </span>
                     {offer.discountValue && (
-                      <span className="text-[#FF6600] font-black">
+                      <span className="text-accent dark:text-accent-light font-black">
                         Value:{" "}
                         {offer.type === "Percentage Discount"
                           ? `${offer.discountValue}%`
@@ -301,7 +302,7 @@ export const AdminOffersPage: React.FC = () => {
             setSelectedOffer(null);
           }}
           title="Delete Promotional Offer?"
-          description={`WARNING: Deleting offer "${selectedOffer.name}" is a permanent action. This offer will be stripped from all active checkouts and billing APIs instantly.`}
+          description={`WARNING: Deleting offer "${selectedOffer.name}" removes it from this local list only — checkout coupons come from the server coupons collection, which this board does not write.`}
           confirmLabel="Delete Offer"
         />
       )}
