@@ -78,7 +78,8 @@ export const AdminSegmentsPage: React.FC = () => {
     return statsMap;
   }, [segments, customers]);
 
-  // Live matching preview based on currently edited inputs
+  // Loop 29/120 honesty: counts seed-directory profiles, not live
+  // customers (no live customer source is wired). Never call it live.
   const livePreviewCount = useMemo(() => {
     return customers.filter((c) => {
       if (filterCity && c.city !== filterCity) return false;
@@ -182,8 +183,8 @@ export const AdminSegmentsPage: React.FC = () => {
                         <span
                           className={`px-2 py-0.2 rounded font-mono text-[8px] uppercase tracking-wide ${
                             seg.isCustom
-                              ? "bg-orange-50 text-[#FF6600] border border-orange-100"
-                              : "bg-emerald-50 text-[#0E4825] border border-emerald-100"
+                              ? "bg-orange-50 text-accent border border-orange-100"
+                              : "bg-emerald-50 text-primary border border-emerald-100"
                           }`}
                         >
                           {seg.isCustom ? "Custom Segment" : "System Core"}
@@ -234,7 +235,7 @@ export const AdminSegmentsPage: React.FC = () => {
                           {matches}
                         </span>
                         <span className="text-[9px] text-gray-400 block font-bold font-mono uppercase tracking-wide">
-                          MATCHING CUSTOMERS
+                          Seed Matches
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5">
@@ -268,17 +269,17 @@ export const AdminSegmentsPage: React.FC = () => {
             subtitle="Build targeted rules to cluster customers automatically"
           >
             <form onSubmit={handleSaveSegment} className="space-y-4">
-              <div className="space-y-1.5 p-3 rounded-xl border border-[#FF6600]/10 bg-[#FF6600]/5 flex items-center gap-2 text-orange-800">
+              <div className="space-y-1.5 p-3 rounded-xl border border-accent/10 bg-accent/5 flex items-center gap-2 text-orange-800">
                 <Filter size={14} className="shrink-0" />
                 <div className="space-y-0.5 leading-tight">
                   <span className="text-[9px] font-black uppercase font-mono tracking-wider">
-                    Live Match Preview
+                    Seed Match Preview
                   </span>
                   <p className="text-xs font-black">
-                    <span className="text-lg font-bold font-mono text-[#FF6600]">
+                    <span className="text-lg font-bold font-mono text-accent dark:text-accent-light">
                       {livePreviewCount}
                     </span>{" "}
-                    profiles currently matching your criteria.
+                    demo profiles currently matching your criteria.
                   </p>
                 </div>
               </div>
