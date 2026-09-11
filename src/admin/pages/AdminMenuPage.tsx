@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Link } from "react-router-dom";
 import { ToggleLeft, ToggleRight, Sparkles, Plus, Image } from "lucide-react";
 import { PageHeader } from "../components/Headers";
 import { StatCard } from "../components/Cards";
@@ -102,7 +103,7 @@ export const AdminMenuPage: React.FC = () => {
       header: "Petpooja Reference ID",
       accessorKey: "petpoojaId",
       cell: (row) => (
-        <code className="text-xs font-mono bg-gray-50 dark:bg-gray-900 px-1.5 py-0.5 rounded-md border border-gray-100 dark:border-gray-800 text-[#FF6600] font-bold">
+        <code className="text-xs font-mono bg-gray-50 dark:bg-gray-900 px-1.5 py-0.5 rounded-md border border-gray-100 dark:border-gray-800 text-accent dark:text-accent-light font-bold">
           {row.petpoojaId}
         </code>
       ),
@@ -129,11 +130,11 @@ export const AdminMenuPage: React.FC = () => {
       cell: (row) => (
         <button
           onClick={() => setSelectedItem(row)}
-          className="p-1.5 hover:text-[#FF6600]"
+          className="p-1.5 hover:text-accent dark:hover:text-accent-light"
           title={row.inStock ? "Mark Out of Stock" : "Mark In Stock"}
         >
           {row.inStock ? (
-            <ToggleRight size={28} className="text-[#0E4825]" />
+            <ToggleRight size={28} className="text-primary" />
           ) : (
             <ToggleLeft size={28} className="text-gray-300" />
           )}
@@ -146,13 +147,20 @@ export const AdminMenuPage: React.FC = () => {
     <div className="space-y-6">
       <PageHeader
         title="Catalog & Menu Editor"
-        description="Oversee the digital menu of burgers, wraps, sides and shakes. Override price variables, upload hero photos, or toggle active stock."
+        description="Demo catalog — toggles stay on this screen only. Manage live availability from Menu."
         breadcrumbs={[{ label: "Catalog" }]}
         actions={
-          <AdminButton variant="secondary" size="sm">
-            <Plus size={14} />
-            <span>Add Menu Item</span>
-          </AdminButton>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[9px] font-black uppercase bg-gray-800 text-amber-300 border border-amber-400/40">
+              Demo catalog
+            </span>
+            <Link to="/menu">
+              <AdminButton variant="secondary" size="sm">
+                <Plus size={14} />
+                <span>Open Live Menu</span>
+              </AdminButton>
+            </Link>
+          </div>
         }
       />
 
@@ -183,7 +191,7 @@ export const AdminMenuPage: React.FC = () => {
             setSelectedItem(null);
           }}
           title={`Override ${selectedItem.name} Stock?`}
-          description={`Warning: Changing stock of this burger will sync to all active mobile clients instantly. Customers in active checkouts won't be able to purchase this item until toggled back.`}
+          description={`This demo catalog does not sync anywhere — the toggle stays on this screen. Manage live availability from Menu.`}
           confirmLabel="Toggle Availability"
         />
       )}
