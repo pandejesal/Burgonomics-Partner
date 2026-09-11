@@ -25,6 +25,7 @@ import { AdminButton } from "../components/Buttons";
 import { StatusBadge } from "../components/Badges";
 import { useAdmin } from "../hooks/useAdmin";
 import { toast } from "sonner";
+import { adminPaymentsService } from "../services/adminPaymentsService";
 import {
   AreaChart,
   Area,
@@ -75,15 +76,16 @@ export const AdminPaymentHealthPage: React.FC = () => {
   const canModifyInfrastructure = role === "Developer" || role === "Finance";
 
   useEffect(() => {
-    import("../services/adminPaymentsService").then(({ adminPaymentsService }) => {
-      adminPaymentsService.listenLiveDiscrepancies(
-        (data) => {
-          setDiscrepancies(data);
-          setRetryQueueCount(data.filter((d) => d.status === "UNRESOLVED").length);
-        },
-        (err) => console.error("Discrepancy listener error", err),
-      );
-    });
+    const unsubscribe = adminPaymentsService.listenLiveDiscrepancies(
+      (data) => {
+        setDiscrepancies(data);
+        setRetryQueueCount(data.filter((d) => d.status === "UNRESOLVED").length);
+      },
+      (err) => console.error("Discrepancy listener error", err),
+    );
+    return () => {
+      if (typeof unsubscribe === "function") unsubscribe();
+    };
   }, []);
 
   // Actions
@@ -145,6 +147,9 @@ export const AdminPaymentHealthPage: React.FC = () => {
         />
 
         <div className="flex gap-2 self-start md:self-center">
+          {/* Loop: threat-sim flips circuit-breaker state + fake latency with
+              zero backend calls — demo tooling, DEV-only in prod builds. */}
+          {import.meta.env.DEV && (
           <button
             onClick={handleSimulateWarning}
             className={`px-3 py-1.5 border rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
@@ -158,6 +163,7 @@ export const AdminPaymentHealthPage: React.FC = () => {
               {isSimulatingWarning ? "Disable Threat Sim" : "Simulate Gateway Latency Spikes"}
             </span>
           </button>
+          )}
 
           <AdminButton
             variant="outline"
