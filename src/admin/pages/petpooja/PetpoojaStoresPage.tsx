@@ -27,29 +27,14 @@ import {
 import { toast } from "sonner";
 
 
-const DEFAULT_SYNC_REPORT: SyncReport = {
-  currentVersion: "v4.2.1",
-  lastSuccessfulVersion: "v4.2.0",
-  started: new Date(Date.now() - 3600000).toLocaleString(),
-  finished: new Date(Date.now() - 3596800).toLocaleString(),
-  duration: "3.2s",
-  created: 3,
-  updated: 24,
-  deleted: 0,
-  categories: 5,
-  modifiers: 8,
-  errors: 0,
-  warnings: 0,
-  conflicts: 0,
-  simulated: true,
-};
-
 export function PetpoojaStoresPage() {
   const [stores, setStores] = useState<GatewayStore[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedStoreId, setSelectedStoreId] = useState<string>("str_001");
   const [storeStates, setStoreStates] = useState<Record<string, StoreOperationalState>>({});
-  const [syncReport, setSyncReport] = useState<SyncReport>(DEFAULT_SYNC_REPORT);
+  // Loop: was seeded with DEFAULT_SYNC_REPORT (simulated:true) — plausible
+  // numbers with no badge. Null until a real op runs; honest empty state.
+  const [syncReport, setSyncReport] = useState<SyncReport | null>(null);
 
   // Manual Operations state management
   const [isOpRunning, setIsOpRunning] = useState(false);
@@ -180,14 +165,14 @@ export function PetpoojaStoresPage() {
                   onClick={() => setSelectedStoreId(store.id)}
                   className={`rounded-[20px] p-5 border text-left cursor-pointer transition-all duration-200 shadow-sm relative overflow-hidden ${
                     isSelected
-                      ? "border-[#0E4825] bg-[#0E4825]/[0.02] dark:border-[#FF6600] dark:bg-[#FF6600]/[0.02] ring-2 ring-[#0E4825]/5 dark:ring-[#FF6600]/10"
+                      ? "border-primary bg-primary/[0.02] dark:border-accent dark:bg-accent/[0.02] ring-2 ring-[#0E4825]/5 dark:ring-accent/10"
                       : "border-gray-100 dark:border-gray-800/80 bg-white dark:bg-[#1A1A1A] hover:border-gray-200"
                   }`}
                 >
                   {/* Subtle selection visual indicator */}
                   {isSelected && (
                     <div className="absolute top-0 right-0 h-10 w-10 overflow-hidden">
-                      <div className="absolute top-1 right-1 h-3 w-3 rounded-full bg-[#0E4825] dark:bg-[#FF6600] animate-pulse" />
+                      <div className="absolute top-1 right-1 h-3 w-3 rounded-full bg-primary dark:bg-accent animate-pulse" />
                     </div>
                   )}
 
@@ -232,7 +217,7 @@ export function PetpoojaStoresPage() {
                       <span
                         className={`px-2 py-0.5 rounded-md ${
                           state.circuitBreaker === "closed"
-                            ? "bg-[#0E4825]/5 text-[#0E4825] dark:bg-emerald-500/10 dark:text-emerald-400"
+                            ? "bg-primary/5 text-primary dark:bg-emerald-500/10 dark:text-emerald-400"
                             : state.circuitBreaker === "half-open"
                               ? "bg-amber-50 text-amber-600"
                               : "bg-red-50 text-red-600"
@@ -261,7 +246,7 @@ export function PetpoojaStoresPage() {
                           {state.retryCount}
                         </span>
                       </span>
-                      <span className="text-[10px] text-gray-400 flex items-center gap-1 hover:text-[#0E4825] font-black uppercase">
+                      <span className="text-[10px] text-gray-400 flex items-center gap-1 hover:text-primary font-black uppercase">
                         <span>Details</span>
                         <ArrowRight size={10} />
                       </span>
@@ -303,7 +288,7 @@ export function PetpoojaStoresPage() {
                     API KEY MAPPING
                   </span>
                   <div className="flex items-center gap-1.5 text-xs font-bold text-gray-700 dark:text-gray-300">
-                    <KeyRound size={13} className="text-[#0E4825] dark:text-emerald-400" />
+                    <KeyRound size={13} className="text-primary dark:text-emerald-400" />
                     <span>{selectedState.apiCredentialsLinked ? "CONFIGURED" : "STANDBY"}</span>
                   </div>
                 </div>
@@ -325,7 +310,7 @@ export function PetpoojaStoresPage() {
                   <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">
                     CURRENT MENU VERSION
                   </span>
-                  <div className="flex items-center gap-1.5 text-xs font-bold font-mono text-[#0E4825] dark:text-emerald-400">
+                  <div className="flex items-center gap-1.5 text-xs font-bold font-mono text-primary dark:text-emerald-400">
                     <FileCode size={13} />
                     <span>{selectedState.menuVersion}</span>
                   </div>
@@ -343,9 +328,14 @@ export function PetpoojaStoresPage() {
               </div>
 
               {/* Active Sync mutations overview */}
+              {!syncReport ? (
+              <div className="p-4 rounded-2xl bg-gray-50 dark:bg-gray-900 border border-dashed border-gray-200 dark:border-gray-800/50 text-xs text-gray-500">
+                No sync run yet this session — trigger an operation below for a live report.
+              </div>
+              ) : (
               <div className="p-4 rounded-2xl bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-800/50 space-y-3 font-sans text-xs">
                 <div className="flex justify-between items-center font-bold">
-                  <span className="text-[#0E4825] dark:text-emerald-400 uppercase text-[10px] tracking-wider">
+                  <span className="text-primary dark:text-emerald-400 uppercase text-[10px] tracking-wider">
                     Last Synchronization Report
                   </span>
                   <span className="font-mono text-[10px]">{syncReport.duration}</span>
@@ -360,7 +350,7 @@ export function PetpoojaStoresPage() {
                   </div>
                   <div className="p-2 bg-white dark:bg-[#1A1A1A] border border-gray-100 dark:border-gray-800/80 rounded-xl">
                     <span className="text-gray-400 block text-[9px] uppercase">Updated</span>
-                    <span className="text-[#FF6600] text-sm font-black">{syncReport.updated}</span>
+                    <span className="text-accent dark:text-accent-light text-sm font-black">{syncReport.updated}</span>
                   </div>
                   <div className="p-2 bg-white dark:bg-[#1A1A1A] border border-gray-100 dark:border-gray-800/80 rounded-xl">
                     <span className="text-gray-400 block text-[9px] uppercase">Deleted</span>
@@ -393,6 +383,7 @@ export function PetpoojaStoresPage() {
                   </div>
                 </div>
               </div>
+              )}
 
               {/* MANUAL OPERATIONS GRID */}
               <div className="space-y-3">
@@ -587,7 +578,7 @@ export function PetpoojaStoresPage() {
                   <AdminButton
                     variant="ghost"
                     size="sm"
-                    className="justify-start gap-2 bg-[#0E4825]/5 hover:bg-[#0E4825]/10 text-[#0E4825]"
+                    className="justify-start gap-2 bg-primary/5 hover:bg-primary/10 text-primary"
                     isLoading={isOpRunning}
                     onClick={() =>
                       handleTriggerOperation(
