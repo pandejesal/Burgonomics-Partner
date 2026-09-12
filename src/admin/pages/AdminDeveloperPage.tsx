@@ -1,9 +1,17 @@
-import React, { useState } from "react";
-import { Terminal, Shield, Key, RefreshCw, Layers } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Terminal, Shield, Key } from "lucide-react";
 import { PageHeader } from "../components/Headers";
 import { StatCard } from "../components/Cards";
 import { ResponsiveTable, TableColumn } from "../components/TableSystem";
 import { StatusBadge, PermissionChip } from "../components/Badges";
+import { db } from "@/core/config/firebase";
+import {
+  collection,
+  query,
+  orderBy,
+  limit,
+  getDocs,
+} from "firebase/firestore";
 
 interface AuditLog {
   id: string;
@@ -55,7 +63,55 @@ const INITIAL_AUDITS: AuditLog[] = [
 ];
 
 export const AdminDeveloperPage: React.FC = () => {
-  const [logs] = useState<AuditLog[]>(INITIAL_AUDITS);
+  // Readiness-7: live server rows first; fixtures only as a labeled fallback
+  // (empty collection, denied read, or offline). The old page rendered
+  // fixtures unconditionally as the security log.
+  const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [source, setSource] = useState<"loading" | "live" | "sample">("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDocs(
+          query(collection(db, "admin_audit_logs"), orderBy("createdAt", "desc"), limit(100))
+        );
+        if (cancelled) return;
+        const rows: AuditLog[] = [];
+        snap.forEach((d) => {
+          const v = d.data() as any;
+          const ts = v?.createdAt;
+          rows.push({
+            id: d.id,
+            adminEmail: v?.actorEmail || v?.actorUid || "server",
+            action: String(v?.action || "UNKNOWN"),
+            resource: `${v?.targetType || "—"}:${v?.targetId || "—"}`,
+            ipAddress: "server-side",
+            severity: "INFO",
+            createdAt:
+              ts && typeof ts.toMillis === "function"
+                ? new Date(ts.toMillis()).toISOString().slice(0, 16).replace("T", " ")
+                : String(ts || ""),
+          });
+        });
+        if (rows.length > 0) {
+          setLogs(rows);
+          setSource("live");
+        } else {
+          setLogs(INITIAL_AUDITS);
+          setSource("sample");
+        }
+      } catch {
+        if (!cancelled) {
+          setLogs(INITIAL_AUDITS);
+          setSource("sample");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const columns: TableColumn<AuditLog>[] = [
     {
@@ -109,24 +165,41 @@ export const AdminDeveloperPage: React.FC = () => {
     <div className="space-y-6">
       <PageHeader
         title="Developer Audit Logging Core"
-        description="Sample audit entries for UI review — no live audit writer exists yet (server admin_audit_logs unwritten). Wire before relying on this log."
+        description={
+          source === "live"
+            ? "Live server audit rows (admin_audit_logs) — recorded by refunds, role changes, coin adjustments, and staff invites."
+            : source === "loading"
+              ? "Loading the server audit log…"
+              : "Server audit log unavailable or empty — showing labeled fixtures for UI review. Rows appear here once server events are recorded."
+        }
         breadcrumbs={[{ label: "Developer Audit" }]}
       />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <StatCard
           title="Security Severity Levels"
-          value="CRITICAL"
+          value={String(logs.filter((l) => l.severity === "CRITICAL").length)}
           icon={Shield}
-          subtext="1 critical log reported"
+          subtext="critical rows in current view"
         />
         <StatCard
           title="Audit Trail Rows"
           value={logs.length}
           icon={Terminal}
-          subtext="Retained on database"
+          subtext={
+            source === "live"
+              ? "Live rows from admin_audit_logs"
+              : source === "loading"
+                ? "Loading…"
+                : "Fixture rows — not live"
+          }
         />
-        <StatCard title="Active SSH Terminals" value="1 session" icon={Key} />
+        <StatCard
+          title="Log Source"
+          value={source === "live" ? "LIVE" : source === "loading" ? "…" : "SAMPLE"}
+          icon={Key}
+          subtext="admin_audit_logs (brand-owner read)"
+        />
       </div>
 
       <ResponsiveTable
