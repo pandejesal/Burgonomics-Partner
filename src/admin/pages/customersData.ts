@@ -37,7 +37,10 @@ export interface NotificationLog {
   title: string;
   body: string;
   sentAt: string;
-  status: "Delivered" | "Opened" | "Clicked" | "Failed";
+  // Loop 61/120: "Draft" covers locally-recorded campaigns that were never
+  // sent (no SMS/Push/WhatsApp/Email channel exists). Only real provider
+  // deliveries may use Delivered/Opened/Clicked.
+  status: "Delivered" | "Opened" | "Clicked" | "Failed" | "Draft";
 }
 
 export interface SupportCase {
@@ -886,7 +889,12 @@ class CustomerDataStorage {
     recipientIds: string[],
     operator: string,
   ) {
-    let successCount = 0;
+    // Loop 61/120 honesty: there is NO SMS/Push/WhatsApp/Email send path —
+    // the old code stamped "Delivered", wrote "Received broadcast campaign"
+    // audit rows with a hardcoded fake IP, and toasted gateway dispatch
+    // that never happened (Loop 22's push-page pattern, here in the CRM).
+    // Records are local drafts; the toast says so loudly.
+    let draftCount = 0;
     this.customers.forEach((cust) => {
       if (recipientIds.includes(cust.id)) {
         cust.notifications.unshift({
@@ -895,22 +903,22 @@ class CustomerDataStorage {
           title,
           body,
           sentAt: new Date().toISOString().slice(0, 19).replace("T", " "),
-          status: "Delivered",
+          status: "Draft",
         });
         cust.auditLogs.unshift({
           id: `AUD-${Date.now().toString().slice(-4)}`,
           date: new Date().toISOString().slice(0, 19).replace("T", " "),
-          action: `Received broadcast campaign: "${title}"`,
+          action: `Drafted broadcast campaign (NOT sent — no ${type} channel): "${title}"`,
           operator,
-          ipAddress: "157.34.82.112",
+          ipAddress: "local",
           device: "Admin Panel / Chrome",
         });
-        successCount++;
+        draftCount++;
       }
     });
 
     toast.success(
-      `Campaign broadcasted! Dispatched ${successCount} messages over ${type} gateway.`,
+      `Campaign saved as a local draft for ${draftCount} customers — NOT sent (no ${type} channel wired).`,
     );
     this.notify();
     return true;

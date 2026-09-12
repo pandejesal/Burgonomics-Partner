@@ -1060,7 +1060,8 @@ export const AdminCustomerProfilePage: React.FC = () => {
                   Notification & Messaging Logs
                 </h3>
                 <span className="block text-[10px] text-gray-400 leading-normal">
-                  Outgoing communication history pushed over Burgonomics server gateways.
+                  Outgoing communication history, including unsent local drafts
+                  (no send channel wired — drafts never left this device).
                 </span>
 
                 {profile.notifications.length === 0 ? (
@@ -1090,7 +1091,17 @@ export const AdminCustomerProfilePage: React.FC = () => {
                           {n.body}
                         </p>
                         <div className="mt-2 text-right">
-                          <span className="text-[8.5px] font-mono font-bold uppercase text-emerald-600 dark:text-emerald-400">
+                          {/* Loop 61/120: drafts/unsent rows must not glow
+                            green — color follows the recorded state. */}
+                          <span
+                            className={`text-[8.5px] font-mono font-bold uppercase ${
+                              n.status === "Failed"
+                                ? "text-rose-600 dark:text-rose-400"
+                                : n.status === "Draft"
+                                  ? "text-amber-600 dark:text-amber-400"
+                                  : "text-emerald-600 dark:text-emerald-400"
+                            }`}
+                          >
                             ● {n.status}
                           </span>
                         </div>
