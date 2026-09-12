@@ -1,9 +1,11 @@
 import React, { useState } from "react";
+import { toast } from "sonner";
 import { Bell, Send, CheckCircle, Users, Activity, Sparkles, Megaphone } from "lucide-react";
 import { PageHeader } from "../components/Headers";
 import { StatCard, AdminCard } from "../components/Cards";
 import { AdminButton } from "../components/Buttons";
-import { Timeline, ActivityItem } from "../components/Utilities";
+import { Timeline, ActivityItem, ConfirmDialog } from "../components/Utilities";
+import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
 
 interface PushLog {
   id: string;
@@ -15,7 +17,12 @@ interface PushLog {
   // Loop 22/120 honesty: nothing on this page has ever been dispatched —
   // there is no customer broadcast endpoint. Seeds are fixtures, new rows
   // are local drafts. Never present either as deliveries.
-  status: "fixture" | "draft";
+  // Readiness-9: "sent" rows carry SERVER-MEASURED counts from POST
+  // /notifications/broadcast (targeted/delivered/failed) — the only rows
+  // that may claim a dispatch.
+  status: "fixture" | "draft" | "sent";
+  targeted?: number;
+  failedCount?: number;
 }
 
 const INITIAL_PUSH_LOGS: PushLog[] = [
@@ -46,6 +53,14 @@ export const AdminNotificationsPage: React.FC = () => {
   const [target, setTarget] = useState("all");
   const [isSending, setIsSending] = useState(false);
   const [sendSuccess, setSendSuccess] = useState(false);
+  // Readiness-9: measured result of the last real broadcast + confirm gate.
+  // Broadcasts reach every registered device — never one tap away.
+  const [lastResult, setLastResult] = useState<{
+    targeted: number;
+    successCount: number;
+    failureCount: number;
+  } | null>(null);
+  const [confirmBroadcast, setConfirmBroadcast] = useState(false);
 
   const handleDispatchPush = (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,6 +90,50 @@ export const AdminNotificationsPage: React.FC = () => {
       setTitle("");
       setBody("");
     }, 1500);
+  };
+
+  // Readiness-9: REAL send through POST /notifications/broadcast. Runs only
+  // after the confirm dialog (a broadcast reaches every registered device).
+  // Records the server-measured counts — never estimates — and reports
+  // failures loudly with no history row written.
+  const handleBroadcast = async () => {
+    if (!title.trim() || !body.trim() || isSending) return;
+    setConfirmBroadcast(false);
+    setIsSending(true);
+    setSendSuccess(false);
+    setLastResult(null);
+    try {
+      const res = await partnerFunctionsApi.sendBroadcast({
+        title: title.trim(),
+        body: body.trim(),
+      });
+      const entry: PushLog = {
+        id: res.broadcastId,
+        title: title.trim(),
+        body: body.trim(),
+        target: "All registered devices",
+        sentAt: new Date().toISOString().replace("T", " ").substring(0, 16),
+        successCount: res.successCount,
+        targeted: res.targeted,
+        failedCount: res.failureCount,
+        status: "sent",
+      };
+      setLogs([entry, ...logs]);
+      setLastResult({
+        targeted: res.targeted,
+        successCount: res.successCount,
+        failureCount: res.failureCount,
+      });
+      setSendSuccess(true);
+      setTitle("");
+      setBody("");
+    } catch (err) {
+      toast.error("Broadcast NOT sent.", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setIsSending(false);
+    }
   };
 
   return (
@@ -149,17 +208,55 @@ export const AdminNotificationsPage: React.FC = () => {
               />
             </div>
 
-            {sendSuccess && (
-              <div className="p-3.5 rounded-2xl bg-amber-50 text-amber-800 text-xs font-semibold flex items-center gap-2">
-                <CheckCircle size={15} />
-                <span>Saved as a local draft — NOT dispatched (no customer broadcast channel yet).</span>
-              </div>
-            )}
+            {sendSuccess &&
+              (lastResult ? (
+                <div className="p-3.5 rounded-2xl bg-emerald-50 text-emerald-800 text-xs font-semibold flex items-center gap-2">
+                  <CheckCircle size={15} />
+                  <span>
+                    Broadcast delivered to {lastResult.successCount} of {lastResult.targeted}{" "}
+                    devices
+                    {lastResult.failureCount > 0
+                      ? ` (${lastResult.failureCount} failed)` : ""}{" "}
+                    — server-measured, recorded in history below.
+                  </span>
+                </div>
+              ) : (
+                <div className="p-3.5 rounded-2xl bg-amber-50 text-amber-800 text-xs font-semibold flex items-center gap-2">
+                  <CheckCircle size={15} />
+                  <span>Saved as a local draft — NOT dispatched. Use Broadcast below to send.</span>
+                </div>
+              ))}
 
             <AdminButton type="submit" variant="secondary" isLoading={isSending} className="w-full">
               <Send size={14} />
               <span>Save Campaign Draft</span>
             </AdminButton>
+            {/* Readiness-9: the REAL send — confirm-gated, server-measured. */}
+            <AdminButton
+              type="button"
+              variant="primary"
+              isLoading={isSending}
+              className="w-full"
+              onClick={() => {
+                if (!title.trim() || !body.trim()) {
+                  toast.error("Write a title and body first.");
+                  return;
+                }
+                setConfirmBroadcast(true);
+              }}
+            >
+              <Megaphone size={14} />
+              <span>Broadcast to Devices</span>
+            </AdminButton>
+            <ConfirmDialog
+              isOpen={confirmBroadcast}
+              onClose={() => setConfirmBroadcast(false)}
+              onConfirm={() => void handleBroadcast()}
+              title="Broadcast to all registered devices?"
+              description="This sends the campaign above to EVERY registered device right now via POST /notifications/broadcast. Counts reported afterwards are server-measured."
+              confirmLabel="Send Broadcast"
+              isDestructive
+            />
           </form>
         </AdminCard>
 
@@ -173,9 +270,17 @@ export const AdminNotificationsPage: React.FC = () => {
               <ActivityItem
                 key={log.id}
                 title={log.title}
-                description={`${log.body} \nTarget: ${log.target} · ${log.status === "fixture" ? "Fixture entry — never dispatched" : "Draft — not dispatched"}.`}
+                description={`${log.body} \nTarget: ${log.target} · ${
+                  log.status === "fixture"
+                    ? "Fixture entry — never dispatched"
+                    : log.status === "sent"
+                      ? `Sent to ${log.successCount} of ${log.targeted ?? log.successCount} devices${
+                          (log.failedCount ?? 0) > 0 ? ` (${log.failedCount} failed)` : ""
+                        } — server-measured`
+                      : "Draft — not dispatched"
+                }.`}
                 time={log.sentAt}
-                variant={log.status === "fixture" ? "warning" : "info"}
+                variant={log.status === "fixture" ? "warning" : log.status === "sent" ? "success" : "info"}
                 icon={Bell}
               />
             ))}

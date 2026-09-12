@@ -237,6 +237,25 @@ export const partnerFunctionsApi = {
   },
 
   /**
+   * Sends a customer broadcast server-side (POST /notifications/broadcast,
+   * brand-only). Returns MEASURED counts — targeted devices, delivered,
+   * failed — recorded from the actual multicast, never estimates.
+   */
+  async sendBroadcast(params: {
+    title: string;
+    body: string;
+    data?: Record<string, string>;
+  }): Promise<{
+    broadcastId: string;
+    targeted: number;
+    successCount: number;
+    failureCount: number;
+    prunedCount: number;
+  }> {
+    return await apiRequest('/notifications/broadcast', params);
+  },
+
+  /**
    * Records a refund-request rejection server-side (POST /refunds/dispose,
    * staff-only). Loop 7/120: closes the Loop 5 carryover — the reject dialog
    * MUST use this, never a local-only mutation.
