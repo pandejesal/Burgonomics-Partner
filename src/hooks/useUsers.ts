@@ -170,20 +170,27 @@ export function useUsers() {
       cityIds: string[];
       pin?: string;
     }) => {
-      const userId = `partner_${Date.now()}`;
-      const hashedPin = userData.pin ? hashPinSimple(userData.pin) : undefined;
-
-      await setDoc(doc(db, 'users', userId), {
-        ...userData,
-        hashedPin,
-        pinSet: !!userData.pin,
-        active: true,
-        invitedBy: user?.id || 'admin',
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
+      // Readiness-6: invites go through POST /staff/invite (brand-only).
+      // The old direct users/ write was rules-denied by design and always
+      // failed. A PIN is never sent — the strict server schema 400s it;
+      // staff set their own at first sign-in.
+      if (userData.pin) {
+        throw new Error(
+          "Staff set their own POS PIN at first sign-in — remove it and retry."
+        );
+      }
+      const { partnerFunctionsApi } = await import(
+        "@/services/partnerFunctionsApi"
+      );
+      const res = await partnerFunctionsApi.inviteStaff({
+        name: userData.name,
+        email: userData.email,
+        phone: userData.phone || undefined,
+        role: userData.role,
+        branchIds: userData.branchIds,
+        cityIds: userData.cityIds,
       });
-
-      return userId;
+      return res.uid;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['team-users'] });

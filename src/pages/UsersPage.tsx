@@ -56,7 +56,9 @@ export function UsersPage() {
       await inviteUser.mutateAsync(data);
       toast.success('Staff invite recorded.');
     } catch (err) {
-      toast.error('Invite NOT recorded — staff invites need a server endpoint.', {
+      // Readiness-6: invites run through POST /staff/invite — failures carry
+      // the server's message (validation, role, or gateway errors).
+      toast.error('Invite NOT recorded.', {
         description: err instanceof Error ? err.message : String(err),
       });
       throw err;

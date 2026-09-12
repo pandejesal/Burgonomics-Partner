@@ -220,6 +220,23 @@ export const partnerFunctionsApi = {
   },
 
   /**
+   * Invites a staff member server-side (POST /staff/invite, brand-only).
+   * The server mints or reuses the Auth account, applies role claims, and
+   * writes the staff profile — the old direct users/ write was rules-denied
+   * by design. No PIN is ever sent: staff set their own at first sign-in.
+   */
+  async inviteStaff(params: {
+    name: string;
+    email: string;
+    phone?: string;
+    role: string;
+    branchIds?: string[];
+    cityIds?: string[];
+  }): Promise<{ uid: string; email: string; role: string; invited: boolean }> {
+    return await apiRequest('/staff/invite', params);
+  },
+
+  /**
    * Records a refund-request rejection server-side (POST /refunds/dispose,
    * staff-only). Loop 7/120: closes the Loop 5 carryover — the reject dialog
    * MUST use this, never a local-only mutation.
