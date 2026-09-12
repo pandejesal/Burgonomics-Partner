@@ -100,7 +100,7 @@ export const AdminNotificationsPage: React.FC = () => {
         {/* Creator panel */}
         <AdminCard
           title="Create FCM Campaign"
-          subtitle="Transmit real-time banners directly to customer locked phones"
+          subtitle="Compose a campaign draft — customer broadcast is not wired yet, nothing here is sent"
         >
           <form onSubmit={handleDispatchPush} className="space-y-4 font-sans">
             <div className="space-y-1.5">
@@ -112,8 +112,12 @@ export const AdminNotificationsPage: React.FC = () => {
                 onChange={(e) => setTarget(e.target.value)}
                 className="w-full p-3 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] text-sm text-gray-800 dark:text-gray-100 focus:outline-none"
               >
-                <option value="all">All Registrations (1,850 device targets)</option>
-                <option value="high-buyers">Loyal VIP Cohorts (290 targets)</option>
+                {/* Loop 59/120: no device-target counts — the old labels
+                  ("1,850 device targets" / "290 targets") revived the exact
+                  fabricated reach Loop 22 removed from the stats. No live
+                  token count exists (see stat cards above). */}
+                <option value="all">All Registered Customers (no live count)</option>
+                <option value="high-buyers">High Frequency Buyers (no live count)</option>
               </select>
             </div>
 
@@ -154,15 +158,15 @@ export const AdminNotificationsPage: React.FC = () => {
 
             <AdminButton type="submit" variant="secondary" isLoading={isSending} className="w-full">
               <Send size={14} />
-              <span>Broadcast Campaign Banner</span>
+              <span>Save Campaign Draft</span>
             </AdminButton>
           </form>
         </AdminCard>
 
         {/* Dispatch Logs timeline */}
         <AdminCard
-          title="Historic Dispatch Log"
-          subtitle="Review performance and conversion logs of previous notifications"
+          title="Draft Log"
+          subtitle="Local drafts and fixtures only — nothing here was dispatched"
         >
           <Timeline>
             {logs.map((log) => (
