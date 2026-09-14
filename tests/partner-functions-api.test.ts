@@ -148,6 +148,55 @@ describe('partnerFunctionsApi gateway (real client, mocked transport)', () => {
     await expect(partnerFunctionsApi.bookPorterRider('ord_9')).rejects.toThrow(/not configured/);
   });
 
+  it('POSTs Porter rebooks (delivery_porter.md §4) with order/staff and surfaces NOT_REBOOKABLE refusals', async () => {
+    const seen: { url?: string; init?: RequestInit } = {};
+    globalThis.fetch = (async (url: any, init: any) => {
+      seen.url = String(url);
+      seen.init = init;
+      return new Response(
+        JSON.stringify({ porterOrderId: 'PRTR-2', riderName: 'Suresh', riderPhone: 'x', riderVehicleNumber: 'y', trackingUrl: 'z', status: 'dispatched' }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }) as any;
+
+    const res = await partnerFunctionsApi.rebookPorterRider('ord_9', 'Asha Manager');
+    expect(seen.url).toMatch(/\/porter\/rebook$/);
+    expect(JSON.parse(String(seen.init?.body))).toMatchObject({ orderId: 'ord_9', staffName: 'Asha Manager' });
+    expect(res.riderName).toBe('Suresh');
+    expect(res.porterOrderId).toBe('PRTR-2');
+
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: 'NOT_REBOOKABLE: order is not in a rebookable state' }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      })) as any;
+    await expect(partnerFunctionsApi.rebookPorterRider('ord_9')).rejects.toThrow(/NOT_REBOOKABLE/);
+  });
+
+  it('POSTs Porter cancellations with orderId and surfaces server cancel failures', async () => {
+    const seen: { url?: string; init?: RequestInit } = {};
+    globalThis.fetch = (async (url: any, init: any) => {
+      seen.url = String(url);
+      seen.init = init;
+      return new Response(JSON.stringify({ success: true, message: 'Porter booking cancelled' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as any;
+
+    const res = await partnerFunctionsApi.cancelPorterRider('ord_9');
+    expect(seen.url).toMatch(/\/porter\/cancel$/);
+    expect(JSON.parse(String(seen.init?.body))).toMatchObject({ orderId: 'ord_9' });
+    expect(res.success).toBe(true);
+
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: 'Porter API rejected the cancellation' }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      })) as any;
+    await expect(partnerFunctionsApi.cancelPorterRider('ord_9')).rejects.toThrow(/rejected the cancellation/);
+  });
+
   it('measures API health instead of fabricating latency', async () => {
     globalThis.fetch = (async (url: any) => {
       expect(String(url)).toMatch(/\/health$/);

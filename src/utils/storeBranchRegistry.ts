@@ -2,7 +2,8 @@
  * storeBranchRegistry — Delivery `stores/*` ↔ Partner `branches/*` ID registry.
  *
  * Why this exists: the customer app scopes everything (menu, orders) by
- * Delivery store id (`str_001`… from the `stores` collection / MOCK_STORES),
+ * Delivery store id (`str_001`… from the `stores` collection / the original
+ * seed mock dataset, now a DEV-only test fixture),
  * while the Partner app scopes by branch id (`branch_surat_01`… from the
  * `branches` collection). The two catalogs were seeded independently with
  * different Petpooja ID schemes (`rest_*` vs `PP_*`), so no automatic join

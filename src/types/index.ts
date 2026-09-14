@@ -125,6 +125,11 @@ export interface Order {
     | 'rider_cancelled'
     | 'no_riders_available'
     | 'manually_assigned';
+  // True when Porter driver cancelled or no driver was found (delivery_porter.md §4).
+  // Server writes this alongside deliveryStatus 'rider_cancelled' — gates the
+  // no-driver rebook alert card and the /porter/rebook guard.
+  needsRebook?: boolean;
+  riderCancellationReason?: string;
   riderName?: string;
   riderPhone?: string;
   riderVehicleNumber?: string;

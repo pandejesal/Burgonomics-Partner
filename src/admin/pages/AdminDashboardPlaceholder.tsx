@@ -17,17 +17,16 @@ const DashboardCharts = lazy(() =>
   }))
 );
 import { Store, MapPin, RefreshCw, Download, CheckCircle, Info } from "lucide-react";
-
-import { INITIAL_RICH_STORES, RichStore } from "./storesData";
+import { useStores } from "../dashboard/hooks/useDashboardData";
 
 export const AdminDashboardPlaceholder: React.FC = () => {
   const { role } = useAdmin();
 
-  // Load actual stores from local storage or INITIAL_RICH_STORES
-  const [stores] = useState<RichStore[]>(() => {
-    const cached = localStorage.getItem("burgonomics_rich_stores_directory");
-    return cached ? JSON.parse(cached) : INITIAL_RICH_STORES;
-  });
+  // Loop 21/120 (partner blocker #2): store-directory filters now read the
+  // real `admin_stores` Firestore collection via useStores. The fabricated
+  // INITIAL_RICH_STORES/localStorage seed is gone — an empty or failed
+  // backend renders empty dropdowns instead of fixture outlets.
+  const { data: stores = [] } = useStores();
 
   // Selected filters state
   const [selectedRange, setSelectedRange] = useState<"today" | "yesterday" | "7days" | "30days">(

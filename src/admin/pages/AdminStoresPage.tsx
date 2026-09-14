@@ -43,7 +43,6 @@ import { StatCard } from "../components/Cards";
 import { StatusBadge, HealthBadge } from "../components/Badges";
 import { ConfirmDialog } from "../components/Utilities";
 import {
-  INITIAL_RICH_STORES,
   RichStore,
   StaffMember,
   StoreDocument,

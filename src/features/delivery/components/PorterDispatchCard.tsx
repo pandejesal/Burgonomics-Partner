@@ -16,6 +16,7 @@ import {
 import type { Order } from '@/types';
 import type { PorterDeliveryQuote } from '@/services/porterDelivery';
 import { isSafeTelNumber, isSafeTrackingUrl } from '@/utils/urlSafety';
+import { playKDSChime } from '@/utils/kdsAudio';
 import { ConfirmDialog } from '../../../admin/components/Utilities';
 
 interface PorterDispatchCardProps {
@@ -23,10 +24,12 @@ interface PorterDispatchCardProps {
   quote?: PorterDeliveryQuote;
   loadingQuote?: boolean;
   isDispatching?: boolean;
+  isRebooking?: boolean;
   onFetchQuote: (order: Order) => void;
   onDispatchPorter: (order: Order) => void;
   onOpenAssignModal: (order: Order) => void;
   onCancelPorter: (orderId: string) => void;
+  onRebookPorter?: (order: Order) => void;
 }
 
 export function getRiderStatusMeta(order: Order): {
@@ -38,6 +41,23 @@ export function getRiderStatusMeta(order: Order): {
   const deliveryStatus = (order as any).deliveryStatus || (order as any).delivery?.status;
   const status = (order.status || '').toLowerCase();
   const hasInHouseRider = (order as any).deliveryStatus === 'manually_assigned';
+
+  // §4 No-Driver Rebook state: server flags needsRebook when a Porter driver
+  // cancelled or no driver was found. Highest-priority pill so the alert card
+  // reads urgent even if a stale riderName still lingers on the doc.
+  const rebookNeeded =
+    (order as any).needsRebook === true ||
+    deliveryStatus === 'rider_cancelled' ||
+    deliveryStatus === 'no_riders_available';
+
+  if (rebookNeeded) {
+    return {
+      statusText: 'Rider Cancelled — Rebook Needed',
+      className: 'bg-rose-950/80 text-rose-300 border-rose-500/50 animate-pulse',
+      isPorter: false,
+      isInHouse: false,
+    };
+  }
 
   if (hasInHouseRider) {
     return {
@@ -97,10 +117,12 @@ export function PorterDispatchCard({
   quote,
   loadingQuote = false,
   isDispatching = false,
+  isRebooking = false,
   onFetchQuote,
   onDispatchPorter,
   onOpenAssignModal,
   onCancelPorter,
+  onRebookPorter,
 }: PorterDispatchCardProps) {
   // Loop 11: dispatch books a real paid courier — require explicit confirm
   // (every other money path already confirms). Fare shown before commit.
@@ -120,6 +142,23 @@ export function PorterDispatchCard({
   const riderMeta = getRiderStatusMeta(order);
   const isReady = order.status === 'ready';
   const isDispatched = order.status === 'out_for_delivery' || !!order.riderName;
+
+  // §4 No-Driver Rebook state (mirrors the pill logic in getRiderStatusMeta).
+  const deliveryStatus = (order as any).deliveryStatus || (order as any).delivery?.status;
+  const needsRebook =
+    (order as any).needsRebook === true ||
+    deliveryStatus === 'rider_cancelled' ||
+    deliveryStatus === 'no_riders_available';
+
+  // §4 urgent audio notification — one-shot chime when the alert card appears,
+  // guarded so re-renders of the same order never re-fire it.
+  const chimeFiredRef = React.useRef(false);
+  useEffect(() => {
+    if (needsRebook && !chimeFiredRef.current) {
+      chimeFiredRef.current = true;
+      playKDSChime();
+    }
+  }, [needsRebook]);
 
   const addressText =
     order.deliveryAddress?.full ||
@@ -166,6 +205,48 @@ export function PorterDispatchCard({
         </div>
       </div>
 
+      {/* §4 No-Driver Alert Card: urgent — Porter rider cancelled or none found */}
+      {needsRebook && (
+        <div className="p-4 rounded-2xl bg-rose-950/30 border border-rose-700/60 space-y-3">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 animate-pulse" />
+            <div className="min-w-0">
+              <p className="text-sm font-black text-rose-300 uppercase tracking-wide">
+                Porter Rider Cancelled
+              </p>
+              <p className="text-xs text-rose-200/80 mt-0.5 leading-relaxed">
+                {order.riderCancellationReason ||
+                  'No driver was available for this order. Rebook a new courier or switch to in-house delivery to keep it moving.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* 1-Click Rebook (delivery_porter.md §4) — re-requests a new Porter rider */}
+            <button
+              type="button"
+              disabled={isRebooking}
+              onClick={() => onRebookPorter?.(order)}
+              className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50 min-h-[44px]"
+            >
+              <RotateCcw className={`w-3.5 h-3.5 ${isRebooking ? 'animate-spin' : ''}`} />
+              <span>{isRebooking ? 'Booking New Rider...' : '1-Click Rebook'}</span>
+            </button>
+
+            {/* Fallback: Switch to In-House Delivery */}
+            <button
+              type="button"
+              onClick={() => onOpenAssignModal(order)}
+              className="py-2.5 px-3.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-emerald-700/60 text-emerald-300 hover:text-emerald-200 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Assign In-House Store Rider"
+            >
+              <UserCheck className="w-3.5 h-3.5" />
+              <span>Switch to In-House Delivery</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Customer & Address Details */}
       <div className="space-y-2 text-xs">
         <div className="flex items-center justify-between">
@@ -202,7 +283,7 @@ export function PorterDispatchCard({
       </div>
 
       {/* Assigned Rider Info (if dispatched) */}
-      {(order.riderName || riderMeta.isInHouse) && (
+      {!needsRebook && (order.riderName || riderMeta.isInHouse) && (
         <div className="p-3 rounded-2xl bg-neutral-950 border border-neutral-800 space-y-1.5 text-xs">
           <div className="flex items-center justify-between">
             <span className="font-bold text-white flex items-center gap-1.5">
@@ -247,7 +328,8 @@ export function PorterDispatchCard({
         </div>
       )}
 
-      {/* Action Triggers */}
+      {/* Action Triggers (hidden while the §4 rebook alert card is active) */}
+      {!needsRebook && (
       <div className="flex items-center gap-2 pt-1">
         {!isDispatched ? (
           <>
@@ -288,7 +370,7 @@ export function PorterDispatchCard({
           </>
         ) : (
           <>
-          /* Cancel / Re-dispatch button (confirmed — kills a live booking) */
+          {/* Cancel / Re-dispatch button (confirmed — kills a live booking) */}
           <button
             type="button"
             onClick={() => setConfirmCancel(true)}
@@ -314,6 +396,7 @@ export function PorterDispatchCard({
           </>
         )}
       </div>
+      )}
     </div>
   );
 }

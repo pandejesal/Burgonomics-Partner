@@ -303,14 +303,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         '@/shared/platform/pushNotifications'
       );
       const { partnerFunctionsApi } = await import('@/services/partnerFunctionsApi');
-      const token = getCachedToken();
+      const token = await getCachedToken();
       if (token) {
         try {
           await partnerFunctionsApi.unregisterDeviceToken(token);
         } catch (err) {
           console.warn('SignOut token detach failed (non-blocking):', err);
         }
-        clearCachedToken();
+        await clearCachedToken();
       }
     } catch (err) {
       console.warn('SignOut token cleanup skipped:', err);

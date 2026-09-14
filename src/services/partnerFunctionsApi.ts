@@ -220,31 +220,43 @@ export const partnerFunctionsApi = {
   },
 
   /**
-   * Re-books cancelled Porter rider.
-   * Same idempotency semantics as bookPorterRider.
-   */
-  async rebookPorterRider(
-    orderId: string,
-    staffName?: string,
-    options?: ApiOptions,
-  ): Promise<{
-    porterOrderId: string;
-    riderName: string;
-    riderPhone: string;
-    riderVehicleNumber: string;
-    trackingUrl: string;
-    status: string;
-  }> {
-    return await apiRequest(
-      '/porter/rebook',
-      { orderId, staffName },
-      { ...options, timeoutMs: options?.timeoutMs ?? PORTER_TIMEOUT_MS, retries: 1 },
-    );
-  },
+     * Re-books cancelled Porter rider.
+     * Same idempotency semantics as bookPorterRider.
+     */
+    async rebookPorterRider(
+      orderId: string,
+      staffName?: string,
+      options?: ApiOptions,
+    ): Promise<{
+      porterOrderId: string;
+      riderName: string;
+      riderPhone: string;
+      riderVehicleNumber: string;
+      trackingUrl: string;
+      status: string;
+    }> {
+      return await apiRequest(
+        '/porter/rebook',
+        { orderId, staffName },
+        { ...options, timeoutMs: options?.timeoutMs ?? PORTER_TIMEOUT_MS, retries: 1 },
+      );
+    },
 
-  /**
-   * Verifies customer 4-digit handover OTP
-   */
+    /**
+     * Cancels a booked Porter rider. Calls server POST /porter/cancel which
+     * contacts Porter provider to cancel the live booking before flipping
+     * local status. Returns success boolean.
+     */
+    async cancelPorterRider(orderId: string): Promise<{ success: boolean; message?: string }> {
+      return await apiRequest('/porter/cancel', { orderId }, {
+        timeoutMs: PORTER_TIMEOUT_MS,
+        retries: 1,
+      });
+    },
+
+    /**
+     * Verifies customer 4-digit handover OTP
+     */
   async verifyDeliveryOtp(params: {
     orderId: string;
     otp: string;

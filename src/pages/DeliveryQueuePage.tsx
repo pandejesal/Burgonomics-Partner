@@ -26,10 +26,12 @@ export function DeliveryQueuePage() {
     quotes,
     loadingQuotes,
     dispatchingOrderIds,
+    rebookingOrderIds,
     fetchOrderQuote,
     dispatchPorter,
     assignInHouseRider,
     cancelPorter,
+    rebookPorter,
   } = usePorterLogistics();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -219,10 +221,12 @@ export function DeliveryQueuePage() {
               quote={quotes[order.id]}
               loadingQuote={loadingQuotes[order.id]}
               isDispatching={dispatchingOrderIds[order.id]}
+              isRebooking={rebookingOrderIds[order.id]}
               onFetchQuote={fetchOrderQuote}
               onDispatchPorter={dispatchPorter}
               onOpenAssignModal={setAssigningOrder}
               onCancelPorter={cancelPorter}
+              onRebookPorter={rebookPorter}
             />
           ))}
         </div>

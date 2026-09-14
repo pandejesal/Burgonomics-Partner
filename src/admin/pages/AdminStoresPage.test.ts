@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { markStoresSynced } from "./AdminStoresPage";
-import { INITIAL_RICH_STORES } from "./storesData";
+import { INITIAL_RICH_STORES } from "@/test/fixtures/richStores";
 
 // Loop 57/120: the stores-page Petpooja sync buttons used to stamp every
 // row active with a fabricated random menuVersion and zero server contact.

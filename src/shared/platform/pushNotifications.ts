@@ -8,6 +8,7 @@
 import { Capacitor } from '@capacitor/core';
 import { toast } from 'sonner';
 import { logger } from '@/core/logging/logger';
+import { secureStorage, SECURE_KEYS } from '@/core/storage/secureStorage';
 import { isSafeDeepLink } from '@/utils/urlSafety';
 import type { User } from '@/types';
 
@@ -21,29 +22,48 @@ export function isNativePlatform(): boolean {
   return Capacitor.isNativePlatform();
 }
 
-export function getCachedToken(): string | null {
-  if (currentToken) return currentToken;
+// Loop 22/120: the device token is device-identity material — on native shells
+// it now lives in secureStorage (Keychain/Keystore) instead of plaintext
+// localStorage. Legacy plaintext values under the old key are lifted once.
+const LEGACY_TOKEN_KEY = 'burg_partner_device_token';
+
+async function readPersistedToken(): Promise<string | null> {
+  const fromSecure = await secureStorage.get(SECURE_KEYS.DEVICE_TOKEN);
+  if (fromSecure !== null) return fromSecure;
   if (typeof window !== 'undefined' && window.localStorage) {
-    return window.localStorage.getItem('burg_partner_device_token');
+    const legacy = window.localStorage.getItem(LEGACY_TOKEN_KEY);
+    if (legacy !== null) {
+      await secureStorage.set(SECURE_KEYS.DEVICE_TOKEN, legacy);
+      window.localStorage.removeItem(LEGACY_TOKEN_KEY);
+    }
+    return legacy;
   }
   return null;
 }
 
-function setCachedToken(token: string | null) {
-  currentToken = token;
-  if (typeof window !== 'undefined' && window.localStorage) {
-    if (token) {
-      window.localStorage.setItem('burg_partner_device_token', token);
-    } else {
-      window.localStorage.removeItem('burg_partner_device_token');
-    }
+async function writePersistedToken(token: string | null): Promise<void> {
+  if (token) {
+    await secureStorage.set(SECURE_KEYS.DEVICE_TOKEN, token);
+  } else {
+    await secureStorage.remove(SECURE_KEYS.DEVICE_TOKEN);
   }
+}
+
+export async function getCachedToken(): Promise<string | null> {
+  if (currentToken) return currentToken;
+  currentToken = await readPersistedToken();
+  return currentToken;
+}
+
+async function setCachedToken(token: string | null): Promise<void> {
+  currentToken = token;
+  await writePersistedToken(token);
 }
 
 // Loop 46/120: forget the device token on logout so a later user on shared
 // hardware never reuses (or inherits pushes for) the previous token.
-export function clearCachedToken(): void {
-  setCachedToken(null);
+export async function clearCachedToken(): Promise<void> {
+  await setCachedToken(null);
 }
 
 /**
@@ -100,7 +120,7 @@ function desiredTopicsFor(user: User | null): string[] {
  * otherwise the previous outlet keeps paging this terminal).
  */
 async function subscribeUserTopics(user: User | null): Promise<void> {
-  const token = getCachedToken();
+  const token = await getCachedToken();
   if (!token) return;
   const wanted = desiredTopicsFor(user);
   const toAdd = wanted.filter((t) => !subscribedTopics.includes(t));
@@ -160,7 +180,7 @@ async function attachListenersOnce(): Promise<void> {
       // Never log token material, even truncated — prefixes are stable
       // identifiers. Dev-only debug through the gated logger.
       logger.debug('[Push] FCM/APNs registration received');
-      setCachedToken(token.value);
+      await setCachedToken(token.value);
 
       // ALWAYS resolve the user fresh (never the init-time closure) for both
       // topic subscription and the Firestore registry write.

@@ -6,6 +6,7 @@
 let audioCtx: AudioContext | null = null;
 let repeatIntervalId: ReturnType<typeof setInterval> | null = null;
 let isAudioUnlocked = false;
+let currentPendingCount = 0;
 
 /**
  * Initialize or get active AudioContext
@@ -59,6 +60,10 @@ export function setKDSAudioMuted(muted: boolean): void {
   localStorage.setItem(MUTE_STORAGE_KEY, muted ? 'true' : 'false');
   if (muted) {
     stopRepeatingKDSAlarm();
+  } else if (currentPendingCount > 0 && !repeatIntervalId) {
+    // Re-arm the repeating alarm from the live backend count so an unmute
+    // never leaves a silent kitchen with unacknowledged orders.
+    syncKDSAlarmState(currentPendingCount);
   }
 }
 
@@ -110,6 +115,10 @@ export function playKDSChime(): void {
  * Start or stop repeating alarm (every 15s) when pending orders exist — with native haptics for Kitchen urgency
  */
 export function syncKDSAlarmState(pendingCount: number): void {
+  // Keep the latest backend truth so the alarm loop follows Firestore, not a
+  // standalone front-end clock.
+  currentPendingCount = pendingCount;
+
   if (isKDSAudioMuted() || pendingCount <= 0) {
     stopRepeatingKDSAlarm();
     return;
@@ -120,9 +129,13 @@ export function syncKDSAlarmState(pendingCount: number): void {
     playKDSChime();
     void triggerKDSHaptic();
     repeatIntervalId = setInterval(() => {
-      if (!isKDSAudioMuted()) {
+      // Tick against the live pending count captured at the last sync — the
+      // loop self-stops the moment the kitchen clears the makeline.
+      if (!isKDSAudioMuted() && currentPendingCount > 0) {
         playKDSChime();
         void triggerKDSHaptic();
+      } else {
+        stopRepeatingKDSAlarm();
       }
     }, 15000); // 15 seconds repeat
   }

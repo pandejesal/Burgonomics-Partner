@@ -22,7 +22,6 @@ import {
   RefundStats,
   DuplicatePayment,
 } from "../types";
-import { INITIAL_RICH_STORES } from "../../pages/storesData";
 
 /**
  * Normalizes any timestamp representation (Firestore Timestamp, ISO string, or number)
@@ -235,7 +234,16 @@ export class DashboardService {
         this.fetchOrders(),
         this.fetchPayments(),
         this.fetchRefunds(),
-        this.getStores(),
+        // Loop 21/120: stores directory fetch is now wrapped — if Firestore
+        // is down, live counts degrade to 0 (same as every sibling). The
+        // real error surfaces in useStores() via StoreOverview's error card.
+        this.getStores().catch((err) => {
+          console.warn(
+            "dashboardService.getLiveCounts: stores directory unavailable, live counts degraded:",
+            err,
+          );
+          return [];
+        }),
         this.fetchUnmatchedWebhookCount(),
         this.fetchUnmatchedPetpoojaCount(),
       ]);
@@ -644,29 +652,18 @@ export class DashboardService {
 
   /**
    * 10. Stores Directory from Firestore
+   *
+   * Loop 21/120 (partner blocker #2): the fabricated fallbackStores() path
+   * was removed. A failed Firestore read now rethrows so callers surface a
+   * real error state; an empty backend returns [] so callers surface an
+   * honest empty state. No mock directory is ever served to production.
    */
   async getStores(params: { city?: string; query?: string } = {}): Promise<StoreResponse[]> {
-    const fallbackStores = (): StoreResponse[] =>
-      INITIAL_RICH_STORES.map((s) => ({
-        id: s.id,
-        name: s.name,
-        address: s.address,
-        city: s.city,
-        state: "",
-        pincode: "",
-        country: "India",
-        phone: s.phone,
-        status: s.isOpen ? "OPEN" : "CLOSED",
-        latitude: s.lat,
-        longitude: s.lng,
-        distanceKm: s.distanceKm,
-        isDemoFallback: true,
-      }));
+    let stores: StoreResponse[] = [];
 
     try {
       // Bounded: directory holds tens of stores; never pull unbounded.
       const snap = await getDocs(query(collection(db, "admin_stores"), limit(100)));
-      let stores: StoreResponse[] = [];
 
       if (!snap.empty) {
         snap.forEach((doc) => {
@@ -688,30 +685,29 @@ export class DashboardService {
             distanceKm: d.distanceKm || 0,
           });
         });
-      } else {
-        // Fallback to repository stores dataset
-        stores = fallbackStores();
       }
-
-      if (params.city && params.city !== "all") {
-        stores = stores.filter((s) => s.city.toLowerCase() === params.city?.toLowerCase());
-      }
-
-      if (params.query) {
-        const qLower = params.query.toLowerCase();
-        stores = stores.filter(
-          (s) =>
-            s.name.toLowerCase().includes(qLower) ||
-            s.address.toLowerCase().includes(qLower) ||
-            s.city.toLowerCase().includes(qLower),
-        );
-      }
-
-      return stores;
     } catch (err) {
-      console.warn("dashboardService.getStores failed:", err);
-      return fallbackStores();
+      // Nope — no fixture fallback. Fail loudly so react-query surfaces the
+      // error card with retry instead of serving forged store data.
+      console.error("dashboardService.getStores failed:", err);
+      throw err;
     }
+
+    if (params.city && params.city !== "all") {
+      stores = stores.filter((s) => s.city.toLowerCase() === params.city?.toLowerCase());
+    }
+
+    if (params.query) {
+      const qLower = params.query.toLowerCase();
+      stores = stores.filter(
+        (s) =>
+          s.name.toLowerCase().includes(qLower) ||
+          s.address.toLowerCase().includes(qLower) ||
+          s.city.toLowerCase().includes(qLower),
+      );
+    }
+
+    return stores;
   }
 
   /**

@@ -60,6 +60,33 @@ export const StoreOverview: React.FC = () => {
     );
   }
 
+  // Loop 21/120: a successful-but-empty Firestore read renders an honest
+  // empty state — no fixture outlets, no demo badges.
+  if (stores.length === 0) {
+    return (
+      <div className="rounded-[20px] border border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] p-6 space-y-3">
+        <div className="flex justify-between items-center">
+          <span className="font-bold text-sm text-gray-900 dark:text-white uppercase font-sans">
+            Store Outlets Overview
+          </span>
+          <Store size={18} className="text-gray-400" />
+        </div>
+        <p className="text-xs font-semibold text-gray-400">
+          No store configurations found in the database yet.
+        </p>
+        <p className="text-[10px] font-bold text-gray-400/70 uppercase tracking-wider">
+          Add your first outlet from the Stores page to see live status here.
+        </p>
+        <button
+          onClick={() => refetch()}
+          className="px-4 py-2 rounded-xl bg-gray-50 dark:bg-gray-900 text-gray-600 dark:text-gray-300 text-xs font-bold transition-all cursor-pointer"
+        >
+          Reload
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-[20px] border border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] p-6 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col h-full">
       <div className="flex items-center justify-between pb-4 border-b border-gray-50 dark:border-gray-800/50 mb-5 shrink-0">
@@ -126,13 +153,6 @@ export const StoreOverview: React.FC = () => {
                       />
                       {isOpen ? "Open" : "Closed"}
                     </span>
-
-                    {/* Loop 3/120 honesty: fixture fallback stores are labeled, never live */}
-                    {store.isDemoFallback && (
-                      <span className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[9px] font-black uppercase bg-gray-800 text-amber-300 border border-amber-400/40 dark:bg-gray-900 dark:text-amber-300">
-                        Demo store
-                      </span>
-                    )}
 
                     {/* Busy badge */}
                     {isBusy && (

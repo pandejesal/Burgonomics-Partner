@@ -22,6 +22,7 @@ export function usePorterLogistics() {
   const [quotes, setQuotes] = useState<Record<string, PorterDeliveryQuote>>({});
   const [loadingQuotes, setLoadingQuotes] = useState<Record<string, boolean>>({});
   const [dispatchingOrderIds, setDispatchingOrderIds] = useState<Record<string, boolean>>({});
+  const [rebookingOrderIds, setRebookingOrderIds] = useState<Record<string, boolean>>({});
 
   // Filter only active delivery orders for branch
   const activeDeliveryOrders = useMemo(() => {
@@ -113,33 +114,54 @@ export function usePorterLogistics() {
     }
   }, [updateOrderStatus]);
 
-  // Cancel Porter Ride
-  // Loop 17/120 honesty: there is NO server cancel endpoint (only rider-side
-  // cancellation webhooks + staff rebook). This flips the board back to Ready
-  // but must never claim the courier booking itself was cancelled — a live
-  // booking would dangle with a rider arriving for a "cancelled" order.
-  // QUEUED: POST /porter/cancel (provider cancel + fee handling).
+  // Cancel Porter Ride — calls server POST /porter/cancel which contacts
+  // Porter provider to cancel the live booking before flipping local status.
   const cancelPorter = useCallback(async (orderId: string) => {
     try {
-      const order = orders.find((o) => o.id === orderId);
+      await partnerFunctionsApi.cancelPorterRider(orderId);
       if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
         await updateOrderStatus.mutateAsync({
           orderId,
           status: 'ready',
         });
       }
-      if (order?.porterOrderId) {
-        toast.warning(
-          `Reverted to Ready queue — courier booking ${order.porterOrderId} was NOT auto-cancelled.`,
-          { description: 'Cancel it with the provider before the rider arrives, or re-dispatch from Ready.' }
-        );
-      } else {
-        toast.info(`Porter dispatch cancelled for order #${orderId.slice(-6).toUpperCase()}. Reverted to Ready queue.`);
-      }
+      toast.success(`Porter booking cancelled for order #${orderId.slice(-6).toUpperCase()}`);
     } catch (err) {
-      toast.error('Failed to cancel Porter dispatch');
+      toast.error('Failed to cancel Porter booking', {
+        description: err instanceof Error ? err.message : 'Could not reach the dispatcher.',
+      });
     }
-  }, [updateOrderStatus, orders]);
+  }, [updateOrderStatus]);
+
+  // Rebook Porter Ride (delivery_porter.md §4) — 1-Click Rebook from the
+  // no-driver alert card. POST /porter/rebook requests a NEW rider for an
+  // order whose previous driver cancelled or was never found. The order must
+  // be in a rebookable server state (needsRebook true / rider_cancelled), so
+  // stale taps surface the server's NOT_REBOOKABLE refusal instead of faking
+  // a booking. Status flips only after the server confirms the new booking.
+  const rebookPorter = useCallback(async (order: Order) => {
+    setRebookingOrderIds((prev) => ({ ...prev, [order.id]: true }));
+    try {
+      const booking = await partnerFunctionsApi.rebookPorterRider(order.id, staffName);
+
+      if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
+        await updateOrderStatus.mutateAsync({
+          orderId: order.id,
+          status: 'out_for_delivery',
+        });
+      }
+
+      toast.success(`New Porter courier booked: ${booking.riderName}`, {
+        description: `Order #${order.id.slice(-6).toUpperCase()} · ${booking.porterOrderId}`,
+      });
+    } catch (err) {
+      toast.error('Porter rebook failed — no new courier dispatched.', {
+        description: err instanceof Error ? err.message : 'Could not reach the dispatcher.',
+      });
+    } finally {
+      setRebookingOrderIds((prev) => ({ ...prev, [order.id]: false }));
+    }
+  }, [updateOrderStatus, staffName]);
 
   return {
     deliveryOrders: activeDeliveryOrders,
@@ -147,10 +169,12 @@ export function usePorterLogistics() {
     quotes,
     loadingQuotes,
     dispatchingOrderIds,
+    rebookingOrderIds,
     fetchOrderQuote,
     dispatchPorter,
     assignInHouseRider,
     cancelPorter,
+    rebookPorter,
   };
 }
 

@@ -3,9 +3,10 @@ import { Link } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import { useAppStore } from '@/stores/appStore';
 import {
+  AcousticChimePlayer,
+  KDSAudioUnlockModal,
   KDSOrderCard,
   KOTTimerBadge,
-  AcousticChimePlayer,
   useKDSRealtimeStream,
 } from '@/features/kds';
 import {
@@ -100,6 +101,27 @@ export function KDSPage() {
   const [isMuted, setIsMuted] = useState<boolean>(isKDSAudioMuted());
   const [audioUnlocked, setAudioUnlocked] = useState<boolean>(isKDSAudioUnlocked());
 
+  // One-time unlock-audio onboarding. Dismissal is persisted so the modal
+  // never nags on every visit; the amber toolbar button stays as the manual
+  // path. Shape-validated read; corrupt values just re-show the modal.
+  const AUDIO_INTRO_KEY = 'kds-audio-intro-seen:v1';
+  const readAudioIntroDismissed = (): boolean => {
+    try {
+      return window.localStorage.getItem(AUDIO_INTRO_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  };
+  const [audioIntroDismissed, setAudioIntroDismissed] = useState<boolean>(readAudioIntroDismissed);
+  const dismissAudioIntro = () => {
+    setAudioIntroDismissed(true);
+    try {
+      window.localStorage.setItem(AUDIO_INTRO_KEY, 'true');
+    } catch {
+      /* storage unavailable — ephemeral dismissal only */
+    }
+  };
+
   // Fullscreen state
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
@@ -124,11 +146,17 @@ export function KDSPage() {
     }
   };
 
-  const handleUnlockAudio = async () => {
+  const handleUnlockAudio = async (): Promise<boolean> => {
     const unlocked = await unlockKDSAudio();
     if (unlocked) {
       setAudioUnlocked(true);
     }
+    return unlocked;
+  };
+
+  const handleEnableAudioFromIntro = async () => {
+    const unlocked = await handleUnlockAudio();
+    if (unlocked) dismissAudioIntro();
   };
 
   const toggleMute = () => {
@@ -203,6 +231,15 @@ export function KDSPage() {
           <WifiOff className="w-5 h-5 stroke-[2.5]" />
           <span>⚠️ KITCHEN OFFLINE - CHECK INTERNET & RECONNECTING WEBSOCKET...</span>
         </div>
+      )}
+
+      {/* One-time audio-unlock onboarding (dismissible, persisted) */}
+      {!isMuted && !audioUnlocked && !audioIntroDismissed && (
+        <KDSAudioUnlockModal
+          open
+          onEnable={() => void handleEnableAudioFromIntro()}
+          onDismiss={dismissAudioIntro}
+        />
       )}
 
       {/* Top Operations Toolbar */}

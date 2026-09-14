@@ -109,6 +109,12 @@ export interface SavedSegment {
   isCustom?: boolean;
 }
 
+// Partner blocker #3 / Loop 22 pattern: demo seeds are DEV-only (Runbook §8 —
+// same gate as useOrders.ts:29 ALLOW_DEMO_SEEDS and useUsers.ts:75). Production
+// loads real CRM records from storage or stays empty — never invented names,
+// phones, and emails as live rows.
+const ALLOW_SEED_CUSTOMERS = import.meta.env.DEV;
+
 const SEED_CUSTOMERS: CustomerProfile[] = [
   {
     id: "CUST-1001",
@@ -609,10 +615,10 @@ class CustomerDataStorage {
         try {
           this.customers = JSON.parse(storedCust);
         } catch {
-          this.customers = SEED_CUSTOMERS;
+          this.customers = ALLOW_SEED_CUSTOMERS ? SEED_CUSTOMERS : [];
         }
       } else {
-        this.customers = SEED_CUSTOMERS;
+        this.customers = ALLOW_SEED_CUSTOMERS ? SEED_CUSTOMERS : [];
         this.saveToStorage();
       }
 
@@ -620,15 +626,15 @@ class CustomerDataStorage {
         try {
           this.segments = JSON.parse(storedSeg);
         } catch {
-          this.segments = SEED_SEGMENTS;
+          this.segments = ALLOW_SEED_CUSTOMERS ? SEED_SEGMENTS : [];
         }
       } else {
-        this.segments = SEED_SEGMENTS;
+        this.segments = ALLOW_SEED_CUSTOMERS ? SEED_SEGMENTS : [];
         this.saveToStorage();
       }
     } else {
-      this.customers = SEED_CUSTOMERS;
-      this.segments = SEED_SEGMENTS;
+      this.customers = ALLOW_SEED_CUSTOMERS ? SEED_CUSTOMERS : [];
+      this.segments = ALLOW_SEED_CUSTOMERS ? SEED_SEGMENTS : [];
     }
   }
 

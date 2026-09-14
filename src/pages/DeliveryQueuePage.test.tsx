@@ -58,6 +58,37 @@ describe('Prompt 25: Delivery Queue & Porter Courier Dispatch Suite', () => {
       expect(meta.isInHouse).toBe(true);
       expect(meta.className).toContain('text-emerald-300');
     });
+
+    it('maps rider_cancelled status to rose rebook-needed pill (delivery_porter.md §4)', () => {
+      const mockOrder = {
+        id: 'ord_5',
+        status: 'out_for_delivery',
+        orderType: 'delivery',
+        needsRebook: true,
+        deliveryStatus: 'rider_cancelled',
+        riderCancellationReason: 'Driver unassigned the trip',
+      } as any;
+
+      const meta = getRiderStatusMeta(mockOrder);
+      expect(meta.statusText).toBe('Rider Cancelled — Rebook Needed');
+      expect(meta.className).toContain('animate-pulse');
+      expect(meta.className).toContain('text-rose-300');
+      expect(meta.isPorter).toBe(false);
+      expect(meta.isInHouse).toBe(false);
+    });
+
+    it('maps no_riders_available status to rose rebook-needed pill even without the flag', () => {
+      const mockOrder = {
+        id: 'ord_6',
+        status: 'out_for_delivery',
+        orderType: 'delivery',
+        deliveryStatus: 'no_riders_available',
+      } as any;
+
+      const meta = getRiderStatusMeta(mockOrder);
+      expect(meta.statusText).toBe('Rider Cancelled — Rebook Needed');
+      expect(meta.className).toContain('text-rose-300');
+    });
   });
 
   describe('2. Delivery Queue Unassigned vs In-Transit Filtering', () => {
