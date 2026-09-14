@@ -142,7 +142,7 @@ describe('partnerFunctionsApi gateway (real client, mocked transport)', () => {
 
     globalThis.fetch = (async () =>
       new Response(JSON.stringify({ error: 'Porter account not configured' }), {
-        status: 503,
+        status: 400,
         headers: { 'Content-Type': 'application/json' },
       })) as any;
     await expect(partnerFunctionsApi.bookPorterRider('ord_9')).rejects.toThrow(/not configured/);

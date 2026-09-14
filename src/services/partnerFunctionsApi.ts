@@ -189,6 +189,37 @@ export const partnerFunctionsApi = {
   },
 
   /**
+   * Live Porter delivery quote (server-side quote-as-gate, D1–D4).
+   * POST /porter/quote runs the branch-radius pre-check then the live
+   * Porter quote as the authoritative fare + coverage verdict. A failure
+   * NEVER falls back to a static rate card client-side — the caller must
+   * surface not_serviced vs transient_failure distinctly.
+   */
+  async getPorterQuote(params: {
+    pickupLat?: number;
+    pickupLng?: number;
+    dropLat?: number;
+    dropLng?: number;
+    customerName?: string;
+    customerPhone?: string;
+  }): Promise<{
+    estimatedDistanceKm: number;
+    estimatedFare: number;
+    estimatedPickupMinutes: number;
+    vehicleType: string;
+    quoteId: string;
+    source: string;
+    isEstimate?: boolean;
+    validForSeconds: number;
+    expiresAt: number;
+  }> {
+    return await apiRequest('/porter/quote', params, {
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+      retries: 1,
+    });
+  },
+
+  /**
    * Re-books cancelled Porter rider.
    * Same idempotency semantics as bookPorterRider.
    */

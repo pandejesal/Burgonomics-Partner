@@ -30,6 +30,8 @@ describe('Order status contract (real orderContract)', () => {
   it('normalizes legacy lowercase string statuses', () => {
     expect(toPartnerStatus('out_for_delivery')).toBe('out_for_delivery');
     expect(toPartnerStatus({ code: 'RIDER_CANCELLED' })).toBe('out_for_delivery');
-    expect(toPartnerStatus(undefined)).toBe('pending');
+    // Undefined/malformed statuses are quarantined fail-closed, never 'pending'
+    expect(toPartnerStatus(undefined)).toBe('quarantine');
+    expect(toPartnerStatus(null)).toBe('quarantine');
   });
 });
