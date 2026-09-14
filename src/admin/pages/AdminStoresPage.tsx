@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { Suspense, lazy, useState, useMemo, useEffect } from "react";
 import {
   Store as StoreIcon,
   MapPin,
@@ -35,17 +35,10 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  Tooltip as ChartTooltip,
-  BarChart,
-  Bar,
-} from "recharts";
 import { PageHeader } from "../components/Headers";
+// Below-the-fold analytics charts are code-split (recharts stays out of the
+// initial stores bundle; the shell list/grid/radar renders first).
+const StoreAnalyticsCharts = lazy(() => import("./StoreAnalyticsCharts"));
 import { StatCard } from "../components/Cards";
 import { StatusBadge, HealthBadge } from "../components/Badges";
 import { ConfirmDialog } from "../components/Utilities";
@@ -1996,64 +1989,26 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                     </div>
                   )}
 
-                  {/* ANALYTICS CHARTS DASHBOARD */}
-                  <div className="rounded-[20px] border border-gray-100 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-[#1C1C1E]">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-wider">
-                        Outlet Sales & Traffic Analytics
-                      </h3>
-                      <TrendingUp size={16} className="text-primary" />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4 mb-4 text-xs font-semibold">
-                      <div className="rounded-xl bg-gray-50 p-3 dark:bg-gray-900/40">
-                        <span className="block text-gray-400">AOV (Average Basket):</span>
-                        <span className="font-mono text-sm font-black text-gray-900 dark:text-white">
-                          ₹{activeStore.avgOrderValue}
+                  {/* ANALYTICS CHARTS DASHBOARD (code-split below-the-fold) */}
+                  <Suspense
+                    fallback={
+                      <div
+                        className="rounded-[20px] border border-gray-100 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-[#1C1C1E]"
+                        role="status"
+                        aria-label="Loading outlet analytics"
+                      >
+                        <span className="text-xs font-bold uppercase tracking-widest text-gray-400 animate-pulse">
+                          Loading outlet analytics...
                         </span>
                       </div>
-                      <div className="rounded-xl bg-gray-50 p-3 dark:bg-gray-900/40">
-                        <span className="block text-gray-400">Peak Ordering Hour:</span>
-                        <span className="font-mono text-sm font-black text-gray-900 dark:text-white truncate">
-                          {activeStore.peakHour}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Weekly Sales Chart */}
-                    <div className="h-44 w-full">
-                      <span className="block text-[10px] font-black text-gray-400 uppercase mb-2">
-                        Weekly Revenue Trend (INR)
-                      </span>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart
-                          data={activeStore.weeklyRevenueTrend.map((val, idx) => ({
-                            day: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][idx],
-                            revenue: val,
-                          }))}
-                          margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
-                        >
-                          <defs>
-                            <linearGradient id="revenueGrad" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#0E4825" stopOpacity={0.2} />
-                              <stop offset="95%" stopColor="#0E4825" stopOpacity={0} />
-                            </linearGradient>
-                          </defs>
-                          <XAxis dataKey="day" stroke="#94a3b8" fontSize={9} />
-                          <YAxis stroke="#94a3b8" fontSize={9} />
-                          <ChartTooltip />
-                          <Area
-                            type="monotone"
-                            dataKey="revenue"
-                            stroke="#0E4825"
-                            strokeWidth={2}
-                            fillOpacity={1}
-                            fill="url(#revenueGrad)"
-                          />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
+                    }
+                  >
+                    <StoreAnalyticsCharts
+                      avgOrderValue={activeStore.avgOrderValue}
+                      peakHour={activeStore.peakHour}
+                      weeklyRevenueTrend={activeStore.weeklyRevenueTrend}
+                    />
+                  </Suspense>
 
                   {/* CONFIGURATIONS & SETTINGS TOGGLES */}
                   <div className="rounded-[20px] border border-gray-100 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-[#1C1C1E]">

@@ -1,7 +1,13 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import { SystemOperationsLayout } from "../layouts/SystemOperationsLayout";
 import { SystemDashboardTab } from "./system/SystemDashboardTab";
-import { SystemMetricsTab } from "./system/SystemMetricsTab";
+// Metrics tab pulls in recharts — code-split so diagnostics visits don't
+// tax every admin bundle load.
+const SystemMetricsTab = lazy(() =>
+  import("./system/SystemMetricsTab").then((m) => ({
+    default: m.SystemMetricsTab,
+  }))
+);
 import { SystemQueueTab } from "./system/SystemQueueTab";
 import { SystemRedisTab } from "./system/SystemRedisTab";
 import { SystemDatabaseTab } from "./system/SystemDatabaseTab";
@@ -35,7 +41,19 @@ export const AdminSystemPage: React.FC<AdminSystemPageProps> = ({ activeView }) 
       case "health":
         return <SystemDashboardTab />;
       case "metrics":
-        return <SystemMetricsTab />;
+        return (
+          <Suspense
+            fallback={
+              <div role="status" aria-label="Loading system metrics">
+                <span className="text-xs font-bold uppercase tracking-widest text-gray-400 animate-pulse">
+                  Loading system metrics...
+                </span>
+              </div>
+            }
+          >
+            <SystemMetricsTab />
+          </Suspense>
+        );
       case "queues":
       case "jobs":
         return <SystemQueueTab />;

@@ -1,6 +1,7 @@
 # Logs
 logs
 *.log
+*.out
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -11,6 +12,21 @@ node_modules
 dist
 dist-ssr
 *.local
+
+# Environment & Secrets (OPS-1)
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+
+# Native Firebase & signing — India production
+*.p12
+*.key
+*.cer
+*.mobileprovision
+google-services.json
+GoogleService-Info.plist
 
 # Editor directories and files
 .vscode/*

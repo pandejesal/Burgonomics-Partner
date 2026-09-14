@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { Suspense, lazy, useState, useEffect, useMemo } from "react";
 import { useAdmin } from "../hooks/useAdmin";
 import { RoleChip } from "../components/Badges";
 import { PageHeader } from "../components/Headers";
@@ -9,7 +9,13 @@ import { PetpoojaStatus } from "../dashboard/components/widgets/PetpoojaStatus";
 import { PaymentOverview } from "../dashboard/components/widgets/PaymentOverview";
 import { CustomerInsights } from "../dashboard/components/widgets/CustomerInsights";
 import { MenuInsights } from "../dashboard/components/widgets/MenuInsights";
-import { DashboardCharts } from "../dashboard/components/charts/DashboardCharts";
+// Time-series charts are code-split (recharts stays out of the initial
+// dashboard bundle; KPI cards + live ops render first).
+const DashboardCharts = lazy(() =>
+  import("../dashboard/components/charts/DashboardCharts").then((m) => ({
+    default: m.DashboardCharts,
+  }))
+);
 import { Store, MapPin, RefreshCw, Download, CheckCircle, Info } from "lucide-react";
 
 import { INITIAL_RICH_STORES, RichStore } from "./storesData";
@@ -167,7 +173,7 @@ export const AdminDashboardPlaceholder: React.FC = () => {
               onClick={() => setSelectedRange("today")}
               className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all cursor-pointer ${
                 selectedRange === "today"
-                  ? "bg-white dark:bg-gray-800 text-[#0E4825] dark:text-emerald-400 shadow-sm border border-gray-100 dark:border-gray-700/50"
+                  ? "bg-white dark:bg-gray-800 text-primary dark:text-emerald-400 shadow-sm border border-gray-100 dark:border-gray-700/50"
                   : "text-gray-400 hover:text-gray-900 dark:hover:text-white"
               }`}
             >
@@ -177,7 +183,7 @@ export const AdminDashboardPlaceholder: React.FC = () => {
               onClick={() => setSelectedRange("yesterday")}
               className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all cursor-pointer ${
                 selectedRange === "yesterday"
-                  ? "bg-white dark:bg-gray-800 text-[#0E4825] dark:text-emerald-400 shadow-sm border border-gray-100 dark:border-gray-700/50"
+                  ? "bg-white dark:bg-gray-800 text-primary dark:text-emerald-400 shadow-sm border border-gray-100 dark:border-gray-700/50"
                   : "text-gray-400 hover:text-gray-900 dark:hover:text-white"
               }`}
             >
@@ -187,7 +193,7 @@ export const AdminDashboardPlaceholder: React.FC = () => {
               onClick={() => setSelectedRange("7days")}
               className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all cursor-pointer ${
                 selectedRange === "7days"
-                  ? "bg-white dark:bg-gray-800 text-[#0E4825] dark:text-emerald-400 shadow-sm border border-gray-100 dark:border-gray-700/50"
+                  ? "bg-white dark:bg-gray-800 text-primary dark:text-emerald-400 shadow-sm border border-gray-100 dark:border-gray-700/50"
                   : "text-gray-400 hover:text-gray-900 dark:hover:text-white"
               }`}
             >
@@ -197,7 +203,7 @@ export const AdminDashboardPlaceholder: React.FC = () => {
               onClick={() => setSelectedRange("30days")}
               className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all cursor-pointer ${
                 selectedRange === "30days"
-                  ? "bg-white dark:bg-gray-800 text-[#0E4825] dark:text-emerald-400 shadow-sm border border-gray-100 dark:border-gray-700/50"
+                  ? "bg-white dark:bg-gray-800 text-primary dark:text-emerald-400 shadow-sm border border-gray-100 dark:border-gray-700/50"
                   : "text-gray-400 hover:text-gray-900 dark:hover:text-white"
               }`}
             >
@@ -248,7 +254,7 @@ export const AdminDashboardPlaceholder: React.FC = () => {
 
           <button
             onClick={handleManualTrigger}
-            className="p-2.5 rounded-xl border border-gray-100 dark:border-gray-800 hover:border-[#0E4825] dark:hover:border-emerald-800 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-all cursor-pointer bg-gray-50/50 dark:bg-gray-900/30"
+            className="p-2.5 rounded-xl border border-gray-100 dark:border-gray-800 hover:border-primary dark:hover:border-emerald-800 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-all cursor-pointer bg-gray-50/50 dark:bg-gray-900/30"
             title="Force refresh all modules"
           >
             <RefreshCw size={13} />
@@ -256,7 +262,7 @@ export const AdminDashboardPlaceholder: React.FC = () => {
 
           <button
             onClick={handleExportData}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#0E4825] hover:bg-[#0E4825]/90 text-white font-bold text-xs shadow-sm cursor-pointer transition-all"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-primary hover:bg-primary/90 text-white font-bold text-xs shadow-sm cursor-pointer transition-all"
           >
             <Download size={13} />
             <span>Export CSV</span>
@@ -273,12 +279,26 @@ export const AdminDashboardPlaceholder: React.FC = () => {
 
       {/* Main split: Analytics & Live pipeline grids */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Time-series charts curves */}
+        {/* Time-series charts curves (code-split below-the-fold) */}
         <div className="lg:col-span-2">
-          <DashboardCharts
-            dateRange={dateRange}
-            storeId={selectedStore !== "all" ? selectedStore : undefined}
-          />
+          <Suspense
+            fallback={
+              <div
+                className="h-64 rounded-[20px] border border-gray-100 bg-white dark:border-gray-800 dark:bg-[#1C1C1E] flex items-center justify-center"
+                role="status"
+                aria-label="Loading sales charts"
+              >
+                <span className="text-xs font-bold uppercase tracking-widest text-gray-400 animate-pulse">
+                  Loading sales charts...
+                </span>
+              </div>
+            }
+          >
+            <DashboardCharts
+              dateRange={dateRange}
+              storeId={selectedStore !== "all" ? selectedStore : undefined}
+            />
+          </Suspense>
         </div>
 
         {/* Live POS integrations monitoring details */}
@@ -297,13 +317,13 @@ export const AdminDashboardPlaceholder: React.FC = () => {
         </div>
 
         <div className="lg:col-span-1 flex flex-col gap-4">
-          <div className="rounded-[20px] border border-[#0E4825]/15 dark:border-emerald-900/30 bg-emerald-50/40 dark:bg-[#1A1A1A] p-6 space-y-4">
+          <div className="rounded-[20px] border border-primary/15 dark:border-emerald-900/30 bg-emerald-50/40 dark:bg-[#1A1A1A] p-6 space-y-4">
             <div className="flex items-center gap-2.5">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#0E4825] text-white">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-white">
                 <Info size={18} />
               </div>
               <div>
-                <h4 className="text-sm font-black text-[#0E4825] dark:text-emerald-400 font-sans uppercase">
+                <h4 className="text-sm font-black text-primary dark:text-emerald-400 font-sans uppercase">
                   Petpooja POS Architecture
                 </h4>
                 <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
@@ -316,7 +336,7 @@ export const AdminDashboardPlaceholder: React.FC = () => {
               <div className="flex items-start gap-2">
                 <CheckCircle
                   size={14}
-                  className="text-[#0E4825] dark:text-emerald-400 shrink-0 mt-0.5"
+                  className="text-primary dark:text-emerald-400 shrink-0 mt-0.5"
                 />
                 <span>
                   <strong>Petpooja POS:</strong> Handles store billing, kitchen display (KDS),
@@ -326,7 +346,7 @@ export const AdminDashboardPlaceholder: React.FC = () => {
               <div className="flex items-start gap-2">
                 <CheckCircle
                   size={14}
-                  className="text-[#0E4825] dark:text-emerald-400 shrink-0 mt-0.5"
+                  className="text-primary dark:text-emerald-400 shrink-0 mt-0.5"
                 />
                 <span>
                   <strong>Burgonomics Admin:</strong> Manages online customer app orders, store

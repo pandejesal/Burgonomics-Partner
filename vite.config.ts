@@ -7,37 +7,52 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, 'src'),
+      '@': path.resolve(import.meta.dirname, 'src'),
     },
   },
   build: {
-    chunkSizeWarningLimit: 1000,
+    sourcemap: false,
+    // Warn on chunks over 800kB so admin-bundle regressions surface again
+    // (heavy chart pages are React.lazy code-split; initial load stays lean).
+    chunkSizeWarningLimit: 800,
+    rolldownOptions: {
+      output: {
+        advancedChunks: {
+          groups: [
+            {
+              name: 'vendor-firebase',
+              test: /[\\/]node_modules[\\/](firebase|@firebase)[\\/]/,
+            },
+            {
+              name: 'vendor-charts',
+              test: /[\\/]node_modules[\\/](recharts|d3-[a-z-]+|victory|react-smooth|internmap|decimal\.js|fast-equals)[\\/]/,
+            },
+            {
+              name: 'vendor-motion',
+              test: /[\\/]node_modules[\\/]motion[\\/]/,
+            },
+            {
+              name: 'vendor-react',
+              test: /[\\/]node_modules[\\/](react|react-dom|react-router|scheduler)[\\/]/,
+            },
+            {
+              name: 'vendor-icons',
+              test: /[\\/]node_modules[\\/]lucide-react[\\/]/,
+            },
+          ],
+        },
+      },
+    },
     rollupOptions: {
       output: {
+        // NOTE: vendor splitting lives in rolldownOptions.advancedChunks below
+        // (the Rolldown-native API — manualChunks string returns were silently
+        // ignored for node_modules, duplicating recharts across chunks).
+        // This function only owns admin page grouping.
         manualChunks(id) {
           const normalizedId = id.replace(/\\/g, '/')
           if (normalizedId.includes('node_modules')) {
-            if (normalizedId.includes('firebase')) {
-              return 'firebase'
-            }
-            if (
-              normalizedId.includes('recharts') ||
-              normalizedId.includes('d3') ||
-              normalizedId.includes('victory') ||
-              normalizedId.includes('react-smooth') ||
-              normalizedId.includes('internmap') ||
-              normalizedId.includes('decimal.js') ||
-              normalizedId.includes('fast-equals')
-            ) {
-              return 'vendor-charts'
-            }
-            if (normalizedId.includes('lucide-react')) {
-              return 'vendor-icons'
-            }
-            if (normalizedId.includes('motion')) {
-              return 'vendor-motion'
-            }
-            return 'vendor'
+            return undefined
           }
           if (normalizedId.includes('/src/admin/pages/petpooja')) {
             return 'admin-petpooja'
@@ -86,6 +101,3 @@ export default defineConfig({
     },
   },
 })
-
-
-
