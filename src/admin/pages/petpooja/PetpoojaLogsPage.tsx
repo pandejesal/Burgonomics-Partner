@@ -88,7 +88,7 @@ export function PetpoojaLogsPage() {
       <div className="bg-white dark:bg-[#1A1A1A] border border-gray-100 dark:border-gray-800 rounded-[20px] p-6 shadow-sm space-y-4">
         <div className="flex items-center justify-between border-b border-gray-50 dark:border-gray-800 pb-3">
           <div className="flex items-center gap-2">
-            <Filter size={14} className="text-[#0E4825] dark:text-emerald-400" />
+            <Filter size={14} className="text-primary dark:text-emerald-400" />
             <span className="text-xs font-black uppercase tracking-wider text-gray-800 dark:text-gray-200 font-sans">
               Filters Explorer
             </span>
@@ -264,7 +264,7 @@ export function PetpoojaLogsPage() {
                       <div className="flex items-center justify-center gap-1.5">
                         <span className="text-emerald-600 font-black">+{log.created}</span>
                         <span className="text-gray-300">/</span>
-                        <span className="text-[#FF6600] font-black">~{log.updated}</span>
+                        <span className="text-accent dark:text-accent-light font-black">~{log.updated}</span>
                         <span className="text-gray-300">/</span>
                         <span className="text-red-500 font-black">-{log.deleted}</span>
                       </div>

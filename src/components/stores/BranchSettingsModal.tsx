@@ -78,11 +78,11 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-      <div className="bg-[#132A17] border border-[#234B2A] rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl text-white">
+      <div className="bg-surface border border-border rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl text-white">
         {/* Header */}
-        <div className="p-6 border-b border-[#234B2A] flex items-center justify-between sticky top-0 bg-[#132A17] z-10">
+        <div className="p-6 border-b border-border flex items-center justify-between sticky top-0 bg-surface z-10">
           <div className="flex items-center space-x-3">
-            <div className="p-2.5 rounded-xl bg-[#1E3A24] text-[#D95D0F]">
+            <div className="p-2.5 rounded-xl bg-surface-hover text-accent-light">
               <Settings className="w-5 h-5" />
             </div>
             <div>
@@ -94,7 +94,7 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-zinc-400 hover:text-white rounded-lg hover:bg-[#1E3A24] transition-colors"
+            className="p-2 text-zinc-400 hover:text-white rounded-lg hover:bg-surface-hover transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -103,7 +103,7 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
           {/* Order Acceptance Status Switcher */}
-          <div className="bg-[#0D0F0D] p-4 rounded-xl border border-[#234B2A] space-y-2">
+          <div className="bg-bg p-4 rounded-xl border border-border space-y-2">
             <label className="block text-xs font-bold text-zinc-300">
               Live Order Acceptance Status (Delivery App)
             </label>
@@ -114,7 +114,7 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
                 className={`py-2 px-3 rounded-lg text-xs font-bold transition-colors flex items-center justify-center space-x-1.5 ${
                   status === 'open'
                     ? 'bg-emerald-600 text-white shadow-sm'
-                    : 'bg-[#132A17] text-zinc-400 hover:text-white border border-[#234B2A]'
+                    : 'bg-surface text-zinc-400 hover:text-white border border-border'
                 }`}
               >
                 <span className="h-2 w-2 rounded-full bg-emerald-300"></span>
@@ -127,7 +127,7 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
                 className={`py-2 px-3 rounded-lg text-xs font-bold transition-colors flex items-center justify-center space-x-1.5 ${
                   status === 'busy'
                     ? 'bg-amber-600 text-white shadow-sm'
-                    : 'bg-[#132A17] text-zinc-400 hover:text-white border border-[#234B2A]'
+                    : 'bg-surface text-zinc-400 hover:text-white border border-border'
                 }`}
               >
                 <span className="h-2 w-2 rounded-full bg-amber-300"></span>
@@ -140,7 +140,7 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
                 className={`py-2 px-3 rounded-lg text-xs font-bold transition-colors flex items-center justify-center space-x-1.5 ${
                   status === 'closed'
                     ? 'bg-rose-600 text-white shadow-sm'
-                    : 'bg-[#132A17] text-zinc-400 hover:text-white border border-[#234B2A]'
+                    : 'bg-surface text-zinc-400 hover:text-white border border-border'
                 }`}
               >
                 <span className="h-2 w-2 rounded-full bg-rose-300"></span>
@@ -152,7 +152,7 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
           {/* Announcement Banner */}
           <div>
             <label className="block text-xs font-semibold text-zinc-300 mb-1.5 flex items-center space-x-1.5">
-              <Megaphone className="w-3.5 h-3.5 text-[#D95D0F]" />
+              <Megaphone className="w-3.5 h-3.5 text-accent-light" />
               <span>Customer Announcement Banner (Delivery App Header)</span>
             </label>
             <input
@@ -160,7 +160,7 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
               placeholder="e.g. 🔥 Weekend Special: Flat 20% off on all Gourmet Burgers!"
               value={announcement}
               onChange={(e) => setAnnouncement(e.target.value)}
-              className="w-full px-3.5 py-2.5 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-[#D95D0F]"
+              className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-accent"
             />
           </div>
 
@@ -177,7 +177,7 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
                 max="90"
                 value={prepTime}
                 onChange={(e) => setPrepTime(parseInt(e.target.value) || 20)}
-                className="w-full px-3.5 py-2.5 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white focus:outline-none focus:border-[#D95D0F]"
+                className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white focus:outline-none focus:border-accent"
               />
             </div>
 
@@ -192,7 +192,7 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
                 max="25"
                 value={deliveryRadius}
                 onChange={(e) => setDeliveryRadius(parseInt(e.target.value) || 7)}
-                className="w-full px-3.5 py-2.5 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white focus:outline-none focus:border-[#D95D0F]"
+                className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white focus:outline-none focus:border-accent"
               />
             </div>
           </div>
@@ -208,7 +208,7 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
                 value={openTime}
                 onChange={(e) => setOpenTime(e.target.value)}
                 placeholder="e.g. 11:00 AM"
-                className="w-full px-3.5 py-2.5 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white focus:outline-none focus:border-[#D95D0F]"
+                className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white focus:outline-none focus:border-accent"
               />
             </div>
 
@@ -221,7 +221,7 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
                 value={closeTime}
                 onChange={(e) => setCloseTime(e.target.value)}
                 placeholder="e.g. 11:30 PM"
-                className="w-full px-3.5 py-2.5 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white focus:outline-none focus:border-[#D95D0F]"
+                className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white focus:outline-none focus:border-accent"
               />
             </div>
           </div>
@@ -237,7 +237,7 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
                 required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full px-3.5 py-2.5 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white focus:outline-none focus:border-[#D95D0F]"
+                className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white focus:outline-none focus:border-accent"
               />
             </div>
 
@@ -248,7 +248,7 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
                 required
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
-                className="w-full px-3.5 py-2.5 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white focus:outline-none focus:border-[#D95D0F]"
+                className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white focus:outline-none focus:border-accent"
               />
             </div>
           </div>
@@ -262,7 +262,7 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
               required
               value={address}
               onChange={(e) => setAddress(e.target.value)}
-              className="w-full px-3.5 py-2.5 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white focus:outline-none focus:border-[#D95D0F]"
+              className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white focus:outline-none focus:border-accent"
             />
           </div>
 
@@ -275,7 +275,7 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
                 type="text"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                className="w-full px-3.5 py-2.5 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white focus:outline-none focus:border-[#D95D0F]"
+                className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white focus:outline-none focus:border-accent"
               />
             </div>
 
@@ -287,24 +287,24 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
                 type="text"
                 value={petpoojaStoreId}
                 onChange={(e) => setPetpoojaStoreId(e.target.value)}
-                className="w-full px-3.5 py-2.5 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white focus:outline-none focus:border-[#D95D0F]"
+                className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white focus:outline-none focus:border-accent"
               />
             </div>
           </div>
 
           {/* Footer */}
-          <div className="pt-4 flex items-center justify-end space-x-3 border-t border-[#234B2A]">
+          <div className="pt-4 flex items-center justify-end space-x-3 border-t border-border">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-semibold rounded-xl bg-[#1E3A24] text-zinc-300 hover:text-white"
+              className="px-4 py-2 text-xs font-semibold rounded-xl bg-surface-hover text-zinc-300 hover:text-white"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="px-5 py-2 text-xs font-semibold rounded-xl bg-[#D95D0F] hover:bg-[#b84d0b] text-white disabled:opacity-50 flex items-center space-x-1.5 shadow-md"
+              className="px-5 py-2 text-xs font-semibold rounded-xl bg-accent hover:bg-accent-hover text-white disabled:opacity-50 flex items-center space-x-1.5 shadow-md"
             >
               <CheckCircle2 className="w-4 h-4" />
               <span>{loading ? 'Broadcasting...' : 'Save & Sync to Delivery App'}</span>

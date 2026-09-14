@@ -33,12 +33,12 @@ export function RecentOrders({ orders }: RecentOrdersProps) {
   };
 
   return (
-    <div className="bg-[#132A17] rounded-2xl border border-[#234B2A] shadow-md overflow-hidden text-white">
-      <div className="p-4 lg:p-5 border-b border-[#234B2A] flex items-center justify-between">
+    <div className="bg-surface rounded-2xl border border-border shadow-md overflow-hidden text-white">
+      <div className="p-4 lg:p-5 border-b border-border flex items-center justify-between">
         <h3 className="font-bold text-white text-sm">Recent Active Orders</h3>
         <Link
           to="/orders"
-          className="text-xs text-[#D95D0F] hover:text-[#f27529] font-semibold transition-colors"
+          className="text-xs text-accent-light hover:text-[#f27529] font-semibold transition-colors"
         >
           View All Live Orders →
         </Link>
@@ -57,10 +57,10 @@ export function RecentOrders({ orders }: RecentOrdersProps) {
               <Link
                 key={order.id}
                 to={`/orders/${order.id}`}
-                className="flex items-center justify-between p-4 hover:bg-[#1E3A24]/40 transition-colors"
+                className="flex items-center justify-between p-4 hover:bg-surface-hover/40 transition-colors"
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-[#0D0F0D] border border-[#234B2A] flex items-center justify-center font-bold text-xs text-[#D95D0F]">
+                  <div className="w-10 h-10 rounded-xl bg-bg border border-border flex items-center justify-center font-bold text-xs text-accent-light">
                     {order.customerName?.charAt(0) || 'B'}
                   </div>
                   <div>

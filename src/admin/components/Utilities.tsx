@@ -44,11 +44,11 @@ export const AdminAvatar: React.FC<AdminAvatarProps> = ({
           src={avatarUrl}
           alt={fullName}
           referrerPolicy="no-referrer"
-          className={`${sizeClass} rounded-2xl object-cover border border-[#0E4825]/10 shadow-sm`}
+          className={`${sizeClass} rounded-2xl object-cover border border-primary/10 shadow-sm`}
         />
       ) : (
         <div
-          className={`${sizeClass} flex items-center justify-center rounded-2xl bg-[#0E4825] font-black tracking-tight text-white shadow-md`}
+          className={`${sizeClass} flex items-center justify-center rounded-2xl bg-primary font-black tracking-tight text-white shadow-md`}
         >
           {initials}
         </div>
@@ -116,7 +116,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           >
             <div className="flex justify-between items-start mb-4">
               <div
-                className={`flex h-10 w-10 items-center justify-center rounded-xl ${isDestructive ? "bg-red-50 text-[#DC2626]" : "bg-[#FF6600]/10 text-[#FF6600]"}`}
+                className={`flex h-10 w-10 items-center justify-center rounded-xl ${isDestructive ? "bg-red-50 text-[#DC2626]" : "bg-accent/10 text-accent dark:text-accent-light"}`}
               >
                 <AlertTriangle size={20} />
               </div>
@@ -150,7 +150,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
                 className={`px-5 py-2.5 rounded-xl text-xs font-bold text-white transition-colors shadow-sm ${
                   isDestructive
                     ? "bg-[#DC2626] hover:bg-[#B91C1C]"
-                    : "bg-[#0E4825] hover:bg-[#0B3A1D]"
+                    : "bg-primary hover:bg-[#0B3A1D]"
                 }`}
               >
                 {confirmLabel}

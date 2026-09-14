@@ -43,11 +43,11 @@ export const AddFutureStoreModal: React.FC<AddFutureStoreModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-      <div className="bg-[#132A17] border border-[#234B2A] rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl text-white">
+      <div className="bg-surface border border-border rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl text-white">
         {/* Header */}
-        <div className="p-6 border-b border-[#234B2A] flex items-center justify-between">
+        <div className="p-6 border-b border-border flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="p-2.5 rounded-xl bg-[#1E3A24] text-[#D95D0F]">
+            <div className="p-2.5 rounded-xl bg-surface-hover text-accent-light">
               <Store className="w-5 h-5" />
             </div>
             <div>
@@ -59,7 +59,7 @@ export const AddFutureStoreModal: React.FC<AddFutureStoreModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-2 text-zinc-400 hover:text-white rounded-lg hover:bg-[#1E3A24] transition-colors"
+            className="p-2 text-zinc-400 hover:text-white rounded-lg hover:bg-surface-hover transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -69,7 +69,7 @@ export const AddFutureStoreModal: React.FC<AddFutureStoreModalProps> = ({
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div>
             <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
-              Store Name <span className="text-[#D95D0F]">*</span>
+              Store Name <span className="text-accent-light">*</span>
             </label>
             <input
               type="text"
@@ -77,7 +77,7 @@ export const AddFutureStoreModal: React.FC<AddFutureStoreModalProps> = ({
               placeholder="e.g. Burgonomics Mumbai Bandra West"
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              className="w-full px-3.5 py-2.5 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-[#D95D0F]"
+              className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-accent"
             />
           </div>
 
@@ -87,7 +87,7 @@ export const AddFutureStoreModal: React.FC<AddFutureStoreModalProps> = ({
               <select
                 value={formData.city}
                 onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-                className="w-full px-3.5 py-2.5 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white focus:outline-none focus:border-[#D95D0F]"
+                className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white focus:outline-none focus:border-accent"
               >
                 <option value="Surat">Surat</option>
                 <option value="Ahmedabad">Ahmedabad</option>
@@ -109,14 +109,14 @@ export const AddFutureStoreModal: React.FC<AddFutureStoreModalProps> = ({
                 placeholder="e.g. November 2026 or Q4 2026"
                 value={formData.expectedLaunchDate}
                 onChange={(e) => setFormData({ ...formData, expectedLaunchDate: e.target.value })}
-                className="w-full px-3.5 py-2.5 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-[#D95D0F]"
+                className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-accent"
               />
             </div>
           </div>
 
           <div>
             <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
-              Full Outlet Address <span className="text-[#D95D0F]">*</span>
+              Full Outlet Address <span className="text-accent-light">*</span>
             </label>
             <textarea
               required
@@ -124,7 +124,7 @@ export const AddFutureStoreModal: React.FC<AddFutureStoreModalProps> = ({
               placeholder="e.g. Ground Floor, Hill Road, Bandra West, Mumbai 400050"
               value={formData.address}
               onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-              className="w-full px-3.5 py-2.5 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-[#D95D0F]"
+              className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-accent"
             />
           </div>
 
@@ -136,7 +136,7 @@ export const AddFutureStoreModal: React.FC<AddFutureStoreModalProps> = ({
                 placeholder="+91 98765 00000"
                 value={formData.phone}
                 onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                className="w-full px-3.5 py-2.5 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-[#D95D0F]"
+                className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-accent"
               />
             </div>
 
@@ -149,7 +149,7 @@ export const AddFutureStoreModal: React.FC<AddFutureStoreModalProps> = ({
                 placeholder="e.g. PP_MUM_01 (optional)"
                 value={formData.petpoojaStoreId}
                 onChange={(e) => setFormData({ ...formData, petpoojaStoreId: e.target.value })}
-                className="w-full px-3.5 py-2.5 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-[#D95D0F]"
+                className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-accent"
               />
             </div>
           </div>
@@ -163,7 +163,7 @@ export const AddFutureStoreModal: React.FC<AddFutureStoreModalProps> = ({
               placeholder="https://..."
               value={formData.bannerImage}
               onChange={(e) => setFormData({ ...formData, bannerImage: e.target.value })}
-              className="w-full px-3.5 py-2.5 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-[#D95D0F]"
+              className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-accent"
             />
           </div>
 
@@ -175,7 +175,7 @@ export const AddFutureStoreModal: React.FC<AddFutureStoreModalProps> = ({
                 step="0.0001"
                 value={formData.lat}
                 onChange={(e) => setFormData({ ...formData, lat: parseFloat(e.target.value) || 0 })}
-                className="w-full px-3.5 py-2.5 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white focus:outline-none focus:border-[#D95D0F]"
+                className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white focus:outline-none focus:border-accent"
               />
             </div>
             <div>
@@ -185,12 +185,12 @@ export const AddFutureStoreModal: React.FC<AddFutureStoreModalProps> = ({
                 step="0.0001"
                 value={formData.lng}
                 onChange={(e) => setFormData({ ...formData, lng: parseFloat(e.target.value) || 0 })}
-                className="w-full px-3.5 py-2.5 text-xs bg-[#0D0F0D] border border-[#234B2A] rounded-xl text-white focus:outline-none focus:border-[#D95D0F]"
+                className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white focus:outline-none focus:border-accent"
               />
             </div>
           </div>
 
-          <div className="pt-2 flex items-center justify-between p-3 bg-[#0D0F0D] border border-[#234B2A] rounded-xl">
+          <div className="pt-2 flex items-center justify-between p-3 bg-bg border border-border rounded-xl">
             <div>
               <p className="text-xs font-semibold text-white">Enable Customer Subscriptions</p>
               <p className="text-[11px] text-zinc-400">
@@ -208,18 +208,18 @@ export const AddFutureStoreModal: React.FC<AddFutureStoreModalProps> = ({
           </div>
 
           {/* Actions */}
-          <div className="pt-4 flex items-center justify-end space-x-3 border-t border-[#234B2A]">
+          <div className="pt-4 flex items-center justify-end space-x-3 border-t border-border">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-semibold rounded-xl bg-[#1E3A24] text-zinc-300 hover:text-white transition-colors"
+              className="px-4 py-2 text-xs font-semibold rounded-xl bg-surface-hover text-zinc-300 hover:text-white transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="px-5 py-2 text-xs font-semibold rounded-xl bg-[#D95D0F] hover:bg-[#b84d0b] text-white transition-colors disabled:opacity-50 flex items-center space-x-1.5 shadow-md"
+              className="px-5 py-2 text-xs font-semibold rounded-xl bg-accent hover:bg-accent-hover text-white transition-colors disabled:opacity-50 flex items-center space-x-1.5 shadow-md"
             >
               <CheckCircle2 className="w-4 h-4" />
               <span>{loading ? 'Creating Store...' : 'Publish Future Store'}</span>

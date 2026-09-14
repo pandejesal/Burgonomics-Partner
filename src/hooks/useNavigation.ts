@@ -3,6 +3,7 @@ import type { UserRole } from '@/types';
 import {
   LayoutDashboard,
   ClipboardList,
+  ChefHat,
   Bike,
   Users,
   MessageSquare,
@@ -34,6 +35,12 @@ const navItems: NavItem[] = [
     label: 'Live Orders',
     icon: ClipboardList,
     path: '/orders',
+    roles: ['brand_owner', 'developer', 'support', 'regional_manager', 'branch_owner', 'branch_staff'],
+  },
+  {
+    label: 'Kitchen KDS',
+    icon: ChefHat,
+    path: '/kds',
     roles: ['brand_owner', 'developer', 'support', 'regional_manager', 'branch_owner', 'branch_staff'],
   },
   {
@@ -95,9 +102,7 @@ const navItems: NavItem[] = [
 export function useNavigation() {
   const { user } = useAuthStore();
 
-  const filteredItems = navItems.filter(
-    (item) => !user || item.roles.includes(user.role)
-  );
+  const filteredItems = user ? navItems.filter((item) => item.roles.includes(user.role)) : [];
 
   return { navItems: filteredItems };
 }

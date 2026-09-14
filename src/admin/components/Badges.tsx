@@ -95,8 +95,8 @@ export const PermissionChip: React.FC<{ permission: string }> = ({ permission })
 export const RoleChip: React.FC<{ role: string }> = ({ role }) => {
   const isDev = role === "Developer";
   const colorClass = isDev
-    ? "bg-amber-50 text-[#FF6600] border-amber-200/50 dark:bg-amber-950/20 dark:text-[#FF6600]"
-    : "bg-[#0E4825]/5 text-[#0E4825] border-[#0E4825]/10 dark:bg-[#0E4825]/10 dark:text-emerald-400";
+    ? "bg-amber-50 text-accent dark:text-accent-light border-amber-200/50 dark:bg-amber-950/20 dark:text-accent-light"
+    : "bg-primary/5 text-primary border-primary/10 dark:bg-primary/10 dark:text-emerald-400";
 
   return (
     <span

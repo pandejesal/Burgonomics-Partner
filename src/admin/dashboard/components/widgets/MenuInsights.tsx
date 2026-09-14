@@ -56,7 +56,7 @@ export const MenuInsights: React.FC<{ dateRange: { from: string; to: string } }>
               Ranked items based on aggregate transaction checkout volumes
             </p>
           </div>
-          <Layers size={16} className="text-[#0E4825] dark:text-emerald-400 shrink-0" />
+          <Layers size={16} className="text-primary dark:text-emerald-400 shrink-0" />
         </div>
 
         {/* Products lists */}
@@ -66,9 +66,9 @@ export const MenuInsights: React.FC<{ dateRange: { from: string; to: string } }>
               const pct = Math.round((p.units / maxUnits) * 100);
               const rankColor =
                 idx === 0
-                  ? "bg-[#FF6600]/10 text-[#FF6600]"
+                  ? "bg-accent/10 text-accent dark:text-accent-light"
                   : idx === 1
-                    ? "bg-[#0E4825]/10 text-[#0E4825]"
+                    ? "bg-primary/10 text-primary"
                     : "bg-gray-100 text-gray-500";
 
               return (
@@ -101,7 +101,7 @@ export const MenuInsights: React.FC<{ dateRange: { from: string; to: string } }>
                   <div className="w-full h-1 bg-gray-50 dark:bg-gray-900 rounded-full overflow-hidden">
                     <div
                       className={`h-full rounded-full transition-all duration-500 ${
-                        idx === 0 ? "bg-[#FF6600]" : "bg-[#0E4825]"
+                        idx === 0 ? "bg-accent" : "bg-primary"
                       }`}
                       style={{ width: `${pct}%` }}
                     />

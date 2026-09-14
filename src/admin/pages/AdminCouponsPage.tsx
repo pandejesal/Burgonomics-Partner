@@ -70,7 +70,7 @@ export const AdminCouponsPage: React.FC = () => {
       header: "Promo Code",
       accessorKey: "code",
       cell: (row) => (
-        <code className="text-sm font-black font-mono bg-orange-50 dark:bg-orange-950/20 px-2 py-1 rounded-lg border border-orange-200/50 text-[#FF6600]">
+        <code className="text-sm font-black font-mono bg-orange-50 dark:bg-orange-950/20 px-2 py-1 rounded-lg border border-orange-200/50 text-accent dark:text-accent-light">
           {row.code}
         </code>
       ),
@@ -113,11 +113,11 @@ export const AdminCouponsPage: React.FC = () => {
       cell: (row) => (
         <button
           onClick={() => setSelectedCoupon(row)}
-          className="p-1.5 hover:text-[#FF6600]"
+          className="p-1.5 hover:text-accent dark:hover:text-accent-light"
           title={row.status === "Active" ? "Deactivate Coupon" : "Activate Coupon"}
         >
           {row.status === "Active" ? (
-            <ToggleRight size={28} className="text-[#0E4825]" />
+            <ToggleRight size={28} className="text-primary" />
           ) : (
             <ToggleLeft size={28} className="text-gray-300" />
           )}

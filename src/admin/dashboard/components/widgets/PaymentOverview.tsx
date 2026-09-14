@@ -97,7 +97,7 @@ export const PaymentOverview: React.FC<{ dateRange: { from: string; to: string }
           </div>
           <button
             onClick={handleRefresh}
-            className="p-2 rounded-xl border border-gray-100 dark:border-gray-800 hover:border-[#0E4825] dark:hover:border-emerald-800 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-all cursor-pointer"
+            className="p-2 rounded-xl border border-gray-100 dark:border-gray-800 hover:border-primary dark:hover:border-emerald-800 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-all cursor-pointer"
           >
             <RefreshCw size={13} />
           </button>
@@ -125,7 +125,7 @@ export const PaymentOverview: React.FC<{ dateRange: { from: string; to: string }
             <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider">
               Reconciled Cash
             </span>
-            <span className="block text-base font-black font-mono text-[#0E4825] dark:text-emerald-400 mt-1">
+            <span className="block text-base font-black font-mono text-primary dark:text-emerald-400 mt-1">
               ₹
               {(
                 ((reconcile?.totalPaise ?? 0) - (reconcile?.refundedPaise ?? 0)) /
@@ -138,7 +138,7 @@ export const PaymentOverview: React.FC<{ dateRange: { from: string; to: string }
             <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider">
               Refunded Ledger
             </span>
-            <span className="block text-base font-black font-mono text-[#FF6600] mt-1">
+            <span className="block text-base font-black font-mono text-accent dark:text-accent-light mt-1">
               ₹
               {((reconcile?.refundedPaise ?? 0) / 100).toLocaleString(undefined, {
                 minimumFractionDigits: 2,

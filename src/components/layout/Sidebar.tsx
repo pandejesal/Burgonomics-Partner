@@ -15,7 +15,7 @@ export function Sidebar() {
   return (
     <aside
       className={clsx(
-        'fixed top-0 left-0 z-50 h-full w-64 bg-[#0D0F0D] border-r border-[#1E3A24] transition-transform duration-300 flex flex-col justify-between',
+        'fixed top-0 left-0 z-50 h-full w-64 bg-bg border-r border-[#1E3A24] transition-transform duration-300 flex flex-col justify-between',
         sidebarOpen ? 'translate-x-0' : '-translate-x-full',
         'lg:translate-x-0'
       )}
@@ -28,7 +28,7 @@ export function Sidebar() {
             onClick={() => setSidebarOpen(false)}
             className="flex items-center space-x-2.5"
           >
-            <div className="w-8 h-8 rounded-xl bg-[#D95D0F] flex items-center justify-center font-black text-white text-base shadow-sm">
+            <div className="w-8 h-8 rounded-xl bg-accent flex items-center justify-center font-black text-white text-base shadow-sm">
               B
             </div>
             <div>
@@ -43,7 +43,7 @@ export function Sidebar() {
         {/* User Card */}
         <div className="p-4 border-b border-[#1E3A24] bg-[#112415]">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-[#1E3A24] text-[#D95D0F] border border-[#234B2A] flex items-center justify-center font-bold text-sm">
+            <div className="w-9 h-9 rounded-xl bg-surface-hover text-accent-light border border-border flex items-center justify-center font-bold text-sm">
               {user?.name?.charAt(0) || 'P'}
             </div>
             <div className="flex-1 min-w-0">
@@ -70,8 +70,8 @@ export function Sidebar() {
                 className={clsx(
                   'flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-colors',
                   isActive
-                    ? 'bg-[#D95D0F] text-white shadow-sm'
-                    : 'text-zinc-400 hover:bg-[#132A17] hover:text-white'
+                    ? 'bg-accent text-white shadow-sm'
+                    : 'text-zinc-400 hover:bg-surface hover:text-white'
                 )}
               >
                 <div className="flex items-center gap-3">

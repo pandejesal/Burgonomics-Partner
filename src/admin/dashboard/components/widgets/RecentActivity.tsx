@@ -69,7 +69,7 @@ export const RecentActivity: React.FC = () => {
     if (act.includes("sync") || res.includes("catalog") || res.includes("sync")) {
       return {
         icon: RefreshCw,
-        bg: "bg-[#0E4825]/5 text-[#0E4825] dark:bg-[#0E4825]/10 dark:text-emerald-400",
+        bg: "bg-primary/5 text-primary dark:bg-primary/10 dark:text-emerald-400",
       };
     }
     if (act.includes("payment") || act.includes("charge") || act.includes("reconcile")) {
@@ -117,7 +117,7 @@ export const RecentActivity: React.FC = () => {
               Immutable operational audit trail for compliance and safety monitors
             </p>
           </div>
-          <Activity size={16} className="text-[#0E4825] dark:text-emerald-400 shrink-0" />
+          <Activity size={16} className="text-primary dark:text-emerald-400 shrink-0" />
         </div>
 
         {/* Timeline */}
@@ -142,7 +142,7 @@ export const RecentActivity: React.FC = () => {
                   >
                     <div className="flex items-start justify-between gap-4">
                       <div className="space-y-0.5">
-                        <span className="block font-bold text-xs text-gray-900 dark:text-white group-hover/item:text-[#0E4825] dark:group-hover/item:text-emerald-400 transition-colors">
+                        <span className="block font-bold text-xs text-gray-900 dark:text-white group-hover/item:text-primary dark:group-hover/item:text-emerald-400 transition-colors">
                           {log.action.replace(/\./g, " ").toUpperCase()}
                         </span>
                         <div className="flex items-center gap-1.5 text-[10px] font-semibold text-gray-400">

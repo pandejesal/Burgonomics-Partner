@@ -1,48 +1,146 @@
+import React, { useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { useNotifications } from '@/hooks/useNotifications';
 import { Spinner } from '@/components/ui/Spinner';
-import { Bell, Check, CheckCheck, ShoppingBag, Ticket, Info } from 'lucide-react';
+import {
+  Bell,
+  CheckCheck,
+  ShoppingBag,
+  Ticket,
+  Info,
+  Settings,
+  Trash2,
+  CheckCircle2,
+} from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
+type NotificationTab = 'all' | 'order' | 'ticket' | 'system';
+
 export function NotificationsPage() {
-  const { notifications, isLoading, markAsRead, markAllAsRead } = useNotifications();
+  const { notifications = [], isLoading, markAsRead, markAllAsRead } = useNotifications();
+  const [activeTab, setActiveTab] = useState<NotificationTab>('all');
+
+  const filteredNotifications = useMemo(() => {
+    if (activeTab === 'all') return notifications;
+    return notifications.filter((n) => {
+      if (activeTab === 'system') return n.type !== 'order' && n.type !== 'ticket';
+      return n.type === activeTab;
+    });
+  }, [notifications, activeTab]);
+
+  const unreadCount = notifications.filter((n) => !n.read).length;
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto">
+    <div className="space-y-6 max-w-4xl mx-auto pb-16 select-none">
+      {/* Header */}
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-text-primary">Notifications</h1>
-          <p className="text-sm text-text-secondary">
-            System alerts, kitchen dispatch updates, and customer ticket events.
+          <h1 className="text-2xl font-black text-white tracking-wide flex items-center gap-2">
+            <span>Notifications & Operational Alerts</span>
+            {unreadCount > 0 && (
+              <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#FF6600] text-white font-bold">
+                {unreadCount} New
+              </span>
+            )}
+          </h1>
+          <p className="text-xs text-neutral-400">
+            Real-time incoming orders, ticket auto-escalations, and kitchen dispatch logs
           </p>
         </div>
 
-        {notifications?.some((n) => !n.read) && (
-          <button
-            onClick={() => markAllAsRead.mutate()}
-            disabled={markAllAsRead.isPending}
-            className="flex items-center gap-1.5 px-3.5 py-2 text-primary hover:bg-primary/5 rounded-xl font-semibold text-xs transition-colors cursor-pointer border border-primary/20"
+        <div className="flex items-center gap-2">
+          {unreadCount > 0 && (
+            <button
+              type="button"
+              onClick={() => markAllAsRead && markAllAsRead.mutate()}
+              disabled={markAllAsRead?.isPending}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-[#0E4825] hover:bg-[#135d30] text-emerald-300 rounded-xl font-bold text-xs transition-colors cursor-pointer border border-emerald-500/40"
+            >
+              <CheckCheck className="w-4 h-4" />
+              <span>Mark all as read</span>
+            </button>
+          )}
+
+          <Link
+            to="/settings"
+            className="p-2 rounded-xl bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white transition-colors"
+            title="Notification Settings"
           >
-            <CheckCheck className="w-4 h-4" />
-            <span>Mark all as read</span>
-          </button>
-        )}
+            <Settings className="w-4 h-4" />
+          </Link>
+        </div>
       </div>
 
+      {/* Filter Tabs */}
+      <div className="flex items-center gap-1 p-1 rounded-2xl bg-neutral-900 border border-neutral-800 overflow-x-auto">
+        <button
+          type="button"
+          onClick={() => setActiveTab('all')}
+          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+            activeTab === 'all'
+              ? 'bg-[#0E4825] text-emerald-300 shadow-xs'
+              : 'text-neutral-400 hover:text-white'
+          }`}
+        >
+          All ({notifications.length})
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('order')}
+          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'order'
+              ? 'bg-orange-600 text-white shadow-xs'
+              : 'text-neutral-400 hover:text-white'
+          }`}
+        >
+          <ShoppingBag className="w-3.5 h-3.5" />
+          <span>Orders</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('ticket')}
+          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'ticket'
+              ? 'bg-amber-600 text-white shadow-xs'
+              : 'text-neutral-400 hover:text-white'
+          }`}
+        >
+          <Ticket className="w-3.5 h-3.5" />
+          <span>Tickets</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('system')}
+          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'system'
+              ? 'bg-cyan-700 text-white shadow-xs'
+              : 'text-neutral-400 hover:text-white'
+          }`}
+        >
+          <Info className="w-3.5 h-3.5" />
+          <span>System Alerts</span>
+        </button>
+      </div>
+
+      {/* Notification Stream List */}
       {isLoading ? (
-        <div className="flex justify-center py-16">
+        <div className="flex justify-center py-20">
           <Spinner size="lg" />
         </div>
-      ) : !notifications?.length ? (
-        <div className="text-center py-16 bg-surface rounded-2xl border border-border">
-          <Bell className="w-12 h-12 mx-auto text-text-secondary mb-4 opacity-50" />
-          <h3 className="font-semibold text-text-primary">All caught up</h3>
-          <p className="text-sm text-text-secondary mt-1">
-            No new notifications or alerts at this time.
+      ) : filteredNotifications.length === 0 ? (
+        <div className="text-center py-16 bg-neutral-900/40 rounded-3xl border border-dashed border-neutral-800 p-8">
+          <Bell className="w-12 h-12 mx-auto text-neutral-600 mb-3" />
+          <h3 className="font-bold text-white text-base">All Caught Up!</h3>
+          <p className="text-xs text-neutral-500 mt-1">
+            No active notifications in this category.
           </p>
         </div>
       ) : (
-        <div className="bg-surface rounded-2xl border border-border divide-y divide-border/70 overflow-hidden shadow-xs">
-          {notifications.map((notif) => {
+        <div className="bg-neutral-900 rounded-3xl border border-neutral-800 divide-y divide-neutral-850 overflow-hidden shadow-xl">
+          {filteredNotifications.map((notif) => {
             const timeAgo = (() => {
               try {
                 if (notif.createdAt?.toDate) {
@@ -54,25 +152,28 @@ export function NotificationsPage() {
               }
             })();
 
+            const isOrder = notif.type === 'order';
+            const isTicket = notif.type === 'ticket';
+
             return (
               <div
                 key={notif.id}
                 className={`flex items-start gap-4 p-4 sm:p-5 transition-colors ${
-                  !notif.read ? 'bg-primary/5' : 'hover:bg-bg/40'
+                  !notif.read ? 'bg-emerald-950/20' : 'hover:bg-neutral-850/40'
                 }`}
               >
                 <div
-                  className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                    notif.type === 'order'
-                      ? 'bg-blue-100 text-blue-700'
-                      : notif.type === 'ticket'
-                      ? 'bg-amber-100 text-amber-700'
-                      : 'bg-primary/10 text-primary'
+                  className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 border ${
+                    isOrder
+                      ? 'bg-orange-950/60 border-orange-800/60 text-orange-400'
+                      : isTicket
+                      ? 'bg-amber-950/60 border-amber-800/60 text-amber-400'
+                      : 'bg-emerald-950/60 border-emerald-800/60 text-emerald-400'
                   }`}
                 >
-                  {notif.type === 'order' ? (
+                  {isOrder ? (
                     <ShoppingBag className="w-5 h-5" />
-                  ) : notif.type === 'ticket' ? (
+                  ) : isTicket ? (
                     <Ticket className="w-5 h-5" />
                   ) : (
                     <Info className="w-5 h-5" />
@@ -81,27 +182,28 @@ export function NotificationsPage() {
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <p className="font-bold text-text-primary text-sm">{notif.title}</p>
+                    <p className="font-black text-white text-sm">{notif.title}</p>
                     {!notif.read && (
-                      <span className="w-2 h-2 rounded-full bg-primary" />
+                      <span className="w-2 h-2 rounded-full bg-[#FF6600] animate-pulse" />
                     )}
                   </div>
-                  <p className="text-xs text-text-secondary mt-1 leading-relaxed">
+                  <p className="text-xs text-neutral-300 mt-1 leading-relaxed">
                     {notif.message}
                   </p>
-                  <p className="text-[11px] text-text-secondary/80 font-medium mt-2">
+                  <p className="text-[11px] text-neutral-500 font-medium mt-2">
                     {timeAgo}
                   </p>
                 </div>
 
-                {!notif.read && (
+                {!notif.read && markAsRead && (
                   <button
+                    type="button"
                     onClick={() => markAsRead.mutate(notif.id)}
                     disabled={markAsRead.isPending}
-                    className="p-2 hover:bg-primary/10 rounded-xl text-primary transition-colors cursor-pointer shrink-0"
+                    className="p-2 text-neutral-400 hover:text-emerald-400 rounded-xl hover:bg-neutral-800 transition-colors cursor-pointer"
                     title="Mark as read"
                   >
-                    <Check className="w-4 h-4" />
+                    <CheckCircle2 className="w-4 h-4" />
                   </button>
                 )}
               </div>

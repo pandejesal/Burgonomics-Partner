@@ -124,11 +124,11 @@ export const SystemOperationsLayout: React.FC<SystemOperationsLayoutProps> = ({ 
   const currentTab = systemTabs.find((t) => location.pathname === t.to) || systemTabs[0];
 
   return (
-    <div className="flex flex-col h-full bg-[#0a0f0c] dark text-gray-200 font-sans selection:bg-[#FF6600]/30 rounded-[20px] overflow-hidden border border-gray-800 shadow-2xl relative">
+    <div className="flex flex-col h-full bg-[#0a0f0c] dark text-gray-200 font-sans selection:bg-accent/30 rounded-[20px] overflow-hidden border border-gray-800 shadow-2xl relative">
       {/* Upper Status HUD Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-gray-800 bg-[#0f1712] px-6 py-4 shrink-0 gap-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-tr from-[#0E4825] to-[#1b5e34] text-emerald-400 border border-emerald-800 shadow-[0_0_20px_rgba(14,72,37,0.3)] animate-pulse">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-tr from-primary to-[#1b5e34] text-emerald-400 border border-emerald-800 shadow-[0_0_20px_rgba(14,72,37,0.3)] animate-pulse">
             <Activity size={20} />
           </div>
           <div>
@@ -160,8 +160,8 @@ export const SystemOperationsLayout: React.FC<SystemOperationsLayoutProps> = ({ 
             onClick={() => setIsAiOpen(!isAiOpen)}
             className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
               isAiOpen
-                ? "bg-[#FF6600] text-white shadow-[0_0_15px_rgba(255,102,0,0.4)]"
-                : "bg-[#0E4825]/20 hover:bg-[#0E4825]/40 text-emerald-400 border border-emerald-900/40"
+                ? "bg-accent text-white shadow-[0_0_15px_rgba(255,102,0,0.4)]"
+                : "bg-primary/20 hover:bg-primary/40 text-emerald-400 border border-emerald-900/40"
             }`}
           >
             <Terminal size={14} className={isAiOpen ? "animate-bounce" : ""} />
@@ -187,7 +187,7 @@ export const SystemOperationsLayout: React.FC<SystemOperationsLayoutProps> = ({ 
                   to={tab.to as any}
                   className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all uppercase tracking-wider ${
                     isActive
-                      ? "bg-[#0E4825] text-white border border-emerald-700/50 shadow-[0_4px_12px_rgba(14,72,37,0.3)] font-black"
+                      ? "bg-primary text-white border border-emerald-700/50 shadow-[0_4px_12px_rgba(14,72,37,0.3)] font-black"
                       : "text-gray-400 hover:text-white hover:bg-gray-800/40"
                   }`}
                 >
@@ -217,7 +217,7 @@ export const SystemOperationsLayout: React.FC<SystemOperationsLayoutProps> = ({ 
                   to={tab.to as any}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider shrink-0 transition-all ${
                     isActive
-                      ? "bg-[#0E4825] text-white border border-emerald-800"
+                      ? "bg-primary text-white border border-emerald-800"
                       : "text-gray-400 bg-gray-900/40 hover:text-white"
                   }`}
                 >
@@ -247,7 +247,7 @@ export const SystemOperationsLayout: React.FC<SystemOperationsLayoutProps> = ({ 
                 <span className="block text-xs font-bold text-white uppercase tracking-wider font-mono">
                   MISSION CONTROL DIAGNOSTICS
                 </span>
-                <span className="block text-[9px] text-[#FF6600] font-black uppercase tracking-widest">
+                <span className="block text-[9px] text-accent dark:text-accent-light font-black uppercase tracking-widest">
                   Live System Telemetry
                 </span>
               </div>
@@ -273,8 +273,8 @@ export const SystemOperationsLayout: React.FC<SystemOperationsLayoutProps> = ({ 
                 <div
                   className={`p-3 rounded-2xl max-w-[90%] border ${
                     chat.role === "user"
-                      ? "bg-[#FF6600]/10 border-[#FF6600]/30 text-white"
-                      : "bg-[#0E4825]/10 border-[#0E4825]/30 text-emerald-300"
+                      ? "bg-accent/10 border-accent/30 text-white"
+                      : "bg-primary/10 border-primary/30 text-emerald-300"
                   }`}
                 >
                   {chat.text}
@@ -303,7 +303,7 @@ export const SystemOperationsLayout: React.FC<SystemOperationsLayoutProps> = ({ 
               <button
                 onClick={handleSendAiMessage}
                 disabled={isAiLoading || !aiMessage.trim()}
-                className="h-8 w-8 rounded-lg bg-[#0E4825] hover:bg-[#156d39] text-white flex items-center justify-center transition-colors disabled:opacity-40 disabled:hover:bg-[#0E4825] cursor-pointer shrink-0"
+                className="h-8 w-8 rounded-lg bg-primary hover:bg-[#156d39] text-white flex items-center justify-center transition-colors disabled:opacity-40 disabled:hover:bg-primary cursor-pointer shrink-0"
               >
                 <Send size={12} />
               </button>

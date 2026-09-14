@@ -37,10 +37,27 @@ export function useTickets(params: UseTicketsParams = {}) {
 
       let branchIds: string[] = [];
 
+      // Loop 7: clamp explicit selection to the caller's authorized scope —
+      // the old code trusted selectedBranchId verbatim (localStorage-forgeable
+      // → foreign-branch queries). Global roles select freely; scoped roles
+      // only their branches (regional: their cities, verified below).
+      const GLOBAL_ROLES = ['brand_owner', 'developer', 'support'];
       if (selectedBranchId && selectedBranchId !== 'all') {
-        branchIds = [selectedBranchId];
+        if (GLOBAL_ROLES.includes(user.role)) {
+          branchIds = [selectedBranchId];
+        } else if ((user.branchIds || []).includes(selectedBranchId)) {
+          branchIds = [selectedBranchId];
+        } else if (user.role === 'regional_manager') {
+          const citySnap = await getDocs(
+            query(collection(db, 'branches'), where('city', 'in', user.cityIds || ['Ahmedabad', 'Surat']))
+          );
+          const cityIds = citySnap.docs.map((d) => d.id);
+          branchIds = cityIds.includes(selectedBranchId) ? [selectedBranchId] : [];
+        } else {
+          branchIds = [];
+        }
       } else {
-        if (['brand_owner', 'developer', 'support'].includes(user.role)) {
+        if (GLOBAL_ROLES.includes(user.role)) {
           const branchesSnap = await getDocs(collection(db, 'branches'));
           branchIds = branchesSnap.docs.map((d) => d.id);
         } else if (user.role === 'regional_manager') {
@@ -53,8 +70,10 @@ export function useTickets(params: UseTicketsParams = {}) {
         }
       }
 
+      // Loop 7: scoped role with no branches sees NOTHING — the old fallback
+      // handed two foreign branches (surat/ahmedabad) to unassigned roles.
       if (branchIds.length === 0) {
-        branchIds = ['branch_surat_01', 'branch_ahmedabad_01'];
+        return [];
       }
 
       // Dual-collection fetch, fired concurrently: the old code awaited

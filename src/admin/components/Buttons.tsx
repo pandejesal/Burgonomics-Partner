@@ -35,11 +35,11 @@ export const AdminButton: React.FC<AdminButtonProps> = ({
   switch (variant) {
     case "primary":
       variantStyle =
-        "bg-[#0E4825] text-white hover:bg-[#0B3A1D] hover:shadow-[0_4px_12px_rgba(14,72,37,0.15)] focus:ring-2 focus:ring-[#0E4825]/20 disabled:bg-gray-100 disabled:text-gray-400 disabled:shadow-none";
+        "bg-primary text-white hover:bg-[#0B3A1D] hover:shadow-[0_4px_12px_rgba(14,72,37,0.15)] focus:ring-2 focus:ring-[#0E4825]/20 disabled:bg-gray-100 disabled:text-gray-400 disabled:shadow-none";
       break;
     case "secondary":
       variantStyle =
-        "bg-[#FF6600] text-white hover:bg-[#D95700] hover:shadow-[0_4px_12px_rgba(255,102,0,0.15)] focus:ring-2 focus:ring-[#FF6600]/20 disabled:bg-gray-100 disabled:text-gray-400 disabled:shadow-none";
+        "bg-accent text-white hover:bg-accent-hover hover:shadow-[0_4px_12px_rgba(255,102,0,0.15)] focus:ring-2 focus:ring-accent/20 disabled:bg-gray-100 disabled:text-gray-400 disabled:shadow-none";
       break;
     case "outline":
       variantStyle =
@@ -55,7 +55,7 @@ export const AdminButton: React.FC<AdminButtonProps> = ({
       break;
     case "link":
       variantStyle =
-        "bg-transparent text-[#0E4825] dark:text-emerald-400 hover:underline shadow-none p-0 border-none cursor-pointer";
+        "bg-transparent text-primary dark:text-emerald-400 hover:underline shadow-none p-0 border-none cursor-pointer";
       break;
   }
 

@@ -79,7 +79,7 @@ export const StatCard: React.FC<StatCardProps> = ({
 }) => {
   return (
     <AdminCard
-      className={`${accent ? "bg-gradient-to-br from-[#0E4825] to-[#0A321A] text-white" : ""} ${className}`}
+      className={`${accent ? "bg-gradient-to-br from-primary to-[#0A321A] text-white" : ""} ${className}`}
     >
       <div className="flex items-start justify-between">
         <div className="space-y-1">
@@ -97,7 +97,7 @@ export const StatCard: React.FC<StatCardProps> = ({
 
         {Icon && (
           <div
-            className={`flex h-11 w-11 items-center justify-center rounded-2xl ${accent ? "bg-white/10 text-white" : "bg-gray-50 dark:bg-gray-900 text-[#0E4825]"}`}
+            className={`flex h-11 w-11 items-center justify-center rounded-2xl ${accent ? "bg-white/10 text-white" : "bg-gray-50 dark:bg-gray-900 text-primary"}`}
           >
             <Icon size={20} />
           </div>
@@ -180,7 +180,7 @@ export const MetricTile: React.FC<{
           {title}
         </span>
         <span
-          className={`text-lg font-black font-mono block mt-0.5 ${isWarning ? "text-[#FF6600]" : "text-[#0E4825] dark:text-emerald-400"}`}
+          className={`text-lg font-black font-mono block mt-0.5 ${isWarning ? "text-accent dark:text-accent-light" : "text-primary dark:text-emerald-400"}`}
         >
           {value}
         </span>

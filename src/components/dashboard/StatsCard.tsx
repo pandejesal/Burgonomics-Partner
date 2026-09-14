@@ -22,10 +22,10 @@ export function StatsCard({
   color = 'primary',
 }: StatsCardProps) {
   const iconColorStyles = {
-    primary: 'bg-[#0D0F0D] text-[#D95D0F] border border-[#D95D0F]/30',
-    secondary: 'bg-[#0D0F0D] text-emerald-400 border border-emerald-500/30',
-    accent: 'bg-[#0D0F0D] text-cyan-400 border border-cyan-500/30',
-    red: 'bg-[#0D0F0D] text-rose-400 border border-rose-500/30',
+    primary: 'bg-bg text-accent-light border border-accent/30',
+    secondary: 'bg-bg text-emerald-400 border border-emerald-500/30',
+    accent: 'bg-bg text-cyan-400 border border-cyan-500/30',
+    red: 'bg-bg text-rose-400 border border-rose-500/30',
   };
 
   const formattedValue =
@@ -36,7 +36,7 @@ export function StatsCard({
       : value;
 
   return (
-    <div className="bg-[#132A17] rounded-2xl p-4 lg:p-6 border border-[#234B2A] shadow-md text-white transition-all hover:border-[#D95D0F]/40">
+    <div className="bg-surface rounded-2xl p-4 lg:p-6 border border-border shadow-md text-white transition-all hover:border-accent/40">
       <div className="flex items-start justify-between">
         <div>
           <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">{title}</p>

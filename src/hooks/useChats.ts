@@ -53,8 +53,25 @@ export function useChats() {
     return () => unsubscribe();
   }, [activeThreadId]);
 
-  const sendMessage = async (text: string, imageUrl?: string) => {
-    if (!user || !activeThreadId || (!text.trim() && !imageUrl)) return;
+  const sendMessage = async (
+    text: string,
+    options?: {
+      imageUrl?: string;
+      orderReference?: {
+        orderId: string;
+        customerName: string;
+        total: number;
+        status: string;
+      };
+      ticketReference?: {
+        ticketId: string;
+        title: string;
+        priority: string;
+      };
+    }
+  ) => {
+    if (!user || !activeThreadId || (!text.trim() && !options?.imageUrl && !options?.orderReference && !options?.ticketReference))
+      return;
 
     const currentThread = threads.find((t) => t.id === activeThreadId);
 
@@ -64,7 +81,9 @@ export function useChats() {
       senderName: user.name || 'Staff Member',
       senderRole: user.role,
       text: text.trim(),
-      imageUrl,
+      imageUrl: options?.imageUrl,
+      orderReference: options?.orderReference,
+      ticketReference: options?.ticketReference,
       threadInfo: currentThread
         ? {
             type: currentThread.type,
@@ -79,22 +98,27 @@ export function useChats() {
   };
 
   const createOrOpenBranchChannel = async (branchId: string, branchName: string) => {
-    if (!user) return;
-    const chatId = await chatService.getOrCreateBranchChannel(branchId, branchName, {
-      id: user.id,
-      name: user.name || 'Branch Operator',
-    });
+    const chatId = `channel_${branchId}`;
     setActiveThreadId(chatId);
+    if (user) {
+      chatService
+        .getOrCreateBranchChannel(branchId, branchName, {
+          id: user.id,
+          name: user.name || 'Branch Operator',
+        })
+        .catch((err) => console.warn('Background channel setup:', err));
+    }
     return chatId;
   };
 
   const createOrOpenDirectDm = async (targetUser: { id: string; name: string }) => {
     if (!user) return;
-    const chatId = await chatService.getOrCreateDirectDm(
-      { id: user.id, name: user.name || 'User' },
-      targetUser
-    );
+    const sortedIds = [user.id, targetUser.id].sort();
+    const chatId = `dm_${sortedIds[0]}_${sortedIds[1]}`;
     setActiveThreadId(chatId);
+    chatService
+      .getOrCreateDirectDm({ id: user.id, name: user.name || 'User' }, targetUser)
+      .catch((err) => console.warn('Background DM setup:', err));
     return chatId;
   };
 

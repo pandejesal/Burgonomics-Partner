@@ -85,7 +85,7 @@ export const AdminCampaignsPage: React.FC = () => {
       cell: (row) => (
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <span className="font-bold text-sm text-gray-900 dark:text-white hover:text-[#0E4825] transition-colors">
+            <span className="font-bold text-sm text-gray-900 dark:text-white hover:text-primary transition-colors">
               {row.name}
             </span>
             <span className="text-[10px] font-bold uppercase tracking-widest font-mono text-gray-400">
@@ -150,7 +150,7 @@ export const AdminCampaignsPage: React.FC = () => {
             </div>
             <div className="flex justify-between gap-4 text-gray-400">
               <span>CTR (Click):</span>
-              <span className="font-bold text-[#FF6600]">{ctr}%</span>
+              <span className="font-bold text-accent dark:text-accent-light">{ctr}%</span>
             </div>
             <div className="flex justify-between gap-4 text-gray-400">
               <span>Delivered:</span>
@@ -164,7 +164,7 @@ export const AdminCampaignsPage: React.FC = () => {
       header: "Revenue",
       accessorKey: "stats",
       cell: (row) => (
-        <span className="font-mono font-bold text-sm text-[#0E4825] dark:text-emerald-400">
+        <span className="font-mono font-bold text-sm text-primary dark:text-emerald-400">
           {row.stats.revenue > 0 ? `₹${row.stats.revenue.toLocaleString()}` : "—"}
         </span>
       ),
@@ -188,7 +188,7 @@ export const AdminCampaignsPage: React.FC = () => {
           {row.status === "Active" ? (
             <button
               onClick={() => handleAction(row, "pause")}
-              className="p-1.5 rounded-xl border border-gray-100 dark:border-gray-800 text-gray-400 hover:text-[#FF6600] hover:bg-gray-50 dark:hover:bg-gray-900 transition-all cursor-pointer"
+              className="p-1.5 rounded-xl border border-gray-100 dark:border-gray-800 text-gray-400 hover:text-accent dark:hover:text-accent-light hover:bg-gray-50 dark:hover:bg-gray-900 transition-all cursor-pointer"
               title="Pause Campaign"
             >
               <Pause size={14} />
@@ -196,7 +196,7 @@ export const AdminCampaignsPage: React.FC = () => {
           ) : row.status === "Paused" || row.status === "Draft" ? (
             <button
               onClick={() => handleAction(row, "resume")}
-              className="p-1.5 rounded-xl border border-gray-100 dark:border-gray-800 text-[#0E4825] hover:bg-gray-50 dark:hover:bg-gray-900 transition-all cursor-pointer"
+              className="p-1.5 rounded-xl border border-gray-100 dark:border-gray-800 text-primary hover:bg-gray-50 dark:hover:bg-gray-900 transition-all cursor-pointer"
               title="Resume/Activate Campaign"
             >
               <Play size={14} />
@@ -205,7 +205,7 @@ export const AdminCampaignsPage: React.FC = () => {
 
           <button
             onClick={() => handleDuplicate(row.id)}
-            className="p-1.5 rounded-xl border border-gray-100 dark:border-gray-800 text-gray-400 hover:text-[#0E4825] hover:bg-gray-50 dark:hover:bg-gray-900 transition-all cursor-pointer"
+            className="p-1.5 rounded-xl border border-gray-100 dark:border-gray-800 text-gray-400 hover:text-primary hover:bg-gray-50 dark:hover:bg-gray-900 transition-all cursor-pointer"
             title="Duplicate Campaign"
           >
             <Copy size={14} />
@@ -263,7 +263,7 @@ export const AdminCampaignsPage: React.FC = () => {
               onClick={() => setActiveTab(tab)}
               className={`pb-3 px-4 text-xs font-bold uppercase tracking-wider border-b-2 transition-all whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
                 isActive
-                  ? "border-[#0E4825] text-[#0E4825] dark:border-emerald-500 dark:text-emerald-400 font-black"
+                  ? "border-primary text-primary dark:border-emerald-500 dark:text-emerald-400 font-black"
                   : "border-transparent text-gray-400 hover:text-gray-600"
               }`}
             >
@@ -271,7 +271,7 @@ export const AdminCampaignsPage: React.FC = () => {
               <span
                 className={`px-1.5 py-0.5 rounded-md text-[9px] font-black font-mono ${
                   isActive
-                    ? "bg-[#0E4825]/10 text-[#0E4825] dark:bg-emerald-900/30 dark:text-emerald-400"
+                    ? "bg-primary/10 text-primary dark:bg-emerald-900/30 dark:text-emerald-400"
                     : "bg-gray-100 text-gray-400 dark:bg-gray-900"
                 }`}
               >

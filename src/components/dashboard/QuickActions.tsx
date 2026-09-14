@@ -16,7 +16,7 @@ const actions = [
     description: 'Track kitchen & delivery',
     icon: ClipboardList,
     path: '/orders',
-    color: 'bg-[#1E3A24] text-[#D95D0F]',
+    color: 'bg-surface-hover text-accent-light',
   },
   {
     label: 'Customer CRM',
@@ -30,7 +30,7 @@ const actions = [
     description: 'Branch ↔ Brand & Support',
     icon: MessageSquare,
     path: '/chat',
-    color: 'bg-[#D95D0F]/20 text-[#D95D0F] border border-[#D95D0F]/40',
+    color: 'bg-accent/20 text-accent-light border border-accent/40',
   },
   {
     label: 'Support Tickets',
@@ -57,19 +57,19 @@ const actions = [
 
 export function QuickActions() {
   return (
-    <div className="bg-[#132A17] rounded-2xl border border-[#234B2A] p-5 shadow-lg">
+    <div className="bg-surface rounded-2xl border border-border p-5 shadow-lg">
       <h3 className="font-bold text-sm text-white mb-3">Operational Command Center</h3>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         {actions.map((action) => (
           <Link
             key={action.path}
             to={action.path}
-            className="flex flex-col items-center text-center p-3.5 rounded-xl bg-[#0D0F0D] hover:bg-[#16301B] border border-[#234B2A] hover:border-[#D95D0F]/40 transition-all group"
+            className="flex flex-col items-center text-center p-3.5 rounded-xl bg-bg hover:bg-[#16301B] border border-border hover:border-accent/40 transition-all group"
           >
             <div className={`p-2.5 rounded-xl mb-2 ${action.color}`}>
               <action.icon className="w-5 h-5" />
             </div>
-            <span className="text-xs font-bold text-white group-hover:text-[#D95D0F] transition-colors">
+            <span className="text-xs font-bold text-white group-hover:text-accent-light transition-colors">
               {action.label}
             </span>
             <span className="text-[10px] text-zinc-400 line-clamp-1 mt-0.5">

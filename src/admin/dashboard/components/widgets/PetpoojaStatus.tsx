@@ -157,7 +157,7 @@ export const PetpoojaStatus: React.FC = () => {
               Direct telemetry stream from the Petpooja Restaurant ERP middleware
             </p>
           </div>
-          <Zap size={16} className="text-[#FF6600] shrink-0" />
+          <Zap size={16} className="text-accent dark:text-accent-light shrink-0" />
         </div>
 
         {/* Grid status indicators */}
@@ -258,7 +258,7 @@ export const PetpoojaStatus: React.FC = () => {
             className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl font-bold text-xs shadow-sm transition-all ${
               !isConnected
                 ? "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-60"
-                : "bg-[#0E4825] hover:bg-[#0E4825]/90 text-white cursor-pointer"
+                : "bg-primary hover:bg-primary/90 text-white cursor-pointer"
             }`}
           >
             {isTriggeringPetpooja ? (
@@ -276,7 +276,7 @@ export const PetpoojaStatus: React.FC = () => {
             className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl font-bold text-xs border transition-all ${
               !isConnected
                 ? "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 border-transparent cursor-not-allowed opacity-60"
-                : "bg-orange-50 hover:bg-orange-100 text-[#FF6600] border-orange-200/50 cursor-pointer"
+                : "bg-orange-50 hover:bg-orange-100 text-accent border-orange-200/50 cursor-pointer"
             }`}
           >
             {isRefreshingCache ? (

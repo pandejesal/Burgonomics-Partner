@@ -137,7 +137,7 @@ export const LiveOperations: React.FC<{ dateRange: { from: string; to: string } 
         </div>
         <button
           onClick={handleManualRefresh}
-          className="p-2 rounded-xl border border-gray-100 dark:border-gray-800 hover:border-[#0E4825] dark:hover:border-emerald-800 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-all cursor-pointer"
+          className="p-2 rounded-xl border border-gray-100 dark:border-gray-800 hover:border-primary dark:hover:border-emerald-800 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-all cursor-pointer"
           title="Force refresh"
         >
           <RefreshCw size={14} />
@@ -167,7 +167,7 @@ export const LiveOperations: React.FC<{ dateRange: { from: string; to: string } 
           label="Completed"
           value={completed}
           icon={CheckCircle2}
-          colorClass="bg-[#0E4825]/5 text-[#0E4825] dark:bg-[#0E4825]/10 dark:text-emerald-400"
+          colorClass="bg-primary/5 text-primary dark:bg-primary/10 dark:text-emerald-400"
         />
         <OperationMetric
           label="Cancelled"

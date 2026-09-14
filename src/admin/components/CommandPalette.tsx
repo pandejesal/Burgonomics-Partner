@@ -106,7 +106,7 @@ export const CommandPalette: React.FC = () => {
                   >
                     <Command.Item
                       onSelect={() => runCommand(() => navigate("/admin" ))}
-                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer select-none aria-selected:bg-[#0E4825]/5 dark:aria-selected:bg-[#0E4825]/10 aria-selected:text-[#0E4825] dark:aria-selected:text-emerald-400"
+                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer select-none aria-selected:bg-primary/5 dark:aria-selected:bg-primary/10 aria-selected:text-primary dark:aria-selected:text-emerald-400"
                     >
                       <BarChart3 size={15} />
                       <span>Dashboard & Core Stats</span>
@@ -114,7 +114,7 @@ export const CommandPalette: React.FC = () => {
 
                     <Command.Item
                       onSelect={() => runCommand(() => navigate("/admin/orders" ))}
-                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer select-none aria-selected:bg-[#0E4825]/5 dark:aria-selected:bg-[#0E4825]/10 aria-selected:text-[#0E4825] dark:aria-selected:text-emerald-400"
+                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer select-none aria-selected:bg-primary/5 dark:aria-selected:bg-primary/10 aria-selected:text-primary dark:aria-selected:text-emerald-400"
                     >
                       <ShoppingBag size={15} />
                       <span>Orders Management</span>
@@ -122,7 +122,7 @@ export const CommandPalette: React.FC = () => {
 
                     <Command.Item
                       onSelect={() => runCommand(() => navigate("/admin/stores" ))}
-                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer select-none aria-selected:bg-[#0E4825]/5 dark:aria-selected:bg-[#0E4825]/10 aria-selected:text-[#0E4825] dark:aria-selected:text-emerald-400"
+                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer select-none aria-selected:bg-primary/5 dark:aria-selected:bg-primary/10 aria-selected:text-primary dark:aria-selected:text-emerald-400"
                     >
                       <Store size={15} />
                       <span>Store Franchises & Outlets</span>
@@ -130,7 +130,7 @@ export const CommandPalette: React.FC = () => {
 
                     <Command.Item
                       onSelect={() => runCommand(() => navigate("/admin/customers" ))}
-                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer select-none aria-selected:bg-[#0E4825]/5 dark:aria-selected:bg-[#0E4825]/10 aria-selected:text-[#0E4825] dark:aria-selected:text-emerald-400"
+                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer select-none aria-selected:bg-primary/5 dark:aria-selected:bg-primary/10 aria-selected:text-primary dark:aria-selected:text-emerald-400"
                     >
                       <Users size={15} />
                       <span>Registered Customers</span>
@@ -138,7 +138,7 @@ export const CommandPalette: React.FC = () => {
 
                     <Command.Item
                       onSelect={() => runCommand(() => navigate("/admin/menu" ))}
-                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer select-none aria-selected:bg-[#0E4825]/5 dark:aria-selected:bg-[#0E4825]/10 aria-selected:text-[#0E4825] dark:aria-selected:text-emerald-400"
+                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer select-none aria-selected:bg-primary/5 dark:aria-selected:bg-primary/10 aria-selected:text-primary dark:aria-selected:text-emerald-400"
                     >
                       <MenuIcon size={15} />
                       <span>Catalog Menu Sync & Prices</span>
@@ -146,7 +146,7 @@ export const CommandPalette: React.FC = () => {
 
                     <Command.Item
                       onSelect={() => runCommand(() => navigate("/admin/payments" ))}
-                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer select-none aria-selected:bg-[#0E4825]/5 dark:aria-selected:bg-[#0E4825]/10 aria-selected:text-[#0E4825] dark:aria-selected:text-emerald-400"
+                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer select-none aria-selected:bg-primary/5 dark:aria-selected:bg-primary/10 aria-selected:text-primary dark:aria-selected:text-emerald-400"
                     >
                       <CreditCard size={15} />
                       <span>Razorpay & Payment Processing</span>
@@ -154,7 +154,7 @@ export const CommandPalette: React.FC = () => {
 
                     <Command.Item
                       onSelect={() => runCommand(() => navigate("/admin/developer" ))}
-                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer select-none aria-selected:bg-[#0E4825]/5 dark:aria-selected:bg-[#0E4825]/10 aria-selected:text-[#0E4825] dark:aria-selected:text-emerald-400"
+                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer select-none aria-selected:bg-primary/5 dark:aria-selected:bg-primary/10 aria-selected:text-primary dark:aria-selected:text-emerald-400"
                     >
                       <Terminal size={15} />
                       <span>Developer Audit & Console Logs</span>
@@ -170,7 +170,7 @@ export const CommandPalette: React.FC = () => {
                       onSelect={() =>
                         runCommand(() => setTheme(theme === "dark" ? "light" : "dark"))
                       }
-                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer select-none aria-selected:bg-[#0E4825]/5 dark:aria-selected:bg-[#0E4825]/10 aria-selected:text-[#0E4825] dark:aria-selected:text-emerald-400"
+                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer select-none aria-selected:bg-primary/5 dark:aria-selected:bg-primary/10 aria-selected:text-primary dark:aria-selected:text-emerald-400"
                     >
                       {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
                       <span>Toggle Visual Theme ({theme === "dark" ? "Light" : "Dark"})</span>
@@ -178,7 +178,7 @@ export const CommandPalette: React.FC = () => {
 
                     <Command.Item
                       onSelect={() => runCommand(() => navigate("/admin/profile" ))}
-                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer select-none aria-selected:bg-[#0E4825]/5 dark:aria-selected:bg-[#0E4825]/10 aria-selected:text-[#0E4825] dark:aria-selected:text-emerald-400"
+                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer select-none aria-selected:bg-primary/5 dark:aria-selected:bg-primary/10 aria-selected:text-primary dark:aria-selected:text-emerald-400"
                     >
                       <User size={15} />
                       <span>My Profile & Security</span>
@@ -186,7 +186,7 @@ export const CommandPalette: React.FC = () => {
 
                     <Command.Item
                       onSelect={() => runCommand(() => navigate("/admin/settings" ))}
-                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer select-none aria-selected:bg-[#0E4825]/5 dark:aria-selected:bg-[#0E4825]/10 aria-selected:text-[#0E4825] dark:aria-selected:text-emerald-400"
+                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-xs font-bold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer select-none aria-selected:bg-primary/5 dark:aria-selected:bg-primary/10 aria-selected:text-primary dark:aria-selected:text-emerald-400"
                     >
                       <Settings size={15} />
                       <span>Global Store Settings</span>

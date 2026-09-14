@@ -213,7 +213,7 @@ export function PetpoojaWebhooksPage() {
                       onClick={() => setSelectedWh(wh)}
                       className={`cursor-pointer hover:bg-gray-50/50 dark:hover:bg-gray-900/20 transition-all ${
                         selectedWh?.id === wh.id
-                          ? "bg-[#0E4825]/[0.02] dark:bg-[#FF6600]/[0.02] border-l-2 border-[#0E4825] dark:border-[#FF6600]"
+                          ? "bg-primary/[0.02] dark:bg-accent/[0.02] border-l-2 border-primary dark:border-accent"
                           : ""
                       }`}
                     >

@@ -7,7 +7,8 @@ export type UserRole =
   | 'support'
   | 'regional_manager'
   | 'branch_owner'
-  | 'branch_staff';
+  | 'branch_staff'
+  | 'customer';
 
 export interface User {
   id: string;
@@ -41,6 +42,8 @@ export interface Branch {
   expectedLaunchDate?: string;
   bannerImage?: string;
   petpoojaStoreId?: string;
+  razorpayAccountId?: string;
+  brandRoyaltyPercent?: number;
   allowComingSoonSubscribers?: boolean;
   subscribersCount?: number;
   coordinates: {
@@ -109,9 +112,16 @@ export interface Order {
   paymentMethod: 'razorpay' | 'cod' | 'upi';
   paymentStatus: 'pending' | 'completed' | 'failed';
   petpoojaOrderId?: string;
+  petpoojaStatus?: 'synced' | 'failed' | 'pending' | 'pending_retry' | 'not_applicable';
   petpoojaSyncStatus?: 'synced' | 'failed' | 'pending' | 'not_applicable';
   porterOrderId?: string;
-  deliveryStatus?: 'dispatched' | 'no_riders_available' | 'manually_assigned';
+  deliveryStatus?:
+    | 'dispatched'
+    | 'in_transit'
+    | 'delivered'
+    | 'rider_cancelled'
+    | 'no_riders_available'
+    | 'manually_assigned';
   riderName?: string;
   riderPhone?: string;
   riderVehicleNumber?: string;
@@ -165,6 +175,17 @@ export interface ChatMessage {
   senderAvatar?: string;
   text: string;
   imageUrl?: string;
+  orderReference?: {
+    orderId: string;
+    customerName: string;
+    total: number;
+    status: string;
+  };
+  ticketReference?: {
+    ticketId: string;
+    title: string;
+    priority: string;
+  };
   createdAt: Timestamp;
   readBy?: string[];
 }
@@ -213,6 +234,10 @@ export interface Ticket {
   ticketNumber?: string;
   title: string;
   customerId?: string;
+  customerName?: string;
+  customerPhone?: string;
+  escalationLevel?: string;
+  assignedToTier?: string;
   branchId: string;
   branchName?: string;
   city?: string;
@@ -224,7 +249,7 @@ export interface Ticket {
   message: string;
   orderId?: string;
   status: TicketStatus;
-  assignedTo?: string;
+  assignedTo?: any;
   assignedToName?: string;
   resolvedById?: string;
   resolvedByName?: string;
@@ -251,10 +276,22 @@ export interface MenuItem {
   description: string;
   price: number;
   categoryId: string;
-  image: string;
-  available: boolean;
-  veg: boolean;
-  petpoojaItemId: string;
+  category?: string;
+  image?: string;
+  available?: boolean;
+  isAvailable?: boolean;
+  inStock?: boolean;
+  veg?: boolean;
+  isVeg?: boolean;
+  isJain?: boolean;
+  isBestSeller?: boolean;
+  petpoojaItemId?: string;
+  eightSixDuration?: string;
+  eightSixReason?: string;
+  disabledUntil?: Timestamp | null;
+  isCombo?: boolean;
+  originalPrice?: number;
+  comboComponents?: any;
   lastSyncedAt?: Timestamp;
 }
 

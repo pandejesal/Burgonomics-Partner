@@ -1,5 +1,18 @@
 apply plugin: 'com.android.application'
 
+// ── Version management ─────────────────────────────────────────────────
+// Read versionCode/versionName from version.properties if available,
+// otherwise fall back to defaults. CI can bump the file automatically.
+def versionPropsFile = rootProject.file('version.properties')
+def vCode = 1
+def vName = "1.0.0"
+if (versionPropsFile.canRead()) {
+    def vProps = new Properties()
+    vProps.load(new FileInputStream(versionPropsFile))
+    vCode = (vProps['VERSION_CODE'] ?: '1').toInteger()
+    vName = vProps['VERSION_NAME'] ?: '1.0.0'
+}
+
 android {
     namespace = "com.glassdoorsstudio.burgonomics.partner"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +20,8 @@ android {
         applicationId "com.glassdoorsstudio.burgonomics.partner"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode vCode
+        versionName vName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +29,27 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            def keystorePath = System.getenv("RELEASE_STORE_FILE") ?: "../release.keystore"
+            def keystoreFile = file(keystorePath)
+            def storePass = System.getenv("RELEASE_STORE_PASSWORD")
+            def keyPass = System.getenv("RELEASE_KEY_PASSWORD")
+            if (keystoreFile.exists() && storePass && keyPass) {
+                def keyAliasName = System.getenv("RELEASE_KEY_ALIAS") ?: "burgonomics"
+                storeFile keystoreFile
+                storePassword storePass
+                keyAlias keyAliasName
+                keyPassword keyPass
+            } else {
+                // Fallback to debug signature for local release verification
+                initWith(signingConfigs.debug)
+            }
+        }
+    }
     buildTypes {
         release {
+            signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

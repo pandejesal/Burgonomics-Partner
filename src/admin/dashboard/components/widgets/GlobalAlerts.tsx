@@ -76,8 +76,8 @@ export const GlobalAlerts: React.FC = () => {
           alert.severity === "critical"
             ? "bg-red-50 text-[#DC2626] border-red-200/50 dark:bg-red-950/20 dark:text-red-400 dark:border-red-950/30"
             : alert.severity === "warning"
-              ? "bg-orange-50 text-[#FF6600] border-orange-200/40 dark:bg-orange-950/20 dark:text-orange-400 dark:border-orange-950/20"
-              : "bg-emerald-50 text-[#0E4825] border-emerald-200/50 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-950/30";
+              ? "bg-orange-50 text-accent dark:text-accent-light border-orange-200/40 dark:bg-orange-950/20 dark:text-orange-400 dark:border-orange-950/20"
+              : "bg-emerald-50 text-primary border-emerald-200/50 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-950/30";
 
         return (
           <div

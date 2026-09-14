@@ -174,7 +174,7 @@ export const AdminTemplatesPage: React.FC = () => {
                 onClick={() => setActiveCategory(cat)}
                 className={`pb-2 px-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all whitespace-nowrap cursor-pointer ${
                   activeCategory === cat
-                    ? "border-[#0E4825] text-[#0E4825] dark:border-emerald-500 dark:text-emerald-400 font-extrabold"
+                    ? "border-primary text-primary dark:border-emerald-500 dark:text-emerald-400 font-extrabold"
                     : "border-transparent text-gray-400 hover:text-gray-600"
                 }`}
               >
@@ -192,7 +192,7 @@ export const AdminTemplatesPage: React.FC = () => {
                   onClick={() => setSelectedTemplate(tmp)}
                   className={`rounded-2xl border p-4 text-left cursor-pointer transition-all space-y-3 relative group ${
                     isActive
-                      ? "border-[#0E4825] bg-[#0E4825]/5 dark:border-emerald-500 dark:bg-emerald-950/15 shadow-sm"
+                      ? "border-primary bg-primary/5 dark:border-emerald-500 dark:bg-emerald-950/15 shadow-sm"
                       : "border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900 bg-white dark:bg-[#1A1A1A]"
                   }`}
                 >
@@ -330,7 +330,7 @@ export const AdminTemplatesPage: React.FC = () => {
                               className="rounded-xl bg-white/90 dark:bg-[#1A1A1A]/95 p-3 shadow-lg border border-white/25 dark:border-gray-800/10 backdrop-blur-md text-gray-900 dark:text-white"
                             >
                               <div className="flex items-center gap-1.5 mb-1 text-[8px] font-black uppercase tracking-widest text-gray-400">
-                                <div className="flex h-3 w-3 items-center justify-center rounded bg-[#0E4825] text-white font-extrabold text-[6px]">
+                                <div className="flex h-3 w-3 items-center justify-center rounded bg-primary text-white font-extrabold text-[6px]">
                                   B
                                 </div>
                                 <span className="font-mono">BURGONOMICS</span>
@@ -532,7 +532,7 @@ export const AdminTemplatesPage: React.FC = () => {
                         onClick={() => toggleFormChannel(ch)}
                         className={`flex-1 py-2 rounded-xl border text-xs font-bold transition-all ${
                           isSel
-                            ? "border-[#0E4825] bg-[#0E4825]/5 text-[#0E4825] dark:border-emerald-500 dark:text-emerald-400"
+                            ? "border-primary bg-primary/5 text-primary dark:border-emerald-500 dark:text-emerald-400"
                             : "border-gray-100 dark:border-gray-800 text-gray-400"
                         }`}
                       >

@@ -21,7 +21,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
 }) => {
   return (
     <div className="flex flex-col items-center justify-center text-center p-12 rounded-[24px] border border-dashed border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1A1A1A]">
-      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[#0E4825]/5 dark:bg-[#0E4825]/10 text-[#0E4825] dark:text-emerald-400 mb-4">
+      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/5 dark:bg-primary/10 text-primary dark:text-emerald-400 mb-4">
         <Icon size={28} />
       </div>
       <h3 className="text-lg font-bold tracking-tight text-gray-900 dark:text-white font-sans">
@@ -33,7 +33,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
       {action && (
         <button
           onClick={action.onClick}
-          className="mt-6 px-5 py-2.5 rounded-xl bg-[#0E4825] text-white hover:bg-[#0B3A1D] text-xs font-bold shadow-sm transition-all duration-150"
+          className="mt-6 px-5 py-2.5 rounded-xl bg-primary text-white hover:bg-[#0B3A1D] text-xs font-bold shadow-sm transition-all duration-150"
         >
           {action.label}
         </button>
@@ -48,9 +48,9 @@ export const LoadingState: React.FC<{ label?: string }> = ({
 }) => {
   return (
     <div className="flex flex-col items-center justify-center py-12 gap-3">
-      <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-[#0E4825] text-white font-bold text-xl shadow-md">
+      <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-white font-bold text-xl shadow-md">
         <span>B</span>
-        <div className="absolute inset-0 rounded-2xl border-2 border-white/20 border-t-[#FF6600] animate-spin" />
+        <div className="absolute inset-0 rounded-2xl border-2 border-white/20 border-t-accent animate-spin" />
       </div>
       <span className="text-xs font-bold uppercase tracking-wider text-gray-400 mt-2">{label}</span>
     </div>

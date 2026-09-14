@@ -72,7 +72,7 @@ export const CustomerInsights: React.FC<{ dateRange: { from: string; to: string 
               Demographic slice of newly acquired vs. recurring loyalty customers
             </p>
           </div>
-          <Users size={16} className="text-[#0E4825] dark:text-emerald-400 shrink-0" />
+          <Users size={16} className="text-primary dark:text-emerald-400 shrink-0" />
         </div>
 
         {/* Circular conversions SVG chart & Cohort stats side-by-side */}
@@ -121,7 +121,7 @@ export const CustomerInsights: React.FC<{ dateRange: { from: string; to: string 
                 </span>
               </div>
               <div className="w-full h-1.5 bg-gray-50 dark:bg-gray-900 rounded-full overflow-hidden">
-                <div className="h-full rounded-full bg-[#0E4825]" style={{ width: `${newPct}%` }} />
+                <div className="h-full rounded-full bg-primary" style={{ width: `${newPct}%` }} />
               </div>
             </div>
 
@@ -133,7 +133,7 @@ export const CustomerInsights: React.FC<{ dateRange: { from: string; to: string 
                 </span>
               </div>
               <div className="w-full h-1.5 bg-gray-50 dark:bg-gray-900 rounded-full overflow-hidden">
-                <div className="h-full rounded-full bg-[#FF6600]" style={{ width: `${retPct}%` }} />
+                <div className="h-full rounded-full bg-accent" style={{ width: `${retPct}%` }} />
               </div>
             </div>
           </div>

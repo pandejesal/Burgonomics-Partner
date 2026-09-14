@@ -126,7 +126,7 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({ dateRange, sto
               onClick={() => setChartTab("revenue")}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all cursor-pointer ${
                 chartTab === "revenue"
-                  ? "bg-white dark:bg-gray-800 text-[#0E4825] dark:text-emerald-400 shadow-sm border border-gray-100 dark:border-gray-700/50"
+                  ? "bg-white dark:bg-gray-800 text-primary dark:text-emerald-400 shadow-sm border border-gray-100 dark:border-gray-700/50"
                   : "text-gray-400 hover:text-gray-900 dark:hover:text-white"
               }`}
             >
@@ -137,7 +137,7 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({ dateRange, sto
               onClick={() => setChartTab("orders")}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black uppercase transition-all cursor-pointer ${
                 chartTab === "orders"
-                  ? "bg-white dark:bg-gray-800 text-[#0E4825] dark:text-emerald-400 shadow-sm border border-gray-100 dark:border-gray-700/50"
+                  ? "bg-white dark:bg-gray-800 text-primary dark:text-emerald-400 shadow-sm border border-gray-100 dark:border-gray-700/50"
                   : "text-gray-400 hover:text-gray-900 dark:hover:text-white"
               }`}
             >

@@ -130,18 +130,18 @@ const KpiCard: React.FC<KpiCardProps> = ({
   return (
     <div
       onClick={() => navigate(navigateTo as any )}
-      className="rounded-[20px] border border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] p-5 shadow-[0_4px_16px_rgba(0,0,0,0.01)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.03)] dark:hover:border-emerald-950 hover:border-[#0E4825] transition-all duration-300 flex flex-col justify-between h-[155px] cursor-pointer group relative overflow-hidden"
+      className="rounded-[20px] border border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] p-5 shadow-[0_4px_16px_rgba(0,0,0,0.01)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.03)] dark:hover:border-emerald-950 hover:border-primary transition-all duration-300 flex flex-col justify-between h-[155px] cursor-pointer group relative overflow-hidden"
     >
       <div className="flex justify-between items-start">
         <div className="space-y-1">
-          <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider group-hover:text-[#0E4825] dark:group-hover:text-emerald-400 transition-colors">
+          <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider group-hover:text-primary dark:group-hover:text-emerald-400 transition-colors">
             {title}
           </span>
           <span className="block text-2xl font-black font-mono tracking-tight text-gray-900 dark:text-white">
             {value}
           </span>
         </div>
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gray-50 dark:bg-gray-900/50 text-[#0E4825] dark:text-emerald-400 group-hover:bg-[#0E4825] group-hover:text-white dark:group-hover:bg-emerald-800 dark:group-hover:text-white transition-all">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gray-50 dark:bg-gray-900/50 text-primary dark:text-emerald-400 group-hover:bg-primary group-hover:text-white dark:group-hover:bg-emerald-800 dark:group-hover:text-white transition-all">
           <Icon size={18} />
         </div>
       </div>

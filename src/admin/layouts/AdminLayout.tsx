@@ -135,14 +135,14 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
               {/* Drawer Header */}
               <div className="flex items-center justify-between border-b border-[#EAEAEA] dark:border-gray-800/60 px-6 pb-4 shrink-0">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#0E4825] text-white font-bold text-lg shadow-sm">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-white font-bold text-lg shadow-sm">
                     B
                   </div>
                   <div>
-                    <span className="block font-black tracking-tight text-[#0E4825] dark:text-emerald-400 text-sm font-mono">
+                    <span className="block font-black tracking-tight text-primary dark:text-emerald-400 text-sm font-mono">
                       BURGONOMICS
                     </span>
-                    <span className="block text-[9px] font-black uppercase tracking-wider text-[#FF6600]">
+                    <span className="block text-[9px] font-black uppercase tracking-wider text-accent dark:text-accent-light">
                       Admin Navigation
                     </span>
                   </div>
@@ -163,7 +163,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
                     <span className="block text-xs font-bold text-gray-900 dark:text-white">
                       {admin?.fullName}
                     </span>
-                    <span className="block text-[10px] text-[#FF6600] font-black uppercase tracking-wider">
+                    <span className="block text-[10px] text-accent dark:text-accent-light font-black uppercase tracking-wider">
                       {roleName}
                     </span>
                   </div>
@@ -171,7 +171,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
                 <Link
                   to="/admin/profile"
                   onClick={() => setIsSidebarOpen(false)}
-                  className="text-xs font-bold text-[#0E4825] dark:text-emerald-400 hover:underline"
+                  className="text-xs font-bold text-primary dark:text-emerald-400 hover:underline"
                 >
                   Profile Settings
                 </Link>
@@ -194,14 +194,14 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
                         onClick={() => setIsSidebarOpen(false)}
                         className={`flex flex-col items-start gap-2.5 p-4 rounded-2xl border transition-all duration-150 ${
                           isItemActive
-                            ? "bg-[#0E4825] text-white border-transparent shadow-[0_4px_12px_rgba(14,72,37,0.15)]"
+                            ? "bg-primary text-white border-transparent shadow-[0_4px_12px_rgba(14,72,37,0.15)]"
                             : "bg-gray-50/50 dark:bg-gray-900/40 border-gray-100 dark:border-gray-800/50 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800/60"
                         }`}
                       >
                         <Icon
                           size={18}
                           className={
-                            isItemActive ? "text-white" : "text-[#0E4825] dark:text-emerald-400"
+                            isItemActive ? "text-white" : "text-primary dark:text-emerald-400"
                           }
                         />
                         <span className="text-[11px] font-bold tracking-tight uppercase leading-tight">
@@ -267,7 +267,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
             exit={{ opacity: 0, scale: 0.8 }}
             transition={{ duration: 0.15 }}
             onClick={() => setIsSidebarOpen(true)}
-            className="fixed bottom-6 right-6 z-[998] flex h-14 w-14 lg:hidden items-center justify-center rounded-full bg-[#0E4825] text-white shadow-[0_8px_30px_rgba(14,72,37,0.35)] hover:bg-[#0B3A1D] active:scale-95 transition-all border border-white/10 cursor-pointer"
+            className="fixed bottom-6 right-6 z-[998] flex h-14 w-14 lg:hidden items-center justify-center rounded-full bg-primary text-white shadow-[0_8px_30px_rgba(14,72,37,0.35)] hover:bg-[#0B3A1D] active:scale-95 transition-all border border-white/10 cursor-pointer"
             aria-label="Open Admin Menu"
           >
             <Menu size={22} />
@@ -280,14 +280,14 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
         {/* Brand Header */}
         <div className="flex h-[80px] items-center justify-between border-b border-[#EAEAEA] dark:border-gray-800 px-6 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#0E4825] text-white font-black text-xl shadow-[0_4px_16px_rgba(14,72,37,0.25)]">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary text-white font-black text-xl shadow-[0_4px_16px_rgba(14,72,37,0.25)]">
               B
             </div>
             <div>
-              <span className="block font-black tracking-tight text-[#0E4825] dark:text-emerald-400 text-lg font-mono">
+              <span className="block font-black tracking-tight text-primary dark:text-emerald-400 text-lg font-mono">
                 BURGONOMICS
               </span>
-              <span className="block text-[10px] font-black uppercase tracking-wider text-[#FF6600]">
+              <span className="block text-[10px] font-black uppercase tracking-wider text-accent dark:text-accent-light">
                 Admin Panel
               </span>
             </div>
@@ -309,7 +309,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
                 to={item.to as any}
                 className={`flex items-center gap-3 px-4 py-3 rounded-2xl text-xs font-bold uppercase tracking-wider transition-all duration-150 group ${
                   isItemActive
-                    ? "bg-[#0E4825] text-white shadow-[0_4px_12px_rgba(14,72,37,0.15)] dark:bg-[#0E4825] dark:text-white"
+                    ? "bg-primary text-white shadow-[0_4px_12px_rgba(14,72,37,0.15)] dark:bg-primary dark:text-white"
                     : "text-gray-400 dark:text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-900 hover:text-gray-900 dark:hover:text-white"
                 }`}
               >
@@ -318,7 +318,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
                   className={
                     isItemActive
                       ? "text-white"
-                      : "text-gray-400 dark:text-gray-500 group-hover:text-[#0E4825] dark:group-hover:text-emerald-400"
+                      : "text-gray-400 dark:text-gray-500 group-hover:text-primary dark:group-hover:text-emerald-400"
                   }
                 />
                 <span>{item.label}</span>
@@ -361,7 +361,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
               <span className="block text-xs font-bold truncate text-gray-900 dark:text-white">
                 {admin?.fullName}
               </span>
-              <span className="block text-[10px] text-[#FF6600] font-black uppercase tracking-wider">
+              <span className="block text-[10px] text-accent dark:text-accent-light font-black uppercase tracking-wider">
                 {roleName}
               </span>
             </div>
@@ -403,13 +403,13 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
             <CommandPalette />
 
             {/* Auth Session Shield badge */}
-            <div className="flex items-center gap-1.5 rounded-xl bg-[#0E4825]/5 dark:bg-[#0E4825]/10 px-3.5 py-2 text-xs font-bold text-[#0E4825] dark:text-emerald-400 border border-[#0E4825]/10 dark:border-emerald-900/30 shadow-sm">
+            <div className="flex items-center gap-1.5 rounded-xl bg-primary/5 dark:bg-primary/10 px-3.5 py-2 text-xs font-bold text-primary dark:text-emerald-400 border border-primary/10 dark:border-emerald-900/30 shadow-sm">
               <ShieldCheck size={14} />
               <span className="hidden xs:inline">SECURE AUTH</span>
             </div>
 
             {/* Role indicator */}
-            <div className="flex items-center gap-1.5 rounded-xl bg-[#FF6600]/5 dark:bg-[#FF6600]/10 px-3.5 py-2 text-xs font-bold text-[#FF6600] border border-[#FF6600]/10 dark:border-orange-950/20 shadow-sm">
+            <div className="flex items-center gap-1.5 rounded-xl bg-accent/5 dark:bg-accent/10 px-3.5 py-2 text-xs font-bold text-accent dark:text-accent-light border border-accent/10 dark:border-orange-950/20 shadow-sm">
               <KeyRound size={14} />
               <span className="hidden xs:inline">{roleName.toUpperCase()}</span>
             </div>

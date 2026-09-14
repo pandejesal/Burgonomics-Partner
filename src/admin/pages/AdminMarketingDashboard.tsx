@@ -165,13 +165,13 @@ export const AdminMarketingDashboard: React.FC = () => {
 
       {/* Secondary quick action banners */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="md:col-span-2 rounded-[20px] bg-gradient-to-r from-[#0E4825]/5 to-transparent border border-[#0E4825]/10 p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+        <div className="md:col-span-2 rounded-[20px] bg-gradient-to-r from-primary/5 to-transparent border border-primary/10 p-6 flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#0E4825]/10 text-[#0E4825]">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">
                 <Sparkles size={12} />
               </span>
-              <span className="text-xs font-bold text-[#0E4825] uppercase tracking-widest font-mono">
+              <span className="text-xs font-bold text-primary uppercase tracking-widest font-mono">
                 AI SEGMENT SUGGESTION
               </span>
             </div>
@@ -198,7 +198,7 @@ export const AdminMarketingDashboard: React.FC = () => {
         <AdminCard className="flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-4">
-              <span className="text-xs font-bold uppercase text-[#FF6600] tracking-wider">
+              <span className="text-xs font-bold uppercase text-accent dark:text-accent-light tracking-wider">
                 Automations Status
               </span>
               <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
@@ -212,7 +212,7 @@ export const AdminMarketingDashboard: React.FC = () => {
           </div>
           <Link
             to="/admin/automation"
-            className="flex items-center justify-between mt-4 text-xs font-bold text-[#0E4825] hover:text-[#FF6600] uppercase tracking-wider transition-all"
+            className="flex items-center justify-between mt-4 text-xs font-bold text-primary hover:text-accent dark:hover:text-accent-light uppercase tracking-wider transition-all"
           >
             <span>Launch Journey Builder</span>
             <ChevronRight size={14} />
@@ -300,7 +300,7 @@ export const AdminMarketingDashboard: React.FC = () => {
             extra={
               <Link
                 to="/admin/campaigns"
-                className="text-xs font-bold text-[#0E4825] hover:text-[#FF6600] uppercase tracking-wider"
+                className="text-xs font-bold text-primary hover:text-accent dark:hover:text-accent-light uppercase tracking-wider"
               >
                 View All
               </Link>
@@ -339,7 +339,7 @@ export const AdminMarketingDashboard: React.FC = () => {
                   </div>
 
                   <div className="text-right shrink-0">
-                    <span className="block font-bold text-sm text-[#0E4825] dark:text-emerald-400 font-mono">
+                    <span className="block font-bold text-sm text-primary dark:text-emerald-400 font-mono">
                       ₹{campaign.stats.revenue.toLocaleString()}
                     </span>
                     <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-widest font-mono">

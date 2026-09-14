@@ -121,7 +121,7 @@ export const SystemHealth: React.FC = () => {
             }`}
           >
             <span
-              className={`h-1.5 w-1.5 rounded-full ${overallStatus === "HEALTHY" ? "bg-[#10B981]" : "bg-[#FF6600]"}`}
+              className={`h-1.5 w-1.5 rounded-full ${overallStatus === "HEALTHY" ? "bg-[#10B981]" : "bg-accent"}`}
             />
             {overallStatus}
           </span>
@@ -214,7 +214,7 @@ export const SystemHealth: React.FC = () => {
             <div className="w-full h-1.5 bg-gray-50 dark:bg-gray-900 rounded-full overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all duration-500 ${
-                  ramPct > 80 ? "bg-red-500" : ramPct > 50 ? "bg-[#FF6600]" : "bg-[#0E4825]"
+                  ramPct > 80 ? "bg-red-500" : ramPct > 50 ? "bg-accent" : "bg-primary"
                 }`}
                 style={{ width: `${ramPct}%` }}
               />
@@ -233,7 +233,7 @@ export const SystemHealth: React.FC = () => {
             <div className="w-full h-1.5 bg-gray-50 dark:bg-gray-900 rounded-full overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all duration-500 ${
-                  diskPct > 85 ? "bg-red-500" : diskPct > 60 ? "bg-[#FF6600]" : "bg-[#0E4825]"
+                  diskPct > 85 ? "bg-red-500" : diskPct > 60 ? "bg-accent" : "bg-primary"
                 }`}
                 style={{ width: `${diskPct}%` }}
               />
@@ -254,7 +254,7 @@ export const SystemHealth: React.FC = () => {
         </div>
         <button
           onClick={() => refetch()}
-          className="p-2 rounded-xl border border-gray-100 dark:border-gray-800 hover:border-[#0E4825] dark:hover:border-emerald-800 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-all cursor-pointer"
+          className="p-2 rounded-xl border border-gray-100 dark:border-gray-800 hover:border-primary dark:hover:border-emerald-800 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-all cursor-pointer"
         >
           <RefreshCw size={12} />
         </button>

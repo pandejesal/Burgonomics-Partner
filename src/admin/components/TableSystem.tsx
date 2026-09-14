@@ -227,7 +227,7 @@ export function ResponsiveTable<T extends { id: string | number; [key: string]: 
             value={searchTerm}
             onChange={(e) => handleSearchChange(e.target.value)}
             placeholder={searchPlaceholder}
-            className="w-full pl-10 pr-10 py-2.5 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] text-sm text-gray-800 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0E4825]/25 focus:border-[#0E4825] transition-all"
+            className="w-full pl-10 pr-10 py-2.5 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] text-sm text-gray-800 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0E4825]/25 focus:border-primary transition-all"
           />
           {searchTerm && (
             <button
@@ -273,7 +273,7 @@ export function ResponsiveTable<T extends { id: string | number; [key: string]: 
                       >
                         <span>{col.header}</span>
                         {visibleColumns.has(col.accessorKey) && (
-                          <Check size={14} className="text-[#0E4825] dark:text-emerald-400" />
+                          <Check size={14} className="text-primary dark:text-emerald-400" />
                         )}
                       </button>
                     ))}
@@ -296,7 +296,7 @@ export function ResponsiveTable<T extends { id: string | number; [key: string]: 
 
       {/* Selected Action Floating Bar */}
       {isAnySelected && bulkActions.length > 0 && (
-        <div className="bg-[#0E4825] text-white p-4 rounded-2xl flex items-center justify-between gap-4 shadow-lg animate-fade-in">
+        <div className="bg-primary text-white p-4 rounded-2xl flex items-center justify-between gap-4 shadow-lg animate-fade-in">
           <div className="flex items-center gap-3">
             <span className="h-5 w-5 rounded-md bg-white/20 flex items-center justify-center text-xs font-bold font-mono">
               {selectedIds.size}
@@ -317,7 +317,7 @@ export function ResponsiveTable<T extends { id: string | number; [key: string]: 
                     ? "bg-red-600 hover:bg-red-700 text-white"
                     : act.variant === "secondary"
                       ? "bg-amber-500 hover:bg-amber-600 text-white"
-                      : "bg-white text-[#0E4825] hover:bg-white/90"
+                      : "bg-white text-primary hover:bg-white/90"
                 }`}
               >
                 {act.label}
@@ -345,7 +345,7 @@ export function ResponsiveTable<T extends { id: string | number; [key: string]: 
                       type="checkbox"
                       checked={isAllSelected}
                       onChange={handleSelectAll}
-                      className="h-4 w-4 rounded border-gray-300 text-[#0E4825] focus:ring-[#0E4825]"
+                      className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-[#0E4825]"
                     />
                   </th>
                 )}
@@ -399,7 +399,7 @@ export function ResponsiveTable<T extends { id: string | number; [key: string]: 
                       onClick={() => onRowClick && onRowClick(row)}
                       className={`hover:bg-gray-50/50 dark:hover:bg-gray-900/20 transition-colors ${
                         onRowClick ? "cursor-pointer" : ""
-                      } ${isSelected ? "bg-[#0E4825]/5 dark:bg-[#0E4825]/10" : ""}`}
+                      } ${isSelected ? "bg-primary/5 dark:bg-primary/10" : ""}`}
                     >
                       {bulkActions.length > 0 && (
                         <td className="p-4 pl-6 w-10" onClick={(e) => e.stopPropagation()}>
@@ -407,7 +407,7 @@ export function ResponsiveTable<T extends { id: string | number; [key: string]: 
                             type="checkbox"
                             checked={isSelected}
                             onChange={(e) => handleSelectRow(row.id, e as any)}
-                            className="h-4 w-4 rounded border-gray-300 text-[#0E4825] focus:ring-[#0E4825]"
+                            className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-[#0E4825]"
                           />
                         </td>
                       )}

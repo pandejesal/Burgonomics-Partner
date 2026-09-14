@@ -93,14 +93,14 @@ export const PetpoojaOperationsLayout: React.FC<{ children?: React.ReactNode }> 
                 alert.type === "error"
                   ? "bg-red-50/75 dark:bg-red-950/15 border-red-200 dark:border-red-900/50 text-red-800 dark:text-red-200"
                   : alert.type === "warning"
-                    ? "bg-[#FF6600]/5 dark:bg-[#FF6600]/10 border-[#FF6600]/25 text-[#D95700] dark:text-orange-300"
+                    ? "bg-accent/5 dark:bg-accent/10 border-accent/25 text-accent dark:text-orange-300"
                     : "bg-blue-50/75 dark:bg-blue-950/15 border-blue-200 dark:border-blue-900/50 text-blue-800 dark:text-blue-200"
               }`}
             >
               <AlertTriangle
                 size={18}
                 className={`shrink-0 mt-0.5 ${
-                  alert.type === "error" ? "text-red-500" : "text-[#FF6600]"
+                  alert.type === "error" ? "text-red-500" : "text-accent dark:text-accent-light"
                 }`}
               />
               <div className="flex-1 min-w-0">
@@ -140,7 +140,7 @@ export const PetpoojaOperationsLayout: React.FC<{ children?: React.ReactNode }> 
                 to={tab.to}
                 className={`flex items-center gap-2 px-5 py-3.5 border-b-2 text-xs font-bold tracking-wider uppercase transition-all duration-200 select-none ${
                   isActive
-                    ? "border-[#0E4825] text-[#0E4825] dark:border-[#FF6600] dark:text-[#FF6600] bg-white/40 dark:bg-[#1A1A1A]/30 rounded-t-xl"
+                    ? "border-primary text-primary dark:border-accent dark:text-accent-light bg-white/40 dark:bg-[#1A1A1A]/30 rounded-t-xl"
                     : "border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-white"
                 }`}
               >
