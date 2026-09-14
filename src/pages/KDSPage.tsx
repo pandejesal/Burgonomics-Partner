@@ -32,7 +32,7 @@ import {
   WifiOff,
   Store,
 } from 'lucide-react';
-import type { OrderType, OrderStatus } from '@/types';
+import type { Order, OrderType, OrderStatus } from '@/types';
 
 export function KDSPage() {
   const { user } = useAuthStore();
@@ -41,6 +41,7 @@ export function KDSPage() {
   const {
     isOnline,
     isLoading,
+    streamError,
     activeOrders,
     pendingOrders,
     preparingOrders,
@@ -65,8 +66,35 @@ export function KDSPage() {
   // Channel filter: 'all' | 'delivery' | 'takeaway' | 'dinein'
   const [channelFilter, setChannelFilter] = useState<OrderType | 'all'>('all');
 
-  // Item bump checklist state: key = `${orderId}_${itemIndex}`
-  const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
+  // Item bump checklist state: key = `${orderId}_${itemIndex}`.
+  // Persisted per order in this device's localStorage so a refresh or a
+  // second device doesn't silently reset progress. Shape-validated on read;
+  // corrupt entries are discarded, never trusted.
+  const CHECKLIST_KEY = 'kds-checklist:v1';
+  const readPersistedChecklist = (): Record<string, boolean> => {
+    try {
+      const raw = window.localStorage.getItem(CHECKLIST_KEY);
+      if (!raw) return {};
+      const parsed: unknown = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        window.localStorage.removeItem(CHECKLIST_KEY);
+        return {};
+      }
+      const clean: Record<string, boolean> = {};
+      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof v === 'boolean') clean[k] = v;
+      }
+      return clean;
+    } catch {
+      try {
+        window.localStorage.removeItem(CHECKLIST_KEY);
+      } catch {
+        /* storage unavailable — ephemeral state only */
+      }
+      return {};
+    }
+  };
+  const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>(readPersistedChecklist);
 
   // Audio mute & unlock state
   const [isMuted, setIsMuted] = useState<boolean>(isKDSAudioMuted());
@@ -114,11 +142,39 @@ export function KDSPage() {
 
   const handleToggleItemCheck = (orderId: string, itemIdx: number) => {
     const key = `${orderId}_${itemIdx}`;
-    setCheckedItems((prev) => ({
-      ...prev,
-      [key]: !prev[key],
-    }));
+    setCheckedItems((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      try {
+        window.localStorage.setItem(CHECKLIST_KEY, JSON.stringify(next));
+      } catch {
+        /* storage unavailable — ephemeral state only */
+      }
+      return next;
+    });
   };
+
+  // Drop checklist entries for orders that left the makeline so the stored
+  // map doesn't grow without bound. Runs on settled data only.
+  useEffect(() => {
+    if (isLoading || streamError) return;
+    const live = new Set(activeOrders.map((o: Order) => o.id));
+    setCheckedItems((prev) => {
+      const keys = Object.keys(prev).filter((k) => {
+        const orderId = k.slice(0, k.lastIndexOf('_'));
+        return live.has(orderId);
+      });
+      if (keys.length === Object.keys(prev).length) return prev;
+      const next: Record<string, boolean> = {};
+      for (const k of keys) next[k] = prev[k];
+      try {
+        window.localStorage.setItem(CHECKLIST_KEY, JSON.stringify(next));
+      } catch {
+        /* storage unavailable — ephemeral state only */
+      }
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, streamError, activeOrders.length]);
 
   // Filter column orders by selected channel
   const filteredPending = useMemo(() => {
@@ -164,12 +220,22 @@ export function KDSPage() {
             <span className="w-3 h-3 rounded-full bg-emerald-500 animate-ping" />
             <h1 className="text-lg sm:text-xl font-black tracking-tight text-white flex items-center gap-2">
               <span>Burgonomics KDS</span>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-[#0E4825] border border-emerald-500/40 text-emerald-300 font-bold">
-                Makeline Live
-              </span>
+              {streamError ? (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-rose-950 border border-rose-500/40 text-rose-300 font-bold">
+                  Stream Error
+                </span>
+              ) : isLoading ? (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-neutral-800 border border-neutral-700 text-neutral-400 font-bold">
+                  Loading…
+                </span>
+              ) : (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-[#0E4825] border border-emerald-500/40 text-emerald-300 font-bold">
+                  Makeline Live
+                </span>
+              )}
             </h1>
-            <span className="text-[10px] font-mono text-neutral-500" title="Last order-stream refresh">
-              {refreshAgeSec < 60 ? `${refreshAgeSec}s ago` : `${Math.floor(refreshAgeSec / 60)}m ago`}
+            <span className="text-[10px] font-mono text-neutral-500" title="Age of the last successfully fetched order data">
+              data {refreshAgeSec < 60 ? `${refreshAgeSec}s old` : `${Math.floor(refreshAgeSec / 60)}m old`}
             </span>
             <button
               type="button"
@@ -238,8 +304,9 @@ export function KDSPage() {
 
         {/* Right Actions: Recall Last KOT, Audio Chime Player, Fullscreen */}
         <div className="flex items-center gap-2">
-          {/* Recall Last Bumped Order Button */}
-          {canRecall && (
+          {/* Recall Last Bumped Order Button — hidden while loading or on
+              stream error so a dead backend never offers a fake undo. */}
+          {canRecall && !isLoading && !streamError && (
             <button
               type="button"
               onClick={() => void recallLastOrder()}
@@ -305,7 +372,25 @@ export function KDSPage() {
           </div>
 
           <div className="flex-1 p-3 space-y-3.5 overflow-y-auto">
-            {filteredPending.length === 0 ? (
+            {isLoading ? (
+              <div className="h-48 rounded-xl border border-neutral-800 flex flex-col items-center justify-center text-center p-4 text-neutral-500" aria-busy="true" aria-label="Loading new KOTs">
+                <RefreshCw className="w-8 h-8 stroke-1 text-neutral-600 mb-1 animate-spin" />
+                <p className="text-xs font-bold">Loading new KOTs…</p>
+              </div>
+            ) : streamError ? (
+              <div role="alert" className="rounded-xl border border-rose-500/40 bg-rose-950/20 flex flex-col items-center justify-center text-center p-4 text-rose-200">
+                <AlertTriangle className="w-8 h-8 stroke-1 mb-1" />
+                <p className="text-xs font-bold">Order stream failed</p>
+                <p className="text-[11px] opacity-80">{(streamError as Error)?.message || 'Check connection and retry.'}</p>
+                <button
+                  type="button"
+                  onClick={refresh}
+                  className="mt-2 px-3 py-1.5 rounded-lg bg-rose-900 text-white text-xs font-bold cursor-pointer"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : filteredPending.length === 0 ? (
               <div className="h-48 rounded-xl border border-dashed border-neutral-800 flex flex-col items-center justify-center text-center p-4 text-neutral-600">
                 <ChefHat className="w-8 h-8 stroke-1 text-neutral-700 mb-1" />
                 <p className="text-xs font-bold">No new orders waiting.</p>
@@ -343,7 +428,25 @@ export function KDSPage() {
           </div>
 
           <div className="flex-1 p-3 space-y-3.5 overflow-y-auto">
-            {filteredPreparing.length === 0 ? (
+            {isLoading ? (
+              <div className="h-48 rounded-xl border border-neutral-800 flex flex-col items-center justify-center text-center p-4 text-neutral-500" aria-busy="true" aria-label="Loading grill orders">
+                <RefreshCw className="w-8 h-8 stroke-1 text-neutral-600 mb-1 animate-spin" />
+                <p className="text-xs font-bold">Loading grill orders…</p>
+              </div>
+            ) : streamError ? (
+              <div role="alert" className="rounded-xl border border-rose-500/40 bg-rose-950/20 flex flex-col items-center justify-center text-center p-4 text-rose-200">
+                <AlertTriangle className="w-8 h-8 stroke-1 mb-1" />
+                <p className="text-xs font-bold">Order stream failed</p>
+                <p className="text-[11px] opacity-80">{(streamError as Error)?.message || 'Check connection and retry.'}</p>
+                <button
+                  type="button"
+                  onClick={refresh}
+                  className="mt-2 px-3 py-1.5 rounded-lg bg-rose-900 text-white text-xs font-bold cursor-pointer"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : filteredPreparing.length === 0 ? (
               <div className="h-48 rounded-xl border border-dashed border-neutral-800 flex flex-col items-center justify-center text-center p-4 text-neutral-600">
                 <Flame className="w-8 h-8 stroke-1 text-neutral-700 mb-1" />
                 <p className="text-xs font-bold">No burgers on the grill.</p>
@@ -381,7 +484,25 @@ export function KDSPage() {
           </div>
 
           <div className="flex-1 p-3 space-y-3.5 overflow-y-auto">
-            {filteredReady.length === 0 ? (
+            {isLoading ? (
+              <div className="h-48 rounded-xl border border-neutral-800 flex flex-col items-center justify-center text-center p-4 text-neutral-500" aria-busy="true" aria-label="Loading ready orders">
+                <RefreshCw className="w-8 h-8 stroke-1 text-neutral-600 mb-1 animate-spin" />
+                <p className="text-xs font-bold">Loading ready orders…</p>
+              </div>
+            ) : streamError ? (
+              <div role="alert" className="rounded-xl border border-rose-500/40 bg-rose-950/20 flex flex-col items-center justify-center text-center p-4 text-rose-200">
+                <AlertTriangle className="w-8 h-8 stroke-1 mb-1" />
+                <p className="text-xs font-bold">Order stream failed</p>
+                <p className="text-[11px] opacity-80">{(streamError as Error)?.message || 'Check connection and retry.'}</p>
+                <button
+                  type="button"
+                  onClick={refresh}
+                  className="mt-2 px-3 py-1.5 rounded-lg bg-rose-900 text-white text-xs font-bold cursor-pointer"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : filteredReady.length === 0 ? (
               <div className="h-48 rounded-xl border border-dashed border-neutral-800 flex flex-col items-center justify-center text-center p-4 text-neutral-600">
                 <CheckCircle2 className="w-8 h-8 stroke-1 text-neutral-700 mb-1" />
                 <p className="text-xs font-bold">No orders waiting for handover.</p>

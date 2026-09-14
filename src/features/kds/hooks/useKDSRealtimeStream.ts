@@ -15,7 +15,13 @@ export interface RecalledOrderHistory {
 
 export function useKDSRealtimeStream() {
   const { selectedBranchId } = useAppStore();
-  const { orders = [], isLoading, updateOrderStatus, simulateOrder } = useOrders();
+  const {
+    orders = [],
+    isLoading,
+    error: streamError,
+    updateOrderStatus,
+    simulateOrder,
+  } = useOrders();
 
   const [isOnline, setIsOnline] = useState<boolean>(
     typeof navigator !== 'undefined' ? navigator.onLine : true
@@ -148,7 +154,8 @@ export function useKDSRealtimeStream() {
     [orders, updateOrderStatus, bumpingIds]
   );
 
-  // Recall Last Bumped Order within 60s
+  // Recall Last Bumped Order within 60s. Guarded: no history, expired
+  // history, or a failed write all return false (never an unhandled throw).
   const recallLastOrder = useCallback(async () => {
     if (!recallHistory) return false;
 
@@ -157,12 +164,20 @@ export function useKDSRealtimeStream() {
       return false;
     }
 
-    const { order, previousStatus } = recallHistory;
-    if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
-      await updateOrderStatus.mutateAsync({ orderId: order.id, status: previousStatus });
+    try {
+      const { order, previousStatus } = recallHistory;
+      if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
+        await updateOrderStatus.mutateAsync({ orderId: order.id, status: previousStatus });
+      }
+      setRecallHistory(null);
+      return true;
+    } catch (err: any) {
+      logger.warn('kds.recall_failed', { message: err?.message });
+      toast.error('Recall failed — order unchanged', {
+        description: err?.message || 'Check connection and retry.',
+      });
+      return false;
     }
-    setRecallHistory(null);
-    return true;
   }, [recallHistory, updateOrderStatus]);
 
   const canRecall = !!recallHistory && Date.now() - recallHistory.timestamp < 60000;
@@ -176,13 +191,18 @@ export function useKDSRealtimeStream() {
   // Poll-based freshness: the order stream is one-shot getDocs (no realtime
   // listener), so a Firestore stall with the browser online used to freeze
   // the makeline on a green "Live" dot. Revalidate every 15s while visible +
-  // online, track the last successful refresh, and expose manual refresh.
+  // online. lastRefreshAt tracks the last SUCCESSFUL fetch (data age), never
+  // the last manual-refresh tap — refresh() only invalidates, the effect
+  // below stamps the time once loading settles without error.
   const queryClient = useQueryClient();
   const [lastRefreshAt, setLastRefreshAt] = useState<number>(Date.now());
   const refresh = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['orders'] });
-    setLastRefreshAt(Date.now());
   }, [queryClient]);
+
+  useEffect(() => {
+    if (!isLoading && !streamError) setLastRefreshAt(Date.now());
+  }, [isLoading, streamError, orders]);
 
   useEffect(() => {
     if (typeof document !== 'undefined' && document.hidden) return;
@@ -195,6 +215,7 @@ export function useKDSRealtimeStream() {
   return {
     isOnline,
     isLoading,
+    streamError,
     activeOrders,
     pendingOrders,
     preparingOrders,

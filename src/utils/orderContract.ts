@@ -80,20 +80,39 @@ const PARTNER_TO_DELIVERY: Record<OrderStatus, DeliveryStatusMeta> = {
   out_for_delivery: { code: 'OUT_FOR_DELIVERY', label: 'Out for delivery', kind: 'in_progress', terminal: false },
   delivered: { code: 'DELIVERED', label: 'Delivered', kind: 'completed', terminal: true },
   cancelled: { code: 'CANCELLED', label: 'Cancelled', kind: 'cancelled', terminal: true },
+  // Quarantined docs stay visible (non-terminal) but never read as fresh or
+  // done work. Written only by review flows, never by the kitchen fast path.
+  quarantine: { code: 'QUARANTINED', label: 'Needs review', kind: 'unknown', terminal: false },
 };
 
-/** Normalize any status shape (object, UPPER, lower) to Partner status. */
+/** Normalize any status shape (object, UPPER, lower) to Partner status.
+ * Unknown codes fail CLOSED to 'quarantine' — never to 'pending', which would
+ * surface a corrupt doc as fresh kitchen/dispatch work. */
 export function toPartnerStatus(raw: unknown): OrderStatus {
   if (typeof raw === 'string') {
-    return DELIVERY_TO_PARTNER[raw] ?? DELIVERY_TO_PARTNER[raw.toUpperCase()] ?? 'pending';
+    return DELIVERY_TO_PARTNER[raw] ?? DELIVERY_TO_PARTNER[raw.toUpperCase()] ?? 'quarantine';
   }
   if (raw && typeof raw === 'object') {
     const code = (raw as { code?: unknown }).code;
     if (typeof code === 'string') {
-      return DELIVERY_TO_PARTNER[code] ?? DELIVERY_TO_PARTNER[code.toUpperCase()] ?? 'pending';
+      return DELIVERY_TO_PARTNER[code] ?? DELIVERY_TO_PARTNER[code.toUpperCase()] ?? 'quarantine';
     }
+    return 'quarantine';
   }
-  return 'pending';
+  return 'quarantine';
+}
+
+/** Machine-readable reason for a quarantined status, for the review banner. */
+export function quarantineReasonFor(raw: unknown): string {
+  if (raw == null) return 'missing status field';
+  if (typeof raw === 'string') return `unrecognized status '${raw}'`;
+  if (typeof raw === 'object') {
+    const code = (raw as { code?: unknown }).code;
+    return typeof code === 'string'
+      ? `unrecognized status code '${code}'`
+      : 'malformed status object (no code)';
+  }
+  return 'malformed status value';
 }
 
 /** Partner status → Delivery `{code,label,kind,terminal}` object for writes. */
@@ -167,6 +186,19 @@ export function normalizeOrderDoc(id: string, data: Record<string, any>): Order 
   const branchId =
     str(data.branchId) || branchIdForDeliveryStore(rawStoreId) || rawStoreId;
 
+  // Fail-closed normalization: unknown statuses land in 'quarantine' with a
+  // reason (never fail-open to 'pending'); malformed items are quarantined
+  // too instead of surfacing as fresh work with invented lines.
+  const status = (
+    !Array.isArray(data.items) ? 'quarantine' : toPartnerStatus(data.status)
+  ) as Order['status'];
+  const reasons: string[] = [];
+  if (status === 'quarantine' && Array.isArray(data.items)) {
+    reasons.push(quarantineReasonFor(data.status));
+  }
+  const items = normalizeItems(data.items);
+  if (!Array.isArray(data.items)) reasons.push('malformed items (not a list)');
+
   return {
     id,
     customerId: str(data.customerId ?? data.userId),
@@ -175,7 +207,7 @@ export function normalizeOrderDoc(id: string, data: Record<string, any>): Order 
     branchId,
     branchName: data.branchName ?? store.name,
     city: data.city ?? store.city ?? address.city,
-    items: normalizeItems(data.items),
+    items,
     subtotal: num(data.subtotal ?? totals.subtotal),
     tax: num(data.tax ?? totals.taxes ?? totals.tax),
     deliveryFee: num(data.deliveryFee ?? totals.deliveryFee),
@@ -183,7 +215,8 @@ export function normalizeOrderDoc(id: string, data: Record<string, any>): Order 
     orderType: (data.orderType ?? data.fulfillment ?? 'delivery') as Order['orderType'],
     deliveryAddress: data.deliveryAddress,
     tableNumber: data.tableNumber,
-    status: toPartnerStatus(data.status),
+    status,
+    ...(reasons.length > 0 ? { quarantineReason: reasons.join('; ') } : {}),
     paymentMethod: paymentMethod as Order['paymentMethod'],
     paymentStatus: paymentStatus as Order['paymentStatus'],
     petpoojaOrderId: data.petpoojaOrderId ?? petpoojaDetails.posOrderId,

@@ -4,6 +4,33 @@
  */
 import { auth } from '@/config/firebase';
 
+export interface ApiRequestOptions {
+  /** Timeout in ms (default 20 000 for general, 30 000 for porter book/rebook). */
+  timeoutMs?: number;
+  /** Max retries on transient failures (default 1 — total 2 attempts). */
+  retries?: number;
+  /** Stable idempotency key; auto-generated per call when omitted. */
+  idempotencyKey?: string;
+}
+
+/** Options exposed to public callers (book/rebook). Timeout defaults to 30 000. */
+export interface ApiOptions {
+  timeoutMs?: number;
+  idempotencyKey?: string;
+}
+
+const DEFAULT_TIMEOUT_MS = 20_000;
+const PORTER_TIMEOUT_MS = 30_000;
+const RETRY_BACKOFF_MS = 500;
+const RETRYABLE_STATUSES = new Set([502, 503, 504]);
+
+function generateIdempotencyKey(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 const getFunctionsBaseUrl = (): string => {
   if (import.meta.env.VITE_FUNCTIONS_API_URL) {
     return import.meta.env.VITE_FUNCTIONS_API_URL.replace(/\/$/, '');
@@ -12,13 +39,28 @@ const getFunctionsBaseUrl = (): string => {
   return `https://asia-south1-${projectId}.cloudfunctions.net/api`;
 };
 
-async function apiRequest<T>(endpoint: string, body: Record<string, any> = {}): Promise<T> {
+async function apiRequest<T>(
+  endpoint: string,
+  body: Record<string, any> = {},
+  options?: ApiRequestOptions,
+): Promise<T> {
   const baseUrl = getFunctionsBaseUrl();
   const targetUrl = `${baseUrl}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+
+  // ── offline gate ──────────────────────────────────────────────
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    throw new Error("You're offline — request not sent. Reconnect and retry.");
+  }
+
+  // ── idempotency key (stable across retries) ──────────────────
+  const idempotencyKey = options?.idempotencyKey ?? generateIdempotencyKey();
+  // Default: one retry (total 2 attempts) on transient failures.
+  const maxAttempts = (options?.retries ?? 1) + 1;
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
+    'X-Idempotency-Key': idempotencyKey,
   };
 
   try {
@@ -41,25 +83,77 @@ async function apiRequest<T>(endpoint: string, body: Record<string, any> = {}): 
     }
   }
 
-  const res = await fetch(targetUrl, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
+  // ── fetch with timeout + retry ────────────────────────────────
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  if (!res.ok) {
-    let errorMsg = `Server error ${res.status}`;
-    try {
-      const errData = await res.json();
-      errorMsg = errData.error || errData.message || errorMsg;
-    } catch {
-      const text = await res.text();
-      if (text) errorMsg = text;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS));
     }
-    throw new Error(errorMsg);
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const res = await fetch(targetUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        // ── non-retryable server error (4xx etc.) ──
+        if (!RETRYABLE_STATUSES.has(res.status)) {
+          let errorMsg = `Server error ${res.status}`;
+          try {
+            const errData = await res.json();
+            errorMsg = errData.error || errData.message || errorMsg;
+          } catch {
+            const text = await res.text();
+            if (text) errorMsg = text;
+          }
+          throw new Error(errorMsg);
+        }
+        // retryable status — fall through to retry loop
+        lastError = new Error(`Server error ${res.status}`);
+        continue;
+      }
+
+      return (await res.json()) as T;
+    } catch (err: unknown) {
+      lastError = err;
+
+      // AbortController timeout — retryable, then surface the safe message.
+      // DOMException is not an Error subclass in browsers, so match by name.
+      const isAbort =
+        (err instanceof Error && err.name === 'AbortError') ||
+        (typeof DOMException !== 'undefined' &&
+          err instanceof DOMException &&
+          err.name === 'AbortError');
+      if (isAbort) {
+        if (attempt < maxAttempts - 1) continue;
+        throw new Error(
+          'Request timed out — no changes were confirmed. Retry safely; bookings carry idempotency keys.',
+        );
+      }
+
+      // Network error (fetch TypeError) — retryable
+      if (err instanceof TypeError) {
+        if (attempt < maxAttempts - 1) continue;
+        throw err;
+      }
+
+      // Non-retryable error — rethrow immediately
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
-  return (await res.json()) as T;
+  // Exhausted retries (shouldn't normally reach here, but be safe)
+  throw lastError ?? new Error('Request failed after retries');
 }
 
 export const partnerFunctionsApi = {
@@ -71,11 +165,14 @@ export const partnerFunctionsApi = {
   },
 
   /**
-   * Dispatches Porter 3PL courier rider for an order
+   * Dispatches Porter 3PL courier rider for an order.
+   * Idempotency key is generated automatically per call; callers may
+   * supply a stable key to guarantee retry safety.
    */
   async bookPorterRider(
     orderId: string,
-    staffName?: string
+    staffName?: string,
+    options?: ApiOptions,
   ): Promise<{
     porterOrderId: string;
     riderName: string;
@@ -84,15 +181,21 @@ export const partnerFunctionsApi = {
     trackingUrl: string;
     status: string;
   }> {
-    return await apiRequest('/porter/book', { orderId, staffName });
+    return await apiRequest(
+      '/porter/book',
+      { orderId, staffName },
+      { ...options, timeoutMs: options?.timeoutMs ?? PORTER_TIMEOUT_MS, retries: 1 },
+    );
   },
 
   /**
-   * Re-books cancelled Porter rider
+   * Re-books cancelled Porter rider.
+   * Same idempotency semantics as bookPorterRider.
    */
   async rebookPorterRider(
     orderId: string,
-    staffName?: string
+    staffName?: string,
+    options?: ApiOptions,
   ): Promise<{
     porterOrderId: string;
     riderName: string;
@@ -101,7 +204,11 @@ export const partnerFunctionsApi = {
     trackingUrl: string;
     status: string;
   }> {
-    return await apiRequest('/porter/rebook', { orderId, staffName });
+    return await apiRequest(
+      '/porter/rebook',
+      { orderId, staffName },
+      { ...options, timeoutMs: options?.timeoutMs ?? PORTER_TIMEOUT_MS, retries: 1 },
+    );
   },
 
   /**

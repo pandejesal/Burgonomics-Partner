@@ -79,7 +79,10 @@ export type OrderStatus =
   | 'ready'
   | 'out_for_delivery'
   | 'delivered'
-  | 'cancelled';
+  | 'cancelled'
+  // Quarantine bucket for docs with an unrecognized status or corrupt shape.
+  // Fail-closed: quarantined orders never appear as fresh pending work.
+  | 'quarantine';
 
 export type OrderType = 'delivery' | 'takeaway' | 'dinein';
 
@@ -130,6 +133,9 @@ export interface Order {
   kotPrintedAt?: Timestamp;
   cancellationReason?: string;
   specialInstructions?: string;
+  // Set when status resolved to 'quarantine' — machine-readable reason for
+  // the review banner. Never shown as fresh kitchen/dispatch work.
+  quarantineReason?: string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

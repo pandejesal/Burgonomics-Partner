@@ -78,6 +78,11 @@ export function Sidebar() {
                   <item.icon className="w-4 h-4" />
                   <span>{item.label}</span>
                 </div>
+                {item.badge && (
+                  <span className="min-w-5 h-5 px-1.5 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center shrink-0">
+                    {item.badge}
+                  </span>
+                )}
               </Link>
             );
           })}

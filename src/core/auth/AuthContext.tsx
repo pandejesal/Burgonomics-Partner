@@ -2,8 +2,7 @@ import React, { createContext, useContext, useEffect, useState, type ReactNode }
 import { useAuthStore } from '@/stores/authStore';
 import type { User, UserRole } from '@/types';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { Timestamp } from 'firebase/firestore';
-import { verifyStaffPin, type StaffPinSession } from './pinHelpers';
+import { exchangePinForCustomToken } from './pinHelpers';
 import { initPushNotifications } from '@/shared/platform/pushNotifications';
 
 export interface AuthContextType {
@@ -23,18 +22,18 @@ export interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Staff PIN sessions must be provisioned by a SERVER-VERIFIED credential
-// (Cloud Function checking a salted hash, returning a Firebase custom token).
-// Client-side PIN rosters are not authentication: the bundle is public and
-// the toy hash is reversible, so any hardcoded PIN (e.g. a "9999 = owner"
-// demo) is a universal backdoor. Until server PINs exist the roster stays
-// EMPTY and every PIN fails closed. Do NOT re-add demo PINs here.
-const DEFAULT_STAFF_SESSIONS: Record<string, StaffPinSession> = {};
+// Staff PIN sign-in has NO client-side roster: the bundle is public and any
+// hardcoded PIN (e.g. a "9999 = owner" demo) is a universal backdoor.
+// The only supported path is a server-verified custom-token exchange
+// (Cloud Function checking a salted hash). Until that endpoint exists every
+// PIN fails closed — use operator email login. Do NOT re-add demo PINs or
+// client-minted sessions here.
+const PIN_DISABLED_ERROR =
+  'PIN sign-in is disabled: server PIN exchange is not configured. Use operator email login.';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const { user, firebaseUser, loading, error, signIn, signOut, initialize } = useAuthStore();
   const [isSessionLocked, setIsSessionLocked] = useState(false);
-  const [staffSessions, setStaffSessions] = useState<Record<string, StaffPinSession>>(DEFAULT_STAFF_SESSIONS);
 
   useEffect(() => {
     initialize();
@@ -47,47 +46,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user]);
 
   const fastSwitchPin = async (
-    pin: string,
+    _pin: string,
     _staffId?: string
   ): Promise<{ success: boolean; error?: string }> => {
-    const session = staffSessions[pin];
-    const now = Date.now();
-
-    if (!session) {
-      return {
-        success: false,
-        error: 'Invalid 4-digit PIN. Please verify your staff credentials.',
-      };
+    // Fail-closed: no client-side PIN verification may mint a session.
+    // Attempt the server exchange (currently unconfigured → rejects) and
+    // surface its generic error. Never fabricate a User here.
+    try {
+      await exchangePinForCustomToken(_pin, _staffId);
+      return { success: false, error: PIN_DISABLED_ERROR };
+    } catch (err: any) {
+      return { success: false, error: err?.message || PIN_DISABLED_ERROR };
     }
-
-    const result = verifyStaffPin(session, pin, now);
-    setStaffSessions((prev) => ({
-      ...prev,
-      [pin]: result.session,
-    }));
-
-    if (!result.success) {
-      return { success: false, error: result.error };
-    }
-
-    // Provision switch
-    useAuthStore.setState({
-      user: {
-        id: session.staffId,
-        name: session.name,
-        email: `${session.staffId}@burgonomics.in`,
-        role: session.role,
-        branchIds: [session.branchId],
-        cityIds: ['Surat'],
-        phone: '+91 98765 00000',
-        createdAt: Timestamp.now(),
-      },
-      loading: false,
-      error: null,
-    });
-
-    setIsSessionLocked(false);
-    return { success: true };
   };
 
   const lockSession = () => {

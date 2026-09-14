@@ -60,7 +60,7 @@ export function ProtectedRoute({ allowedRoles, children }: ProtectedRouteProps) 
           <div>
             <h2 className="text-xl font-black text-white">Terminal Locked</h2>
             <p className="text-xs text-zinc-400 mt-1">
-              Active Shift: <span className="text-[#4ADE80] font-bold">{user.name}</span> ({user.role})
+              Sign back in to continue your shift.
             </p>
           </div>
 
@@ -79,7 +79,7 @@ export function ProtectedRoute({ allowedRoles, children }: ProtectedRouteProps) 
             </div>
 
             {unlockError && (
-              <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-800/60 text-rose-300 text-xs flex items-center justify-center gap-1.5">
+              <div role="alert" className="p-3 rounded-xl bg-rose-950/60 border border-rose-800/60 text-rose-300 text-xs flex items-center justify-center gap-1.5">
                 <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
                 <span>{unlockError}</span>
               </div>
