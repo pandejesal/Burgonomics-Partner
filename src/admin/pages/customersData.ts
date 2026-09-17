@@ -607,39 +607,27 @@ class CustomerDataStorage {
   }
 
   private loadFromStorage() {
-    if (typeof window !== "undefined") {
-      const storedCust = localStorage.getItem("burg_crm_customers");
-      const storedSeg = localStorage.getItem("burg_crm_segments");
-
-      if (storedCust) {
-        try {
-          this.customers = JSON.parse(storedCust);
-        } catch {
-          this.customers = ALLOW_SEED_CUSTOMERS ? SEED_CUSTOMERS : [];
-        }
-      } else {
-        this.customers = ALLOW_SEED_CUSTOMERS ? SEED_CUSTOMERS : [];
-        this.saveToStorage();
-      }
-
-      if (storedSeg) {
-        try {
-          this.segments = JSON.parse(storedSeg);
-        } catch {
-          this.segments = ALLOW_SEED_CUSTOMERS ? SEED_SEGMENTS : [];
-        }
-      } else {
-        this.segments = ALLOW_SEED_CUSTOMERS ? SEED_SEGMENTS : [];
-        this.saveToStorage();
-      }
-    } else {
-      this.customers = ALLOW_SEED_CUSTOMERS ? SEED_CUSTOMERS : [];
-      this.segments = ALLOW_SEED_CUSTOMERS ? SEED_SEGMENTS : [];
+    // PROD never seeds: localStorage may carry stale DEV seeds from a prior
+    // session — ignore them entirely and return an empty CRM.  DEV uses
+    // SEED_CUSTOMERS in-memory only; seeds must never touch localStorage so
+    // they cannot leak into a PROD session via the same browser.
+    if (ALLOW_SEED_CUSTOMERS) {
+      this.customers = [...SEED_CUSTOMERS];
+      this.segments = [...SEED_SEGMENTS];
+      return;
     }
+
+    // PROD: always start empty.  We do not read from localStorage here
+    // because any data present could be residual DEV seeds (the root cause
+    // of the customer-leak bug this block fixes).
+    this.customers = [];
+    this.segments = [];
   }
 
   private saveToStorage() {
-    if (typeof window !== "undefined") {
+    // Never persist DEV seeds to localStorage — they are in-memory only so
+    // they cannot survive into a PROD session on the same browser.
+    if (!ALLOW_SEED_CUSTOMERS && typeof window !== "undefined") {
       localStorage.setItem("burg_crm_customers", JSON.stringify(this.customers));
       localStorage.setItem("burg_crm_segments", JSON.stringify(this.segments));
     }
