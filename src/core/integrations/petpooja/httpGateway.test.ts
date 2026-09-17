@@ -1,4 +1,29 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+
+// Mock appConfig to return petpoojaEnabled: true so the gateway factory
+// loads the live gateway instead of throwing. This must be hoisted so
+// it runs before the gateway module is evaluated.
+vi.mock('@/core/config/env', () => ({
+  appConfig: {
+    env: 'development',
+    appName: 'Burgonomics Partner',
+    appVersion: '1.0.0',
+    api: { baseUrl: 'https://test', timeoutMs: 15000, retry: { attempts: 2, backoffMs: 500 } },
+    featureFlags: { offlineMode: false, orderTracking: true, referrals: false, adminOps: true },
+    analytics: { enabled: false, writeKey: '' },
+    push: { enabled: true, vapidPublicKey: '' },
+    integrations: {
+      razorpayKeyId: '',
+      paymentsApiBaseUrl: 'https://test',
+      petpoojaEnabled: true,
+      mapsApiKey: '',
+      firebaseConfig: '',
+    },
+  },
+  isDev: () => true,
+  isProd: () => false,
+}));
+
 import { HttpPetpoojaGateway } from './httpGateway';
 import { createPetpoojaGateway } from './gateway';
 
@@ -22,8 +47,8 @@ describe('petpooja gateway wiring', () => {
     }
   });
 
-  it('defaults to the mock gateway (keyless dev behavior unchanged)', () => {
-    expect(createPetpoojaGateway().implementation).toBe('mock');
+  it('returns the live gateway when petpoojaEnabled=true', () => {
+    expect(createPetpoojaGateway().implementation).toBe('live');
   });
 
   it('live pushOrder acknowledges via the proxy contract', async () => {
