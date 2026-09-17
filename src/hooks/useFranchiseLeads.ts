@@ -143,7 +143,11 @@ export function useFranchiseLeads() {
         if (notes) updatePayload.notes = notes;
         await updateDoc(docRef, updatePayload);
       } catch (err) {
-        console.warn('Updated lead locally / mock fallback:', err);
+        if (import.meta.env.DEV) {
+          console.warn('Updated lead locally / mock fallback:', err);
+          return;
+        }
+        throw err;
       }
     },
     onSuccess: () => {
