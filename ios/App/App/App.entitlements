@@ -4,5 +4,11 @@
 <dict>
 	<key>aps-environment</key>
 	<string>production</string>
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:burgonomics.com</string>
+		<string>applinks:partner.burgonomics.com</string>
+		<string>applinks:burgonomics.netlify.app</string>
+	</array>
 </dict>
 </plist>
