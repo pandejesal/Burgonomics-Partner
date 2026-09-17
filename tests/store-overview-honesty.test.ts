@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Loop 3/120: dashboard getStores must never present fixture stores as live,
-// and must bound the directory read.
+// and must bound the directory read. Empty/error returns empty or throws —
+// NO fixture fallback is ever served (Loop 21/120).
 vi.mock('@/core/config/firebase', () => ({ db: {} }));
 
 const mocks = vi.hoisted(() => ({
@@ -27,18 +28,15 @@ describe('dashboard getStores honesty (Loop 3/120)', () => {
     mocks.getDocsImpl.mockReset();
   });
 
-  it('marks fixture fallback stores when admin_stores is empty', async () => {
+  it('returns empty array (no fixture) when admin_stores is empty', async () => {
     mocks.getDocsImpl.mockResolvedValue({ empty: true, forEach: () => {} });
     const stores = await dashboardService.getStores();
-    expect(stores.length).toBeGreaterThan(0);
-    for (const s of stores) expect(s.isDemoFallback).toBe(true);
+    expect(stores).toEqual([]);
   });
 
-  it('marks fixture fallback stores when the read throws', async () => {
+  it('throws (no fixture) when the read throws', async () => {
     mocks.getDocsImpl.mockRejectedValue(new Error('permission-denied'));
-    const stores = await dashboardService.getStores();
-    expect(stores.length).toBeGreaterThan(0);
-    for (const s of stores) expect(s.isDemoFallback).toBe(true);
+    await expect(dashboardService.getStores()).rejects.toThrow('permission-denied');
   });
 
   it('live docs are NOT flagged and the read is bounded', async () => {
@@ -66,7 +64,6 @@ describe('dashboard getStores honesty (Loop 3/120)', () => {
     });
     const stores = await dashboardService.getStores();
     expect(stores).toHaveLength(1);
-    expect(stores[0].isDemoFallback).not.toBe(true);
     expect(qFn).toHaveBeenCalled();
     expect(limitFn).toHaveBeenCalledWith(100);
   });
