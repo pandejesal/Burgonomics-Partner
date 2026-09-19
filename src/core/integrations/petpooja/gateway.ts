@@ -23,9 +23,35 @@ export function createPetpoojaGateway(): PetpoojaGateway {
   );
 }
 
-/** Shared singleton — import this, never instantiate gateways directly. */
-export const petpoojaGateway: PetpoojaGateway = createPetpoojaGateway();
+let cachedGateway: PetpoojaGateway | null = null;
 
-if (typeof console !== "undefined") {
-  console.info(`[petpooja] gateway implementation: ${petpoojaGateway.implementation}`);
+/**
+ * Lazily creates the shared singleton on first use. Still throws
+ * fail-closed when VITE_PETPOOJA_ENABLED is not true — but only when gateway
+ * functionality is actually invoked, never at import time.
+ */
+export function getPetpoojaGateway(): PetpoojaGateway {
+  if (!cachedGateway) {
+    cachedGateway = createPetpoojaGateway();
+    if (typeof console !== "undefined") {
+      console.info(`[petpooja] gateway implementation: ${cachedGateway.implementation}`);
+    }
+  }
+  return cachedGateway;
 }
+
+/**
+ * Shared singleton — import this, never instantiate gateways directly.
+ *
+ * Lazily initialized on first property access so importing this module never
+ * throws at app boot (a module-scope throw blank-screens the whole app
+ * before React mounts). Fail-closed behavior is preserved: touching the
+ * gateway without VITE_PETPOOJA_ENABLED=true still throws, just at use-time.
+ */
+export const petpoojaGateway: PetpoojaGateway = new Proxy({} as PetpoojaGateway, {
+  get(_target, prop) {
+    const gateway = getPetpoojaGateway();
+    const value = (gateway as unknown as Record<PropertyKey, unknown>)[prop];
+    return typeof value === "function" ? value.bind(gateway) : value;
+  },
+});
