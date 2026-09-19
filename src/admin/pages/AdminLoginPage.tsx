@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { ShieldAlert, Mail, Lock, ArrowLeft } from "lucide-react";
 import { useAdminAuthStore } from "../store/adminAuthStore";
+import { Logo } from '@/components/ui/Logo';
 
 import { useNavigate } from "react-router-dom";
 
@@ -35,9 +36,7 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ onSuccess }) => 
       <div className="relative w-full max-w-[480px] overflow-hidden rounded-[24px] border border-[#EAEAEA] bg-white p-10 shadow-[0_12px_40px_rgba(0,0,0,0.03)]">
         {/* Brand Header */}
         <div className="mb-8 text-center">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-white font-bold text-2xl shadow-[0_8px_20px_rgba(14,72,37,0.15)]">
-            B
-          </div>
+          <Logo size={56} showText={true} className="mx-auto" />
           <h2 className="mt-4 text-2xl font-black tracking-tight text-primary">BURGONOMICS</h2>
           <p className="text-xs font-bold uppercase tracking-widest text-accent dark:text-accent-light mt-1">
             ADMINISTRATIVE GATEWAY

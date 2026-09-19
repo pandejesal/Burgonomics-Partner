@@ -10,9 +10,9 @@ import {
   EyeOff,
   AlertCircle,
   ArrowRight,
-  Sparkles,
   WifiOff,
 } from 'lucide-react';
+import { Logo } from '@/components/ui/Logo';
 
 // Single generic message for ALL login failures — credential mismatch,
 // unknown account, and missing operator role all read identically, so the
@@ -90,10 +90,7 @@ export function LoginPage() {
       <div className="w-full max-w-md space-y-6">
         {/* Brand Header */}
         <div className="text-center space-y-3">
-          <div className="w-16 h-16 mx-auto rounded-2xl bg-[#0E4825] border-2 border-[#1E3A24] flex items-center justify-center font-black text-white text-3xl shadow-2xl relative overflow-hidden group">
-            <div className="absolute inset-0 bg-gradient-to-tr from-[#0E4825] to-[#4ADE80]/20" />
-            <span className="relative z-10 text-[#4ADE80]">B</span>
-          </div>
+          <Logo size={64} showText={true} className="mx-auto" />
           <div>
             <h1 className="text-2xl font-black text-white tracking-wide">Burgonomics Partner</h1>
             <p className="text-xs text-zinc-400 mt-1">
@@ -193,22 +190,6 @@ export function LoginPage() {
               )}
             </button>
           </form>
-        </div>
-
-        {/* RBAC Security Note */}
-        <div className="p-4 rounded-2xl bg-[#0A0A0A] border border-[#1E3A24] text-[11px] text-zinc-400 space-y-1.5">
-          <div className="flex items-center space-x-1.5 font-bold text-zinc-300">
-            <Sparkles className="w-3.5 h-3.5 text-[#4ADE80]" />
-            <span>Strict Role & Branch Isolation:</span>
-          </div>
-          <p className="leading-relaxed">
-            Your role (<span className="text-[#4ADE80]">Brand Owner</span>,{' '}
-            <span className="text-cyan-400">Developer</span>,{' '}
-            <span className="text-emerald-400">Support</span>, or{' '}
-            <span className="text-amber-400">Branch Owner</span>) is cryptographically verified from
-            Firebase ID token custom claims. Branch staff cannot access other outlets or global
-            analytics.
-          </p>
         </div>
       </div>
     </div>
