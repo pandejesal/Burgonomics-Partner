@@ -48,15 +48,15 @@ export const Logo: FC<LogoProps> = ({
       <circle cx="45" cy="16" r="2" fill="#8B7355" />
     </g>
     {showText && (
-      <text 
-        x="100" 
-        y="165" 
-        fontFamily="system-ui, sans-serif" 
-        fontSize="24" 
-        fontWeight="bold" 
-        fill="white" 
+      <text
+        x="100"
+        y="170"
+        fontFamily="system-ui, sans-serif"
+        fontSize="20"
+        fontWeight="bold"
+        fill="white"
         textAnchor="middle"
-        letterSpacing="2"
+        letterSpacing="1"
       >
         BURGONOMICS
       </text>
