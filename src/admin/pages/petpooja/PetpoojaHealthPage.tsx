@@ -219,7 +219,7 @@ export function PetpoojaHealthPage() {
               </div>
 
               <div className="flex justify-between text-[10px] font-extrabold font-mono text-gray-400 uppercase">
-                <span>Cache State: Ready</span>
+                <span>Cache State: {cacheMetrics.status}</span>
                 <span>Standby mode</span>
               </div>
             </div>
@@ -240,7 +240,7 @@ export function PetpoojaHealthPage() {
       {/* Circuit Breaker override states */}
       <AdminCard
         title="Circuit Breakers Override Matrix"
-        subtitle="Manage and trip simulated POS connection locks manually"
+        subtitle="Manage and trip POS connection circuit breakers manually"
       >
         <div className="overflow-x-auto no-scrollbar rounded-xl border border-gray-100 dark:border-gray-800">
           <table className="w-full text-left border-collapse font-sans text-xs">
@@ -343,7 +343,7 @@ export function PetpoojaHealthPage() {
           }
           description={
             confirmBreaker.targetState === "open"
-              ? "Manually opening the connection breaker simulates a faulted terminal link."
+              ? "Manually opening the connection breaker forces the circuit into an open (tripped) state."
               : "This resets the breaker back to closed (healthy) status."
           }
           confirmLabel="Execute State Transition"

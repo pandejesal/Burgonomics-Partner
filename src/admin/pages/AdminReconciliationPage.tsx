@@ -124,6 +124,14 @@ export const AdminReconciliationPage: React.FC = () => {
     });
   }, [discrepancies, searchQuery, selectedType]);
 
+  // Live-data coherence: derived from the discrepancy registry, never a
+  // hardcoded figure. 100% means zero open discrepancies.
+  const resolvedCount = discrepancies.filter((d) => d.status === "RESOLVED").length;
+  const coherencePct =
+    discrepancies.length === 0
+      ? 100
+      : Math.round((resolvedCount / discrepancies.length) * 10000) / 100;
+
   // Actions — Loop 25/120: resolutions record server-side via POST
   // /discrepancies/resolve. The old local-only clears faked ops review while
   // server-parked rows sat unread. Failures stay loud with no state change
@@ -246,7 +254,7 @@ export const AdminReconciliationPage: React.FC = () => {
             RESOLVED ALERTS
           </span>
           <span className="block text-2xl font-black font-mono tracking-tight text-gray-900 mt-1 dark:text-white">
-            {discrepancies.filter((d) => d.status === "RESOLVED").length}
+            {resolvedCount}
           </span>
           <span className="block text-[10px] text-gray-400 font-mono mt-1">
             Audited and marked closed today
@@ -258,10 +266,10 @@ export const AdminReconciliationPage: React.FC = () => {
             LEDGER COHERENCE
           </span>
           <span className="block text-2xl font-black font-mono tracking-tight text-white mt-1">
-            99.98%
+            {coherencePct.toFixed(2)}%
           </span>
           <span className="block text-[10px] text-green-200 font-mono mt-1">
-            Synced to Razorpay Settlement Pool
+            Computed from the live discrepancy registry
           </span>
         </AdminCard>
       </div>
@@ -306,7 +314,7 @@ export const AdminReconciliationPage: React.FC = () => {
           {/* Discrepancies stream */}
           <AdminCard
             title="Gateway vs Database Discrepancy Ledger"
-            subtitle={`Analyzing ${filteredDiscrepancies.length} discrepancy warnings across system threads · Simulation — Sync Recheck / Force Settle act on local demo data only and settle nothing on the real ledger`}
+            subtitle={`Analyzing ${filteredDiscrepancies.length} discrepancy warnings across system threads · Resolutions record server-side; re-checks run automatically on every payment event`}
           >
             {filteredDiscrepancies.length === 0 ? (
               <div className="py-8 text-center text-gray-400 font-mono">

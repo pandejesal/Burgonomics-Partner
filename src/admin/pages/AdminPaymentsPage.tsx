@@ -12,7 +12,6 @@ import {
   Clock,
   AlertOctagon,
   FileSpreadsheet,
-  FileText,
   Eye,
   ShieldCheck,
   ChevronRight,
@@ -63,6 +62,12 @@ export const AdminPaymentsPage: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState("all");
   const [amountRange, setAmountRange] = useState("all");
 
+  // Dynamic date bounds for filters/metrics — never hardcoded.
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const yesterdayDate = new Date(now.getTime() - 86400000);
+  const yesterdayStr = `${yesterdayDate.getFullYear()}-${String(yesterdayDate.getMonth() + 1).padStart(2, "0")}-${String(yesterdayDate.getDate()).padStart(2, "0")}`;
+
   // Live Auto Refresh state (UI only, data is real-time now)
   const [isLiveActive, setIsLiveActive] = useState(true);
   const [pulseLive, setPulseLive] = useState(false);
@@ -88,30 +93,28 @@ export const AdminPaymentsPage: React.FC = () => {
   };
 
   // Export functions
-  const handleExport = (type: "csv" | "excel" | "pdf") => {
-    toast.success(`Dispatched thread to generate payment ${type.toUpperCase()}...`);
-    setTimeout(() => {
-      // Simulate file download
-      const element = document.createElement("a");
-      const file = new Blob(
-        [
-          "Transaction ID,Order Number,Customer,Store,Amount,Status,Gateway,Date\n" +
-            txns
-              .map(
-                (t) =>
-                  `${t.id},${t.orderId},${t.customer.name},${t.store.name},₹${(t.amountPaise / 100).toFixed(2)},${t.status},${t.gateway},${t.createdAt}`,
-              )
-              .join("\n"),
-        ],
-        { type: "text/plain" },
-      );
-      element.href = URL.createObjectURL(file);
-      element.download = `burgonomics-payments-export.${type === "pdf" ? "pdf" : type}`;
-      document.body.appendChild(element);
-      element.click();
-      document.body.removeChild(element);
-      toast.success(`Download started: burgonomics-payments-export.${type}`);
-    }, 1000);
+  const handleExport = (type: "csv" | "excel") => {
+    const header = "Transaction ID,Order Number,Customer,Store,Amount,Status,Gateway,Date";
+    const rows = txns.map(
+      (t) =>
+        `${t.id},${t.orderId},${t.customer.name},${t.store.name},₹${(t.amountPaise / 100).toFixed(2)},${t.status},${t.gateway},${t.createdAt}`,
+    );
+    // Real files, generated immediately from the live ledger — no fake
+    // "thread dispatch" and no text/plain blob misnamed as PDF.
+    const content =
+      type === "excel"
+        ? `<table><thead><tr>${header.split(",").map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.split(",").map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table>`
+        : `${header}\n${rows.join("\n")}`;
+    const file = new Blob([content], {
+      type: type === "excel" ? "application/vnd.ms-excel" : "text/csv",
+    });
+    const element = document.createElement("a");
+    element.href = URL.createObjectURL(file);
+    element.download = `burgonomics-payments-export.${type === "excel" ? "xls" : "csv"}`;
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
+    toast.success(`Downloaded ${txns.length} transaction${txns.length === 1 ? "" : "s"} as ${type.toUpperCase()}.`);
   };
 
   // Filtered Payments list
@@ -150,10 +153,9 @@ export const AdminPaymentsPage: React.FC = () => {
 
       // Date Filter
       if (selectedDate !== "all") {
-        const todayStr = "2026-07-19";
         const datePart = t.createdAt.split(" ")[0];
         if (selectedDate === "today" && datePart !== todayStr) return false;
-        if (selectedDate === "yesterday" && datePart !== "2026-07-18") return false;
+        if (selectedDate === "yesterday" && datePart !== yesterdayStr) return false;
       }
 
       // Amount Range
@@ -183,7 +185,12 @@ export const AdminPaymentsPage: React.FC = () => {
 
     const todayRevenue =
       list
-        .filter((t) => t.status === "CAPTURED" && t.createdAt.startsWith("2026-07-19"))
+        .filter((t) => t.status === "CAPTURED" && t.createdAt.startsWith(todayStr))
+        .reduce((sum, t) => sum + t.amountPaise, 0) / 100;
+
+    const yesterdayRevenue =
+      list
+        .filter((t) => t.status === "CAPTURED" && t.createdAt.startsWith(yesterdayStr))
         .reduce((sum, t) => sum + t.amountPaise, 0) / 100;
 
     const successfulCount = list.filter((t) => t.status === "CAPTURED").length;
@@ -217,12 +224,14 @@ export const AdminPaymentsPage: React.FC = () => {
               totalAttempts) *
             100
           ).toFixed(1)
-        : "100.0";
+        : "—";
 
-    const settlementPendingAmt =
-      (list.filter((t) => t.status === "CAPTURED").reduce((sum, t) => sum + t.amountPaise, 0) *
-        0.15) /
-      100; // Mock settlement factor
+    // Honest day-over-day delta: null when there is no prior-day data to
+    // compare against (no fabricated "+14.2%").
+    const revenueDeltaPct =
+      yesterdayRevenue > 0
+        ? (((todayRevenue - yesterdayRevenue) / yesterdayRevenue) * 100).toFixed(1)
+        : null;
 
     return {
       todayRevenue,
@@ -232,7 +241,7 @@ export const AdminPaymentsPage: React.FC = () => {
       refundedAmt,
       refundRequestsCount,
       gatewaySuccessRate,
-      settlementPendingAmt,
+      revenueDeltaPct,
     };
   }, [txns, isStoreManager]);
 
@@ -308,7 +317,11 @@ export const AdminPaymentsPage: React.FC = () => {
           </span>
           <div className="flex items-center gap-1 text-[10px] font-black text-primary dark:text-emerald-400 uppercase tracking-wider font-sans mt-3">
             <TrendingUp size={11} />
-            <span>+14.2% vs yesterday</span>
+            <span>
+              {metrics.revenueDeltaPct === null
+                ? "No prior-day data"
+                : `${Number(metrics.revenueDeltaPct) >= 0 ? "+" : ""}${metrics.revenueDeltaPct}% vs yesterday`}
+            </span>
           </div>
         </AdminCard>
 
@@ -355,8 +368,7 @@ export const AdminPaymentsPage: React.FC = () => {
             {metrics.gatewaySuccessRate}%
           </span>
           <div className="flex items-center justify-between text-[10px] font-bold text-green-200 uppercase tracking-wider font-sans mt-3">
-            <span>Avg Latency: 2.1s</span>
-            <span>Settlement Pending: ₹{metrics.settlementPendingAmt.toLocaleString()}</span>
+            <span>Live from Firestore</span>
           </div>
         </AdminCard>
       </div>
@@ -395,13 +407,6 @@ export const AdminPaymentsPage: React.FC = () => {
               >
                 <FileSpreadsheet size={13} className="text-emerald-600" />
                 <span>Excel</span>
-              </button>
-              <button
-                onClick={() => handleExport("pdf")}
-                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-gray-100 dark:border-gray-800/80 hover:bg-gray-50 dark:hover:bg-gray-900 text-xs font-bold text-gray-500 hover:text-gray-900 dark:hover:text-white transition-all shadow-sm"
-              >
-                <FileText size={13} className="text-red-500" />
-                <span>PDF Report</span>
               </button>
             </div>
           </div>
@@ -477,8 +482,8 @@ export const AdminPaymentsPage: React.FC = () => {
                 className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-50 dark:border-gray-800/80 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none dark:text-white"
               >
                 <option value="all">All History</option>
-                <option value="today">Today (2026-07-19)</option>
-                <option value="yesterday">Yesterday (2026-07-18)</option>
+                <option value="today">Today ({todayStr})</option>
+                <option value="yesterday">Yesterday ({yesterdayStr})</option>
               </select>
             </div>
 

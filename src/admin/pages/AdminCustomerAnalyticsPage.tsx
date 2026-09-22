@@ -14,22 +14,13 @@ import {
   Legend,
   PieChart,
   Pie,
-  LineChart,
-  Line,
 } from "recharts";
 import {
-  TrendingUp,
   DollarSign,
-  ShoppingBag,
   ArrowLeft,
   Users,
   Award,
   Percent,
-  MapPin,
-  RefreshCw,
-  HelpCircle,
-  FileText,
-  Sparkles,
 } from "lucide-react";
 import { PageHeader } from "../components/Headers";
 import { StatCard, AdminCard } from "../components/Cards";
@@ -58,15 +49,25 @@ export const AdminCustomerAnalyticsPage: React.FC = () => {
     };
   }, [customers]);
 
-  // Chart Data 1: Customer Growth (simulated signup timeline based on joined dates)
-  const GROWTH_DATA = [
-    { week: "Wk 24", newCustomers: 12, cumulative: 45 },
-    { week: "Wk 25", newCustomers: 15, cumulative: 60 },
-    { week: "Wk 26", newCustomers: 18, cumulative: 78 },
-    { week: "Wk 27", newCustomers: 22, cumulative: 100 },
-    { week: "Wk 28", newCustomers: 25, cumulative: 125 },
-    { week: "Wk 29", newCustomers: 30, cumulative: 155 },
-  ];
+  // Chart Data 1: Customer Growth (real signup timeline bucketed by join week)
+  const growthData = useMemo(() => {
+    const byWeek = new Map<string, number>();
+    for (const c of customers) {
+      const d = new Date(c.joinedAt);
+      if (isNaN(d.getTime())) continue;
+      const year = d.getFullYear();
+      const start = new Date(year, 0, 1);
+      const week = Math.ceil(((d.getTime() - start.getTime()) / 86400000 + start.getDay() + 1) / 7);
+      const key = `${year}-W${String(week).padStart(2, "0")}`;
+      byWeek.set(key, (byWeek.get(key) || 0) + 1);
+    }
+    const sorted = Array.from(byWeek.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    let cumulative = 0;
+    return sorted.map(([key, count]) => {
+      cumulative += count;
+      return { week: key, newCustomers: count, cumulative };
+    });
+  }, [customers]);
 
   // Chart Data 2: Loyalty Tier Distribution
   const tierDistributionData = useMemo(() => {
@@ -147,7 +148,7 @@ export const AdminCustomerAnalyticsPage: React.FC = () => {
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <PageHeader
           title="Customer CRM Analytics Console"
-          description="Seed-directory analytics — charts aggregate local demo profiles until the live customer directory lands."
+          description="Charts aggregate real CRM profiles from the customer directory."
           breadcrumbs={[
             { label: "Customer CRM", to: "/admin/customers" },
             { label: "CRM Analytics" },
@@ -170,13 +171,11 @@ export const AdminCustomerAnalyticsPage: React.FC = () => {
           title="Consolidated CRM Profiles"
           value={stats.total.toString()}
           icon={Users}
-          trend={{ value: 12.8, label: "vs last month", isPositive: true }}
         />
         <StatCard
           title="Consolidated Customer Value"
           value={`₹${stats.totalSpentSum.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`}
           icon={DollarSign}
-          trend={{ value: 18.4, label: "vs last month", isPositive: true }}
         />
         <StatCard
           title="CRM Repeat Purchase Rate"
@@ -202,7 +201,7 @@ export const AdminCustomerAnalyticsPage: React.FC = () => {
           >
             <div className="h-80 w-full font-sans text-xs pt-4">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={GROWTH_DATA} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <AreaChart data={growthData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                   <defs>
                     <linearGradient id="colorGrowth" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#0E4825" stopOpacity={0.2} />

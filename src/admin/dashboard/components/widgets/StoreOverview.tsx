@@ -1,26 +1,11 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { useStores, useAnalyticsSummary } from "../../hooks/useDashboardData";
-import {
-  Store,
-  Wifi,
-  WifiOff,
-  Cpu,
-  Layers,
-  Database,
-  RefreshCw,
-  AlertTriangle,
-  ArrowRight,
-  Play,
-} from "lucide-react";
+import { useStores } from "../../hooks/useDashboardData";
+import { Store, AlertTriangle, ArrowRight } from "lucide-react";
 
 export const StoreOverview: React.FC = () => {
   const navigate = useNavigate();
   const { data: stores, isLoading, isError, refetch } = useStores();
-  const { data: analytics } = useAnalyticsSummary({
-    from: new Date(new Date().setHours(0, 0, 0, 0)).toISOString(),
-    to: new Date().toISOString(),
-  });
 
   if (isLoading) {
     return (
@@ -110,17 +95,6 @@ export const StoreOverview: React.FC = () => {
       <div className="flex-1 overflow-y-auto space-y-3 pr-1 max-h-[480px] no-scrollbar">
         {stores.map((store) => {
           const isOpen = store.status === "OPEN";
-          // Simulate some variations for demo completeness based on ID
-          const isBusy = isOpen && store.id.charCodeAt(0) % 2 === 0;
-          const ppConnected = store.status !== "PAUSED";
-          const cacheStatus = isOpen ? "HIT" : "MISS";
-          const menuVersion = store.minPrepMinutes ? `v${store.minPrepMinutes}.0` : "v1.4";
-          const queueStatus = isOpen ? "NORMAL" : "PAUSED";
-
-          // Compute mock store metrics stably based on ID so they don't jump on every render
-          const hashVal = store.id.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
-          const ordersCount = isOpen ? (hashVal % 35) + 10 : 0;
-          const revCount = ordersCount * 420;
 
           return (
             <div
@@ -154,67 +128,11 @@ export const StoreOverview: React.FC = () => {
                       {isOpen ? "Open" : "Closed"}
                     </span>
 
-                    {/* Busy badge */}
-                    {isBusy && (
-                      <span className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[9px] font-black uppercase bg-orange-50 text-orange-600 border border-orange-200/40 dark:bg-orange-950/20 dark:text-orange-400">
-                        <span className="h-1 w-1 rounded-full bg-orange-500 animate-pulse" />
-                        Busy
-                      </span>
-                    )}
-
-                    {/* Petpooja connected */}
-                    <span
-                      className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[9px] font-black uppercase border ${
-                        ppConnected
-                          ? "bg-blue-50 text-blue-600 border-blue-200/40 dark:bg-blue-950/10"
-                          : "bg-gray-100 text-gray-500"
-                      }`}
-                    >
-                      <Wifi size={10} />
-                      POS LINK
-                    </span>
-
-                    {/* Redis Status */}
-                    <span className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[9px] font-black uppercase bg-purple-50 text-purple-600 border border-purple-200/40 dark:bg-purple-950/20 dark:text-purple-400">
-                      <Cpu size={10} />
-                      Cache {cacheStatus}
-                    </span>
-                  </div>
+                    </div>
                 </div>
               </div>
 
-              <div className="flex flex-row md:flex-col items-center md:items-end justify-between md:justify-center border-t md:border-t-0 border-gray-50 dark:border-gray-900/60 pt-3 md:pt-0 shrink-0">
-                <div className="text-left md:text-right space-y-0.5">
-                  <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-                    Today's Sales
-                  </span>
-                  <div className="flex items-baseline gap-1.5">
-                    <span className="text-xs font-black font-mono text-gray-900 dark:text-white">
-                      ₹{revCount.toLocaleString()}
-                    </span>
-                    <span className="text-[10px] text-gray-400 font-semibold">
-                      ({ordersCount} ord)
-                    </span>
-                    {/* Loop 3/120 honesty: card figures are id-hash
-                        illustrations, not ledger sales */}
-                    <span className="block text-[8px] text-gray-400 font-bold uppercase tracking-wider">
-                      Demo metrics
-                    </span>
-                  </div>
-                </div>
-
-                <div className="hidden xs:flex gap-4 mt-2">
-                  <div className="text-right">
-                    <span className="block text-[8px] text-gray-400 font-bold uppercase tracking-wider">
-                      Sync Log
-                    </span>
-                    <span className="block text-[9px] font-bold text-gray-500 dark:text-gray-300">
-                      {menuVersion} (Normal)
-                    </span>
-                  </div>
-                </div>
               </div>
-            </div>
           );
         })}
       </div>

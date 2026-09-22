@@ -11,28 +11,21 @@ import {
   Bar,
   Cell,
   Legend,
-  LineChart,
-  Line,
 } from "recharts";
 import {
-  BarChart3,
   TrendingUp,
   DollarSign,
   ShoppingBag,
   Eye,
   Megaphone,
-  Bell,
-  Percent,
   Layers,
-  Store,
-  Users,
   Zap,
   Tag,
   CheckCircle2,
 } from "lucide-react";
 import { PageHeader } from "../components/Headers";
 import { StatCard, AdminCard } from "../components/Cards";
-import { marketingStorage } from "./marketingData";
+import { marketingStorage, MarketingCampaign } from "./marketingData";
 import {
   useDashboardSnapshot,
   useRevenueSeries,
@@ -40,31 +33,6 @@ import {
 } from "../dashboard/hooks/useDashboardData";
 
 const CHART_FILLS = ["#0E4825", "#FF6600", "#F59E0B", "#16A34A", "#7C3AED"];
-
-// Marketing Analytics Data (New)
-const CHANNEL_PERF_DATA = [
-  { name: "WhatsApp", Dispatched: 2450, Delivered: 2390, Clicked: 412 },
-  { name: "App Push", Dispatched: 3030, Delivered: 2910, Clicked: 596 },
-  { name: "SMS Gateway", Dispatched: 1780, Delivered: 1680, Clicked: 142 },
-  { name: "Email Blast", Dispatched: 1540, Delivered: 1520, Clicked: 890 },
-];
-
-const COUPON_TRENDS = [
-  { date: "Jul 13", redemptions: 42, revenue: 12400 },
-  { date: "Jul 14", redemptions: 55, revenue: 16800 },
-  { date: "Jul 15", redemptions: 78, revenue: 23400 },
-  { date: "Jul 16", redemptions: 62, revenue: 19100 },
-  { date: "Jul 17", redemptions: 95, revenue: 28500 },
-  { date: "Jul 18", redemptions: 120, revenue: 38900 },
-  { date: "Jul 19", redemptions: 145, revenue: 45600 },
-];
-
-const OUTLET_CONVERSION = [
-  { name: "Navrangpura", sent: 1200, sales: 240, rate: 20.0 },
-  { name: "Science City", sent: 1000, sales: 180, rate: 18.0 },
-  { name: "CP Delhi", sent: 800, sales: 160, rate: 20.0 },
-  { name: "Sector 62 Noida", sent: 900, sales: 108, rate: 12.0 },
-];
 
 /** Formats an ISO date bucket (YYYY-MM-DD) as a short label like "12 Aug". */
 const formatBucketLabel = (bucket: string) => {
@@ -79,7 +47,7 @@ const formatINR = (paise: number) =>
 export const AdminAnalyticsPage: React.FC = () => {
   const [tab, setTab] = useState<"sales" | "marketing">("sales");
   const [rangeDays, setRangeDays] = useState(7);
-  const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [campaigns, setCampaigns] = useState<MarketingCampaign[]>([]);
 
   useEffect(() => {
     setCampaigns(marketingStorage.getCampaigns());
@@ -143,11 +111,38 @@ export const AdminAnalyticsPage: React.FC = () => {
   const totalClicked = campaigns.reduce((acc, c) => acc + c.stats.clicked, 0);
   const totalRevenue = campaigns.reduce((acc, c) => acc + c.stats.revenue, 0);
 
-  // Loop: zero-data fallbacks were FICTION ("96.2"/"45.8"/"14.2") presented
-  // as metrics. No data → em-dash, honest.
   const deliveryRate = totalSent > 0 ? ((totalDelivered / totalSent) * 100).toFixed(1) : "—";
-  const openRate = totalDelivered > 0 ? ((totalClicked / totalDelivered) * 180).toFixed(1) : "—"; // simulated open volume
   const ctr = totalDelivered > 0 ? ((totalClicked / totalDelivered) * 100).toFixed(1) : "—";
+
+  // Real channel stats derived from campaign records: each campaign's stats
+  // are split evenly across the channels it targets (no fabricated numbers).
+  const channelPerf = useMemo(() => {
+    const byChannel = new Map<string, { Dispatched: number; Delivered: number; Clicked: number }>();
+    for (const c of campaigns) {
+      const channels = c.channels.length > 0 ? c.channels : ["Unassigned"];
+      const share = 1 / channels.length;
+      for (const ch of channels) {
+        const row = byChannel.get(ch) || { Dispatched: 0, Delivered: 0, Clicked: 0 };
+        row.Dispatched += Math.round(c.stats.sent * share);
+        row.Delivered += Math.round(c.stats.delivered * share);
+        row.Clicked += Math.round(c.stats.clicked * share);
+        byChannel.set(ch, row);
+      }
+    }
+    return Array.from(byChannel.entries()).map(([name, v]) => ({ name, ...v }));
+  }, [campaigns]);
+
+  // Real campaign revenue bucketed by launch date (no fabricated trends).
+  const campaignRevenueTrend = useMemo(() => {
+    const byDate = new Map<string, number>();
+    for (const c of campaigns) {
+      const date = c.createdAt.slice(0, 10);
+      byDate.set(date, (byDate.get(date) || 0) + c.stats.revenue);
+    }
+    return Array.from(byDate.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, revenue]) => ({ date: formatBucketLabel(date), revenue }));
+  }, [campaigns]);
 
   return (
     <div className="space-y-6">
@@ -319,7 +314,7 @@ export const AdminAnalyticsPage: React.FC = () => {
               title="Open / Click-Through"
               value={ctr === "—" ? "—" : `${ctr}% CTR`}
               icon={Zap}
-              subtext={openRate === "—" ? "No delivery data yet" : `${openRate}% open rates`}
+              subtext="Clicked links per delivered message"
             />
             <StatCard
               title="Voucher Revenue"
@@ -334,12 +329,12 @@ export const AdminAnalyticsPage: React.FC = () => {
             {/* Channel Gateway Performance bar charts */}
             <AdminCard
               title="Delivery Gateway Funnel by Channel"
-              subtitle="Dispatches, successful deliveries and clicked links across gateways"
+              subtitle="Campaign stats split evenly across the channels each campaign targets"
             >
               <div className="h-80 w-full font-sans text-xs mt-4">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
-                    data={CHANNEL_PERF_DATA}
+                    data={channelPerf}
                     margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#EAEAEA" />
@@ -362,13 +357,13 @@ export const AdminAnalyticsPage: React.FC = () => {
 
             {/* Coupon Redemptions and Revenue generated */}
             <AdminCard
-              title="Voucher Usage & Conversion Trends"
-              subtitle="Consolidated daily promotional checkout redemptions vs. direct sales"
+              title="Campaign Revenue by Launch Date"
+              subtitle="Real voucher revenue from campaign records, bucketed by launch date"
             >
               <div className="h-80 w-full font-sans text-xs mt-4">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart
-                    data={COUPON_TRENDS}
+                    data={campaignRevenueTrend}
                     margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
                   >
                     <defs>
@@ -390,7 +385,7 @@ export const AdminAnalyticsPage: React.FC = () => {
                     <Area
                       type="monotone"
                       dataKey="revenue"
-                      name="Direct Sales (₹)"
+                      name="Campaign Revenue (₹)"
                       stroke="#FF6600"
                       strokeWidth={3}
                       fillOpacity={1}
@@ -401,94 +396,8 @@ export const AdminAnalyticsPage: React.FC = () => {
               </div>
             </AdminCard>
           </div>
-
-          {/* Store specific campaign comparisons */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2">
-              <AdminCard
-                title="Outlet Campaign ROI Comparison"
-                subtitle="Analyzing campaign dispatch volumes against paid conversion rates per store outlet"
-              >
-                <div className="h-80 w-full font-sans text-xs mt-4">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={OUTLET_CONVERSION}
-                      margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#EAEAEA" />
-                      <XAxis dataKey="name" stroke="#A3A3A3" fontSize={11} tickLine={false} />
-                      <YAxis stroke="#A3A3A3" fontSize={11} tickLine={false} axisLine={false} />
-                      <Tooltip
-                        contentStyle={{
-                          borderRadius: "16px",
-                          border: "1px solid #EAEAEA",
-                        }}
-                      />
-                      <Legend verticalAlign="top" height={36} />
-                      <Bar
-                        dataKey="sent"
-                        name="Recipients Targeted"
-                        fill="#0E4825"
-                        radius={[6, 6, 0, 0]}
-                      />
-                      <Bar
-                        dataKey="sales"
-                        name="Checkouts Recorded"
-                        fill="#F59E0B"
-                        radius={[6, 6, 0, 0]}
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </AdminCard>
-            </div>
-
-            <AdminCard
-              title="Conversion Success Ratio"
-              subtitle="Direct conversion rates per outlet targeted"
-            >
-              <div className="space-y-5 mt-4">
-                {OUTLET_CONVERSION.map((outlet) => (
-                  <div key={outlet.name} className="space-y-1.5">
-                    <div className="flex justify-between text-xs font-bold text-gray-800 dark:text-gray-200">
-                      <span>{outlet.name}</span>
-                      <span className="font-mono text-primary dark:text-emerald-400">
-                        {outlet.rate}% Success
-                      </span>
-                    </div>
-                    {/* Visual custom progress bar */}
-                    <div className="h-2 w-full rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
-                      <div
-                        className="h-full bg-gradient-to-r from-primary to-accent rounded-full transition-all"
-                        style={{ width: `${outlet.rate * 4}%` }} // multiplier to highlight conversion difference
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </AdminCard>
-          </div>
         </div>
       )}
     </div>
   );
 };
-
-// Compact local icon helper
-const CheckCircle2Icon: React.FC<any> = (props) => (
-  <svg
-    {...props}
-    xmlns="http://www.w3.org/2000/svg"
-    width="24"
-    height="24"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" />
-    <path d="m9 12 2 2 4-4" />
-  </svg>
-);

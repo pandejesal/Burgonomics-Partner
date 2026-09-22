@@ -1,6 +1,5 @@
 import React, { useState } from "react";
-import { motion } from "motion/react";
-import { Database, Search, Trash2, RefreshCw, Zap, Clock, Flame, CheckCircle2 } from "lucide-react";
+import { Database, Search } from "lucide-react";
 
 interface RedisKey {
   key: string;
@@ -11,86 +10,13 @@ interface RedisKey {
   value: string;
 }
 
-const INITIAL_KEYS: RedisKey[] = [
-  {
-    key: "menu:catalog:connaught_place:full",
-    type: "string",
-    group: "menu_cache",
-    ttlSec: 3600,
-    sizeBytes: 1450000,
-    value:
-      '{"storeId":"connaught_place","categories":[{"id":"cat_1","name":"Burgers","items":[{...}]}]}',
-  },
-  {
-    key: "session:usr_94a2b_tok_9210",
-    type: "hash",
-    group: "session_cache",
-    ttlSec: 1209600,
-    sizeBytes: 450,
-    value: '{"userId":"usr_94a2b","phone":"9876543210","role":"operations","expires":1784920402}',
-  },
-  {
-    key: "otp:challenge:otp_4821a0f9b32e",
-    type: "hash",
-    group: "otp_cache",
-    ttlSec: 180,
-    sizeBytes: 210,
-    value:
-      '{"phone":"9021482142","codeHash":"a7c390ef42","encryptedCode":"928afc2104bf","attempts":1}',
-  },
-  {
-    key: "ratelimit:ip:103.45.201.12",
-    type: "string",
-    group: "rate_limit",
-    ttlSec: 52,
-    sizeBytes: 64,
-    value: "4",
-  },
-  {
-    key: "ratelimit:phone:9021482142",
-    type: "string",
-    group: "rate_limit",
-    ttlSec: 32,
-    sizeBytes: 64,
-    value: "1",
-  },
-];
-
 export const SystemRedisTab: React.FC = () => {
-  const [keys, setKeys] = useState<RedisKey[]>(INITIAL_KEYS);
+  const [keys] = useState<RedisKey[]>([]);
   const [selectedKey, setSelectedKey] = useState<RedisKey | null>(null);
   const [searchPattern, setSearchPattern] = useState("");
   const [activeGroupFilter, setActiveGroupFilter] = useState<
     "all" | "menu" | "session" | "otp" | "rate"
   >("all");
-
-  const handleDeleteKey = (targetKey: string) => {
-    setKeys((prev) => prev.filter((k) => k.key !== targetKey));
-    if (selectedKey?.key === targetKey) {
-      setSelectedKey(null);
-    }
-  };
-
-  const handleFlushGroup = (group: "menu_cache" | "session_cache" | "otp_cache" | "rate_limit") => {
-    setKeys((prev) => prev.filter((k) => k.group !== group));
-    setSelectedKey(null);
-    alert(`Flushed Redis Cache Group successfully: ${group}`);
-  };
-
-  const handleWarmCache = () => {
-    alert(
-      "Warming core caching layer: Querying SQL tables and warming Redis cache pipelines for all 8 active menu cards...",
-    );
-    const warmedKey: RedisKey = {
-      key: "menu:catalog:global_all_stores:full",
-      type: "string",
-      group: "menu_cache",
-      ttlSec: 3600,
-      sizeBytes: 4120000,
-      value: '{"cache_type":"warmed_all_stores_catalog","stores":8,"warmed_at":1784920402}',
-    };
-    setKeys((prev) => [...prev.filter((k) => k.key !== warmedKey.key), warmedKey]);
-  };
 
   const filteredKeys = keys.filter((k) => {
     const matchesPattern = k.key.toLowerCase().includes(searchPattern.toLowerCase());
@@ -122,84 +48,12 @@ export const SystemRedisTab: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Loop: local mock state only (no Redis/SQL in this stack — backend is
-          Firestore). Badge it; flush/warm buttons mutate the demo list. */}
-      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20 w-fit">
-        Simulated data — not live metrics
-      </div>
       {/* Redis cache groups row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="p-5 rounded-[20px] bg-[#0c130e] border border-gray-800 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] text-gray-500 uppercase tracking-widest font-mono font-bold">
-                Catalog Memory
-              </span>
-              <Database size={14} className="text-emerald-400" />
-            </div>
-            <span className="block text-lg font-bold text-white mt-2 font-mono">1.45 MB</span>
-          </div>
-          <button
-            onClick={() => handleFlushGroup("menu_cache")}
-            className="mt-4 text-left text-[9px] font-bold uppercase text-red-400 tracking-wider hover:underline"
-          >
-            Flush Catalog cache
-          </button>
-        </div>
-
-        <div className="p-5 rounded-[20px] bg-[#0c130e] border border-gray-800 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] text-gray-500 uppercase tracking-widest font-mono font-bold">
-                Sessions Stack
-              </span>
-              <Clock size={14} className="text-blue-400" />
-            </div>
-            <span className="block text-lg font-bold text-white mt-2 font-mono">450 Bytes</span>
-          </div>
-          <button
-            onClick={() => handleFlushGroup("session_cache")}
-            className="mt-4 text-left text-[9px] font-bold uppercase text-red-400 tracking-wider hover:underline"
-          >
-            Flush user sessions
-          </button>
-        </div>
-
-        <div className="p-5 rounded-[20px] bg-[#0c130e] border border-gray-800 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] text-gray-500 uppercase tracking-widest font-mono font-bold">
-                OTP Challenges
-              </span>
-              <Zap size={14} className="text-amber-400" />
-            </div>
-            <span className="block text-lg font-bold text-white mt-2 font-mono">210 Bytes</span>
-          </div>
-          <button
-            onClick={() => handleFlushGroup("otp_cache")}
-            className="mt-4 text-left text-[9px] font-bold uppercase text-red-400 tracking-wider hover:underline"
-          >
-            Flush otp challenges
-          </button>
-        </div>
-
-        <div className="p-5 rounded-[20px] bg-[#0c130e] border border-gray-800 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] text-gray-500 uppercase tracking-widest font-mono font-bold">
-                Rate Limits Pool
-              </span>
-              <Trash2 size={14} className="text-purple-400" />
-            </div>
-            <span className="block text-lg font-bold text-white mt-2 font-mono">128 Bytes</span>
-          </div>
-          <button
-            onClick={() => handleFlushGroup("rate_limit")}
-            className="mt-4 text-left text-[9px] font-bold uppercase text-red-400 tracking-wider hover:underline"
-          >
-            Clear rate limits
-          </button>
-        </div>
+      <div className="p-6 rounded-[20px] bg-[#0c130e] border border-gray-800 flex flex-col items-center justify-center text-center space-y-2">
+        <Database size={24} className="text-gray-700" />
+        <p className="text-xs text-gray-500 font-mono">
+          No cache telemetry yet — this view will populate once a cache layer is deployed and monitored.
+        </p>
       </div>
 
       {/* Redis Explorer Table Suite */}
@@ -226,21 +80,15 @@ export const SystemRedisTab: React.FC = () => {
                   className="bg-transparent border-0 outline-none text-[11px] text-white placeholder-gray-600 font-mono w-[130px]"
                 />
               </div>
-              <button
-                onClick={handleWarmCache}
-                className="px-2.5 py-1 bg-primary/20 border border-emerald-950 text-emerald-400 text-[10px] font-black uppercase tracking-wider rounded-lg flex items-center gap-1 hover:bg-primary/40 cursor-pointer"
-              >
-                <Flame size={12} /> Warm
-              </button>
             </div>
           </div>
 
           {/* Redis groups selector */}
           <div className="flex items-center gap-1.5 border-b border-gray-900 pb-2 overflow-x-auto no-scrollbar">
-            {["all", "menu", "session", "otp", "rate"].map((g) => (
+            {(["all", "menu", "session", "otp", "rate"] as const).map((g) => (
               <button
                 key={g}
-                onClick={() => setActiveGroupFilter(g as any)}
+                onClick={() => setActiveGroupFilter(g)}
                 className={`px-3 py-1 rounded text-[10px] font-black uppercase tracking-wider font-mono ${
                   activeGroupFilter === g
                     ? "bg-primary text-white"
@@ -253,54 +101,54 @@ export const SystemRedisTab: React.FC = () => {
           </div>
 
           <div className="space-y-2.5 max-h-[340px] overflow-y-auto custom-scrollbar">
-            {filteredKeys.map((k) => (
-              <div
-                key={k.key}
-                onClick={() => setSelectedKey(k)}
-                className={`p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
-                  selectedKey?.key === k.key
-                    ? "bg-primary/15 border-emerald-700/50"
-                    : "bg-black/30 border-gray-900/60 hover:border-gray-800"
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="text-[10px] font-black px-1.5 py-0.5 rounded bg-black/40 text-gray-400 border border-gray-900 font-mono uppercase">
-                    {k.type}
+            {filteredKeys.length === 0 ? (
+              <div className="py-16 text-center space-y-2">
+                <Database size={24} className="text-gray-700 mx-auto animate-pulse" />
+                <p className="text-xs text-gray-500 font-mono">
+                  No Redis keys to inspect — the key explorer will populate once a cache layer is deployed.
+                </p>
+              </div>
+            ) : (
+              filteredKeys.map((k) => (
+                <div
+                  key={k.key}
+                  onClick={() => setSelectedKey(k)}
+                  className={`p-3.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
+                    selectedKey?.key === k.key
+                      ? "bg-primary/15 border-emerald-700/50"
+                      : "bg-black/30 border-gray-900/60 hover:border-gray-800"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="text-[10px] font-black px-1.5 py-0.5 rounded bg-black/40 text-gray-400 border border-gray-900 font-mono uppercase">
+                      {k.type}
+                    </div>
+                    <div>
+                      <span className="block text-xs font-bold text-white font-mono break-all leading-tight">
+                        {k.key}
+                      </span>
+                      <div className="flex items-center gap-2 mt-1">
+                        {getGroupBadge(k.group)}
+                        <span className="text-[9px] text-gray-500 font-mono">
+                          Size:{" "}
+                          {k.sizeBytes > 1000
+                            ? `${(k.sizeBytes / 1000).toFixed(1)} KB`
+                            : `${k.sizeBytes} B`}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <span className="block text-xs font-bold text-white font-mono break-all leading-tight">
-                      {k.key}
-                    </span>
-                    <div className="flex items-center gap-2 mt-1">
-                      {getGroupBadge(k.group)}
-                      <span className="text-[9px] text-gray-500 font-mono">
-                        Size:{" "}
-                        {k.sizeBytes > 1000
-                          ? `${(k.sizeBytes / 1000).toFixed(1)} KB`
-                          : `${k.sizeBytes} B`}
+
+                  <div className="flex items-center gap-3 shrink-0 font-mono text-right">
+                    <div>
+                      <span className="block text-[10px] text-amber-400 font-bold">
+                        TTL: {k.ttlSec}s
                       </span>
                     </div>
                   </div>
                 </div>
-
-                <div className="flex items-center gap-3 shrink-0 font-mono text-right">
-                  <div>
-                    <span className="block text-[10px] text-amber-400 font-bold">
-                      TTL: {k.ttlSec}s
-                    </span>
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteKey(k.key);
-                    }}
-                    className="p-1.5 text-gray-600 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
 

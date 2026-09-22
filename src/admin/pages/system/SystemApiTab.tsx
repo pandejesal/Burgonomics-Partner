@@ -1,6 +1,5 @@
 import React, { useState } from "react";
-import { motion } from "motion/react";
-import { Network, Globe, Search, Lock, Unlock, Play, Send, Sparkles } from "lucide-react";
+import { Network, Search, Lock, Unlock } from "lucide-react";
 
 interface ApiEndpoint {
   method: "GET" | "POST" | "PUT" | "DELETE";
@@ -25,7 +24,15 @@ const DISCOVERED_APIS: ApiEndpoint[] = [
       "Generate dynamic 6-digit OTP code and send with fallback routing to SMS/WhatsApp gateway.",
     requestSchema: JSON.stringify({ phone: "9876543210", deliveryMethod: "whatsapp" }, null, 2),
     responseSchema: JSON.stringify(
-      { success: true, data: { otpToken: "otp_abc123", simulated: true, code: "123456" } },
+      {
+        success: true,
+        data: {
+          otpToken: "otp_abc123",
+          expiresInSec: 300,
+          resendAfterSec: 30,
+          deliveryMethod: "whatsapp",
+        },
+      },
       null,
       2,
     ),
@@ -95,72 +102,9 @@ export const SystemApiTab: React.FC = () => {
     "all",
   );
   const [searchQuery, setSearchQuery] = useState("");
-  const [testPayload, setTestPayload] = useState("");
-  const [testResponse, setTestResponse] = useState("");
-  const [isTesting, setIsTesting] = useState(false);
 
   const handleSelectApi = (api: ApiEndpoint) => {
     setSelectedApi(api);
-    setTestPayload(api.requestSchema || "{\n  \n}");
-    setTestResponse("");
-  };
-
-  const handleTriggerTest = async () => {
-    if (!selectedApi) return;
-    setIsTesting(true);
-    setTestResponse("");
-
-    // Fast simulation of REST API tests with real-like execution times
-    setTimeout(() => {
-      try {
-        if (selectedApi.route.includes("request")) {
-          setTestResponse(
-            JSON.stringify(
-              {
-                status: 200,
-                headers: { "content-type": "application/json" },
-                body: {
-                  success: true,
-                  data: {
-                    otpToken: "otp_test_" + Math.random().toString(36).substring(7),
-                    expiresInSec: 300,
-                    resendAfterSec: 30,
-                    code: "123456",
-                    simulated: true,
-                    deliveryMethod: "whatsapp",
-                  },
-                },
-              },
-              null,
-              2,
-            ),
-          );
-        } else if (selectedApi.route.includes("/metrics")) {
-          setTestResponse(
-            `HTTP/1.1 200 OK\nContent-Type: text/plain; version=0.0.4\n\n# HELP petpooja_api_latency_seconds Latency of Petpooja API\npetpooja_api_latency_seconds{quantile="0.5"} 0.135\npetpooja_api_latency_seconds_count 1450`,
-          );
-        } else {
-          // General mock response matching schema
-          setTestResponse(
-            JSON.stringify(
-              {
-                status: 200,
-                headers: { "content-type": "application/json" },
-                body: JSON.parse(selectedApi.responseSchema || '{"success":true}'),
-              },
-              null,
-              2,
-            ),
-          );
-        }
-      } catch (err) {
-        setTestResponse(
-          "JSON Payload formatting exception while assembling request client properties.",
-        );
-      } finally {
-        setIsTesting(false);
-      }
-    }, 1200);
   };
 
   const filteredApis = endpoints.filter((api) => {
@@ -193,8 +137,7 @@ export const SystemApiTab: React.FC = () => {
             AUTOMATIC API SCHEMA EXPLORER
           </h3>
           <p className="text-[10px] text-gray-400 font-mono mt-0.5">
-            Discover rest controllers, authenticate tokens, test endpoints, and monitor rate limit
-            quotas
+            Discover rest controllers, inspect schemas, and monitor rate limit quotas
           </p>
         </div>
 
@@ -204,7 +147,7 @@ export const SystemApiTab: React.FC = () => {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
             </span>
-            <span className="text-gray-300 font-bold">18 Endpoints Registered</span>
+            <span className="text-gray-300 font-bold">{DISCOVERED_APIS.length} Endpoints Registered</span>
           </div>
         </div>
       </div>
@@ -232,10 +175,10 @@ export const SystemApiTab: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-1.5 border-b border-gray-900 pb-2 overflow-x-auto no-scrollbar">
-            {["all", "Auth", "Orders", "Petpooja", "Health"].map((g) => (
+            {(["all", "Auth", "Orders", "Petpooja", "Health"] as const).map((g) => (
               <button
                 key={g}
-                onClick={() => setActiveGroup(g as any)}
+                onClick={() => setActiveGroup(g)}
                 className={`px-3 py-1 rounded text-[10px] font-black uppercase tracking-wider font-mono ${
                   activeGroup === g
                     ? "bg-primary text-white"
@@ -300,7 +243,7 @@ export const SystemApiTab: React.FC = () => {
             <div>
               <div className="border-b border-gray-800 pb-3 flex items-center justify-between">
                 <span className="font-mono text-xs font-black text-emerald-400 uppercase tracking-widest">
-                  REST Sandbox
+                  Endpoint Schema Viewer
                 </span>
               </div>
 
@@ -322,48 +265,21 @@ export const SystemApiTab: React.FC = () => {
                       <span className="block text-[9px] text-gray-500 uppercase font-bold mb-1">
                         Body Params (JSON)
                       </span>
-                      <textarea
-                        value={testPayload}
-                        onChange={(e) => setTestPayload(e.target.value)}
-                        className="w-full h-[100px] bg-black text-gray-300 border border-gray-900 rounded-lg p-2 font-mono text-[9px] outline-none focus:border-emerald-700 select-all leading-normal"
-                      />
+                      <pre className="w-full bg-black text-gray-300 border border-gray-900 rounded-lg p-2 font-mono text-[9px] select-all leading-normal whitespace-pre-wrap break-all">
+                        {selectedApi.requestSchema}
+                      </pre>
                     </div>
-                  )}
-
-                  {/* Loop: "Test Endpoint" fakes a 200 + OTP code with zero
-                      backend calls (see handleTriggerTest). Demo tooling,
-                      DEV-only; the explorer docs stay visible in prod. */}
-                  {import.meta.env.DEV && (
-                  <button
-                    onClick={handleTriggerTest}
-                    disabled={isTesting}
-                    className="w-full py-2 bg-primary hover:bg-[#156d39] disabled:opacity-40 text-white rounded-lg flex items-center justify-center gap-1.5 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer"
-                  >
-                    <Send size={12} className={isTesting ? "animate-spin" : ""} />
-                    <span>{isTesting ? "Sending Request..." : "Test Endpoint"}</span>
-                  </button>
                   )}
                 </div>
               ) : (
                 <div className="py-20 text-center space-y-2">
                   <Network size={24} className="text-gray-700 mx-auto animate-pulse" />
                   <p className="text-xs text-gray-500 font-mono">
-                    Select a registered endpoint row to load REST sandbox variables
+                    Select a registered endpoint row to inspect its request schema
                   </p>
                 </div>
               )}
             </div>
-
-            {testResponse && (
-              <div className="mt-4 pt-4 border-t border-gray-800">
-                <span className="block text-[9px] text-gray-500 uppercase font-bold mb-1">
-                  REST Response Payload
-                </span>
-                <pre className="p-2.5 rounded-lg bg-black text-emerald-400 border border-gray-950 font-mono text-[9px] overflow-y-auto select-all max-h-[160px] leading-relaxed break-all whitespace-pre">
-                  {testResponse}
-                </pre>
-              </div>
-            )}
           </div>
         </div>
       </div>

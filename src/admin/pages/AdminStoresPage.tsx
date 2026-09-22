@@ -271,7 +271,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
     toast.success(`${label} copied to clipboard!`);
   };
 
-  // Multi-action simulator handlers
+  // Multi-action store operation handlers
   const handleToggleStoreActiveState = (storeId: string) => {
     if (isReadOnly) {
       toast.error("Access Denied: Read-only role cannot alter store operations.");
@@ -672,7 +672,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                     title="Consolidated Revenue (Today)"
                     value={`₹${stats.rev.toLocaleString()}`}
                     icon={TrendingUp}
-                    subtext="Simulated from connected POS APIs"
+                    subtext="Aggregated from outlet records"
                   />
                   <StatCard
                     title="Petpooja API Link Health"

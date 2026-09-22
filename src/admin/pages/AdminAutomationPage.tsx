@@ -15,7 +15,6 @@ import {
   ArrowDown,
   Sparkles,
   RefreshCw,
-  Send,
 } from "lucide-react";
 import { PageHeader } from "../components/Headers";
 import { StatCard, AdminCard } from "../components/Cards";
@@ -33,7 +32,7 @@ export const AdminAutomationPage: React.FC = () => {
   // Form states
   const [flowName, setFlowName] = useState("");
   const [flowDesc, setFlowDesc] = useState("");
-  const [triggerType, setTriggerType] = useState<any>("Registration");
+  const [triggerType, setTriggerType] = useState<string>("Registration");
 
   useEffect(() => {
     const flows = marketingStorage.getAutomations();
@@ -110,11 +109,8 @@ export const AdminAutomationPage: React.FC = () => {
     setShowCreateModal(false);
   };
 
-  const handleSimulateTrigger = (id: string) => {
-    marketingStorage.simulateAutomationTrigger(id);
-  };
-
   const activeCount = automations.filter((a) => a.status === "Active").length;
+  const totalConversions = automations.reduce((sum, a) => sum + a.stats.conversions, 0);
 
   return (
     <div className="space-y-6">
@@ -141,11 +137,11 @@ export const AdminAutomationPage: React.FC = () => {
         <AdminCard className="flex items-center justify-between">
           <div>
             <span className="block text-xs font-bold text-gray-400 uppercase tracking-widest">
-              Journey Conversion Rate
+              Total Conversions
             </span>
-            <span className="block text-2xl font-black text-accent dark:text-accent-light mt-1 font-mono">34.2%</span>
+            <span className="block text-2xl font-black text-accent dark:text-accent-light mt-1 font-mono">{totalConversions}</span>
             <p className="text-[10px] text-gray-400 mt-0.5">
-              Weighted conversion from initial triggers.
+              Real conversions recorded by journey flows.
             </p>
           </div>
           <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-orange-50 text-accent">
@@ -260,23 +256,6 @@ export const AdminAutomationPage: React.FC = () => {
             <AdminCard
               title={`Visual Canvas: ${selectedFlow.name}`}
               subtitle="Sequence of event triggers, queue delay parameters, and dispatch filters"
-              extra={
-                /* Loop: simulate writes a FAKE Delivered journey entry under a
-                   REAL customer name + bumps stats with Math.random — demo
-                   tooling, DEV-only in prod builds. */
-                import.meta.env.DEV ? (
-                <AdminButton
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => handleSimulateTrigger(selectedFlow.id)}
-                  disabled={selectedFlow.status !== "Active"}
-                  className="bg-orange-50 hover:bg-orange-100 border border-orange-200 text-accent"
-                >
-                  <Send size={12} />
-                  <span>Simulate Real Trigger</span>
-                </AdminButton>
-                ) : undefined
-              }
             >
               {/* Interactive Visual Node Timeline graph representation */}
               <div className="p-6 bg-gray-50/50 dark:bg-[#121212]/50 border border-gray-100 dark:border-gray-800 rounded-3xl flex flex-col items-center space-y-4 relative min-h-[440px] justify-center">
@@ -380,7 +359,7 @@ export const AdminAutomationPage: React.FC = () => {
           onClose={() => setConfirmDeleteId(null)}
           onConfirm={() => handleDeleteFlow(confirmDeleteId)}
           title="Permanently Delete Journey Flow?"
-          description="Are you sure you want to delete this journey automation flow? All queue tasks, background threads, and simulated statistics will be permanently scrubbed."
+          description="Are you sure you want to delete this journey automation flow? All queue tasks and background threads will be permanently scrubbed."
           confirmLabel="Delete Flow"
         />
       )}
@@ -426,7 +405,7 @@ export const AdminAutomationPage: React.FC = () => {
                 </label>
                 <select
                   value={triggerType}
-                  onChange={(e) => setTriggerType(e.target.value as any)}
+                  onChange={(e) => setTriggerType(e.target.value)}
                   className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-black px-3 py-2 text-sm focus:outline-none dark:text-white"
                 >
                   <option value="Registration">Customer Registration</option>

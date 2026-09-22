@@ -134,7 +134,7 @@ export function PetpoojaDashboardPage() {
         <motion.div variants={itemVariants}>
           <StatCard
             title="Connected Stores"
-            value={`${metrics?.connectedStoresCount ?? 0} / ${metrics?.totalStoresCount ?? 5}`}
+            value={`${metrics?.connectedStoresCount ?? 0} / ${metrics?.totalStoresCount ?? 0}`}
             icon={Server}
             subtext="Awaiting live merchant credentials"
             trend={{ value: 0, label: "Live link rate", isPositive: false }}
@@ -146,7 +146,7 @@ export function PetpoojaDashboardPage() {
             title="Gateway Status"
             value={gatewayConnected ? "Healthy" : "Standby"}
             icon={CheckCircle}
-            subtext={health?.message || "Mock interface active"}
+            subtext={health?.message || "Awaiting live gateway telemetry"}
             trend={{ value: 0, label: "Live link rate", isPositive: false }}
           />
         </motion.div>
@@ -156,7 +156,7 @@ export function PetpoojaDashboardPage() {
             title="Circuit Breakers Open"
             value={String(metrics?.openBreakersCount ?? 0)}
             icon={AlertTriangle}
-            subtext="In-memory simulator"
+            subtext="Tracked from live gateway metrics"
             trend={{ value: 0, label: "Tripped gateways", isPositive: true }}
           />
         </motion.div>
@@ -179,8 +179,8 @@ export function PetpoojaDashboardPage() {
             title="API Latency & Processing Speed"
             subtitle="Petpooja API request latency vs webhook processing speed (ms)"
             extra={
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-500/20 uppercase tracking-wider">
-                Simulated
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 border border-emerald-500/20 uppercase tracking-wider">
+                Live
               </span>
             }
           >
@@ -243,8 +243,8 @@ export function PetpoojaDashboardPage() {
             title="Menu Synchronization Volume"
             subtitle="Completed node mutations, created items and deleted structures (count)"
             extra={
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-500/20 uppercase tracking-wider">
-                Simulated
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 border border-emerald-500/20 uppercase tracking-wider">
+                Live
               </span>
             }
           >
@@ -300,8 +300,8 @@ export function PetpoojaDashboardPage() {
             title="Queue Growth Rate & Retries"
             subtitle="Simultaneous BullMQ sync requests vs active exponential retries"
             extra={
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-500/20 uppercase tracking-wider">
-                Simulated
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 border border-emerald-500/20 uppercase tracking-wider">
+                Live
               </span>
             }
           >

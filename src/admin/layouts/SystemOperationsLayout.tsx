@@ -40,7 +40,7 @@ export const SystemOperationsLayout: React.FC<SystemOperationsLayoutProps> = ({ 
   const [aiChat, setAiChat] = useState<{ role: "user" | "assistant"; text: string }[]>([
     {
       role: "assistant",
-      text: "Welcome to BURGONOMICS Mission Control System Diagnostics. I have full read-only access to live systems (BullMQ, Redis, Prometheus Metrics, API gateways, database logs). How can I assist you with debugging, performance auditing, or systems management today?",
+      text: "Welcome to BURGONOMICS Mission Control System Diagnostics. I query the developer diagnostics endpoint to help with debugging, performance auditing, and systems management. How can I assist you today?",
     },
   ]);
   const [isAiLoading, setIsAiLoading] = useState(false);
@@ -51,7 +51,7 @@ export const SystemOperationsLayout: React.FC<SystemOperationsLayoutProps> = ({ 
     const timer = setInterval(() => {
       setRefreshCountdown((prev) => {
         if (prev <= 1) {
-          // Trigger a simulated global telemetry ping
+          // Reset the auto-refresh countdown (display only — no telemetry ping is fired)
           return 10;
         }
         return prev - 1;

@@ -26,14 +26,27 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+// Honest "no data yet" defaults — no fabricated store or metrics.
+const STANDBY_STATE: StoreOperationalState = {
+  storeId: "",
+  menuVersion: "Standby",
+  lastSuccessfulVersion: "Standby",
+  lastSyncTime: "Awaiting sync",
+  webhookStatus: "standby",
+  circuitBreaker: "closed",
+  queueState: "idle",
+  retryCount: 0,
+  apiCredentialsLinked: false,
+  webhookSecretLinked: false,
+  posTerminalOnline: false,
+};
 
 export function PetpoojaStoresPage() {
   const [stores, setStores] = useState<GatewayStore[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedStoreId, setSelectedStoreId] = useState<string>("str_001");
+  const [selectedStoreId, setSelectedStoreId] = useState<string>("");
   const [storeStates, setStoreStates] = useState<Record<string, StoreOperationalState>>({});
-  // Loop: was seeded with DEFAULT_SYNC_REPORT (simulated:true) — plausible
-  // numbers with no badge. Null until a real op runs; honest empty state.
+  // Null until a real sync operation runs; honest empty state.
   const [syncReport, setSyncReport] = useState<SyncReport | null>(null);
 
   // Manual Operations state management
@@ -66,26 +79,11 @@ export function PetpoojaStoresPage() {
     });
   }, []);
 
-  const selectedStore = stores.find((s) => s.id === selectedStoreId) ||
-    stores[0] || {
-      id: "str_001",
-      name: "Burgonomics Navrangpura",
-      petpoojaRestId: "rest_navrangpura",
-    };
+  const selectedStore = stores.find((s) => s.id === selectedStoreId) || stores[0] || null;
 
-  const selectedState: StoreOperationalState = storeStates[selectedStore.id] || {
-    storeId: selectedStore.id,
-    menuVersion: "Standby",
-    lastSuccessfulVersion: "Standby",
-    lastSyncTime: "Awaiting sync",
-    webhookStatus: "standby",
-    circuitBreaker: "closed",
-    queueState: "idle",
-    retryCount: 0,
-    apiCredentialsLinked: false,
-    webhookSecretLinked: false,
-    posTerminalOnline: false,
-  };
+  const selectedState: StoreOperationalState = selectedStore
+    ? storeStates[selectedStore.id] || STANDBY_STATE
+    : STANDBY_STATE;
 
   // Filter stores based on search query
   const filteredStores = stores.filter(
@@ -264,6 +262,7 @@ export function PetpoojaStoresPage() {
             Petpooja Merchant Control Room
           </span>
 
+          {selectedStore ? (
           <AdminCard
             title={selectedStore.name}
             subtitle={`Integrated with POS node terminal ${selectedStore.petpoojaRestId}`}
@@ -499,7 +498,6 @@ export function PetpoojaStoresPage() {
                             ...prev,
                             [selectedStore.id]: {
                               ...prev[selectedStore.id],
-                              posTerminalOnline: false,
                               lastSyncTime: "Just now",
                             },
                           }));
@@ -605,6 +603,11 @@ export function PetpoojaStoresPage() {
               </div>
             </div>
           </AdminCard>
+          ) : (
+            <div className="p-4 rounded-2xl bg-gray-50 dark:bg-gray-900 border border-dashed border-gray-200 dark:border-gray-800/50 text-xs text-gray-500">
+              No Petpooja stores connected yet — connect a store to manage sync, cache, and circuit breakers.
+            </div>
+          )}
         </div>
       </div>
 

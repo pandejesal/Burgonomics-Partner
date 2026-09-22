@@ -33,10 +33,10 @@ export const AdminCreateCampaignPage: React.FC = () => {
   // Wizard state fields
   const [campaignName, setCampaignName] = useState("");
   const [campaignDesc, setCampaignDesc] = useState("");
-  const [objective, setObjective] = useState<any>("Sales Conversion");
+  const [objective, setObjective] = useState<MarketingCampaign["objective"]>("Sales Conversion");
   const [channels, setChannels] = useState<string[]>(["Push"]);
 
-  const [audienceType, setAudienceType] = useState<any>("Entire Base");
+  const [audienceType, setAudienceType] = useState<MarketingCampaign["audienceType"]>("Entire Base");
   const [selectedSegmentId, setSelectedSegmentId] = useState("");
   const [selectedCity, setSelectedCity] = useState("Ahmedabad");
   const [selectedStore, setSelectedStore] = useState("Burgonomics Navrangpura");
@@ -126,11 +126,11 @@ export const AdminCreateCampaignPage: React.FC = () => {
       audienceVal = `${selectedCustomerIds.length} profiles`;
     }
 
-    const payload: any = {
+    const payload: Omit<MarketingCampaign, "id" | "createdAt" | "createdBy" | "stats"> = {
       name: campaignName,
       description: campaignDesc || `Campaign pushing ${msgTitle}`,
       objective,
-      channels: channels as any,
+      channels: channels as Array<"Push" | "SMS" | "WhatsApp" | "Email" | "In-App">,
       status: scheduleType === "now" ? "Active" : "Scheduled",
       audienceType,
       audienceFilterValue: audienceVal,
@@ -782,8 +782,8 @@ export const AdminCreateCampaignPage: React.FC = () => {
         {/* STEP RIGHT COLS: PHONE PREVIEW MODULE */}
         <div className="space-y-6">
           <AdminCard
-            title="Channel Mock Preview"
-            subtitle="Simulated mock of how the alert renders on customer phone"
+            title="Channel Preview"
+            subtitle="Live preview of how the alert renders on a customer phone"
           >
             {/* Phone shell container */}
             <div className="relative mx-auto max-w-[280px] h-[520px] rounded-[36px] border-[12px] border-gray-900 dark:border-gray-800 bg-gray-100 dark:bg-[#121212] overflow-hidden shadow-2xl flex flex-col">

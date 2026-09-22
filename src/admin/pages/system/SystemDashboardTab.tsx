@@ -1,12 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { motion } from "motion/react";
 import {
   Cpu,
-  Database,
-  Zap,
   Activity,
-  CheckCircle,
-  AlertTriangle,
   HardDrive,
   Users,
   RefreshCw,
@@ -52,9 +47,9 @@ const MiniStatCard: React.FC<StatCardProps> = ({ title, value, icon: Icon, statu
 };
 
 export const SystemDashboardTab: React.FC = () => {
-  const [cpuVal, setCpuVal] = useState(24);
-  const [memVal, setMemVal] = useState(48.5);
-  const [activeUsers, setActiveUsers] = useState(115);
+  const [cpuVal] = useState<number | null>(null);
+  const [memVal] = useState<number | null>(null);
+  const [activeUsers] = useState<number | null>(null);
   // Loop 30/120: latency is MEASURED (null = no successful probe yet), never
   // the old random walk.
   const [respTime, setRespTime] = useState<number | null>(null);
@@ -90,20 +85,6 @@ export const SystemDashboardTab: React.FC = () => {
     const interval = setInterval(fetchHealthCheck, 30000); // refresh system health every 30s
     return () => clearInterval(interval);
   }, [fetchHealthCheck]);
-
-  // Bouncing hardware simulator
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setCpuVal((prev) => Math.min(99, Math.max(10, prev + Math.floor(Math.random() * 7) - 3)));
-      setMemVal((prev) => {
-        const next = Math.min(95, Math.max(40, prev + Math.random() * 0.8 - 0.4));
-        return Math.round(next * 10) / 10;
-      });
-      setActiveUsers((prev) => Math.max(90, prev + Math.floor(Math.random() * 3) - 1));
-      // Loop 30/120: latency is measured by the probe, not simulated.
-    }, 4000);
-    return () => clearInterval(interval);
-  }, []);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -192,24 +173,24 @@ export const SystemDashboardTab: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <MiniStatCard
           title="CPU Core Load"
-          value={`${cpuVal}%`}
+          value={cpuVal === null ? "—" : `${cpuVal}%`}
           icon={Cpu}
-          status={cpuVal > 85 ? "critical" : cpuVal > 65 ? "warning" : "healthy"}
-          subtext="Simulated demo animation"
+          status={cpuVal === null ? "offline" : cpuVal > 85 ? "critical" : cpuVal > 65 ? "warning" : "healthy"}
+          subtext={cpuVal === null ? "No live CPU telemetry" : "Measured CPU load"}
         />
         <MiniStatCard
           title="Server RAM Buffer"
-          value={`${memVal}%`}
+          value={memVal === null ? "—" : `${memVal}%`}
           icon={HardDrive}
-          status="healthy"
-          subtext="Simulated demo animation"
+          status={memVal === null ? "offline" : "healthy"}
+          subtext={memVal === null ? "No live memory telemetry" : "Measured memory usage"}
         />
         <MiniStatCard
           title="Active Sessions"
-          value={activeUsers}
+          value={activeUsers === null ? "—" : activeUsers}
           icon={Users}
-          status="healthy"
-          subtext="Simulated demo animation"
+          status={activeUsers === null ? "offline" : "healthy"}
+          subtext={activeUsers === null ? "No live session telemetry" : "Measured active sessions"}
         />
         <MiniStatCard
           title="Avg API Response Time"
@@ -241,18 +222,15 @@ export const SystemDashboardTab: React.FC = () => {
             </button>
             <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-emerald-400 font-mono">
               <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
-              <span>Telemetries active</span>
+              <span>API probe active</span>
             </span>
           </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {healthChecks.map((item, index) => (
-            <motion.div
+          {healthChecks.map((item) => (
+            <div
               key={item.name}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.04 }}
               className="p-4 rounded-xl bg-black/40 border border-gray-900/60 flex flex-col justify-between space-y-3 hover:border-gray-800 transition-all"
             >
               <div className="flex items-start justify-between gap-3">
@@ -269,7 +247,7 @@ export const SystemDashboardTab: React.FC = () => {
               <p className="text-[10px] text-gray-400 font-mono leading-relaxed bg-[#050906] p-2 rounded-lg border border-emerald-950/20">
                 {item.details}
               </p>
-            </motion.div>
+            </div>
           ))}
         </div>
       </div>
