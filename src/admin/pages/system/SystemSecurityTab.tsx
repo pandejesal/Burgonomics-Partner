@@ -90,8 +90,11 @@ const INITIAL_BACKUPS = [
 
 export const SystemSecurityTab: React.FC = () => {
   const { accessToken, admin } = useAdminAuthStore();
-  const [sessions, setSessions] = useState<UserSession[]>(INITIAL_SESSIONS);
-  const [backups, setBackups] = useState(INITIAL_BACKUPS);
+  // Demo rows are DEV-only: the sessions endpoint does not exist server-side
+  // (fetch always fails), so production must render empty — never fabricated
+  // admin emails, IPs, and backup files.
+  const [sessions, setSessions] = useState<UserSession[]>(import.meta.env.DEV ? INITIAL_SESSIONS : []);
+  const [backups, setBackups] = useState(import.meta.env.DEV ? INITIAL_BACKUPS : []);
   const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
   const [maintenancePin, setMaintenancePin] = useState("");
   const [isLoadingSessions, setIsLoadingSessions] = useState(false);
@@ -164,7 +167,7 @@ export const SystemSecurityTab: React.FC = () => {
       setIsMaintenanceMode(false);
       setMaintenancePin("");
       alert(
-        "Burgonomics customer-facing API cluster is BACK ONLINE. Store networks are responsive.",
+        "Local console flag cleared. NOTE: this toggle never controlled the live API — it only marks this console. Coordinate real maintenance out-of-band.",
       );
     } else {
       if (!maintenancePin || maintenancePin !== requiredPin) {
@@ -173,7 +176,7 @@ export const SystemSecurityTab: React.FC = () => {
       }
       setIsMaintenanceMode(true);
       alert(
-        "MAINTENANCE MODE ACTIVATED. All customer checkouts throttled. API gateway returning HTTP 503.",
+        "Local console flag set. NOTE: customer checkouts are NOT throttled by this toggle — it marks this console only. Coordinate real maintenance out-of-band.",
       );
     }
   };

@@ -26,6 +26,9 @@ export function DeliveryOtpModal({
   const staffName = useAuthStore((s) => s.user?.name) || 'Branch Staff';
 
   const confirmWithOtp = async () => {
+    // Re-entry guard: Enter-key + button double-taps must not fire
+    // verifyDeliveryOtp twice (double server verification).
+    if (busy) return;
     if (!/^\d{4}$/.test(otp.trim())) {
       setError('Enter the 4-digit OTP from the customer screen.');
       return;
@@ -37,6 +40,7 @@ export function DeliveryOtpModal({
       onVerified(orderId);
     } catch (err) {
       setError((err as Error).message || 'Could not verify OTP. Check connectivity and retry.');
+    } finally {
       setBusy(false);
     }
   };

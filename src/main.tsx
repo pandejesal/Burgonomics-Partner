@@ -6,7 +6,11 @@ import { initAppCheck } from './config/firebase.ts'
 import { initHardwareBackButton } from './shared/platform/hardwareBackButton.ts'
 import { initNativeShell } from './shared/platform/nativeBootstrap.ts'
 
-createRoot(document.getElementById('root')!).render(
+const rootEl = document.getElementById('root');
+if (!rootEl) {
+  throw new Error('Missing #root element — index.html contract broken, refusing blank render.');
+}
+createRoot(rootEl).render(
   <StrictMode>
     <App />
   </StrictMode>,

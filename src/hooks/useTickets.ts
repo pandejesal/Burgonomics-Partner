@@ -293,25 +293,27 @@ export function useTickets(params: UseTicketsParams = {}) {
       priority?: 'urgent' | 'high' | 'medium' | 'low';
       targetTier?: 'branch' | 'brand_support' | 'developer_team';
     }) => {
-      const year = new Date().getFullYear();
-      const rand = Math.floor(1000 + Math.random() * 9000);
-      const ticketNumber = `TICK-${year}-${rand}`;
-
-      return addDoc(collection(db, 'support_tickets'), {
-        ticketNumber,
-        subject: ticketData.title || ticketData.message.slice(0, 50),
-        description: ticketData.message,
-        category: ticketData.category || ticketData.type || 'general_inquiry',
+      // Server-side creation (POST /tickets/create): spam guards, branch
+      // assignment, and caller-bound identity run server-side. The old
+      // direct addDoc skipped all three (no guards, client-chosen ids).
+      // Category maps onto the server enum; anything operational falls back
+      // to general_inquiry (never a 400 on a staffer filing a ticket).
+      const rawCategory = ticketData.category || ticketData.type || 'other';
+      const category =
+        rawCategory === 'payment_refund' || rawCategory === 'payment_issue'
+          ? 'payment_issue'
+          : rawCategory === 'wrong_item' || rawCategory === 'late_delivery' || rawCategory === 'food_quality' || rawCategory === 'app_bug'
+            ? rawCategory
+            : 'general_inquiry';
+      const subject = (ticketData.title || ticketData.message).trim().slice(0, 120);
+      const { partnerFunctionsApi } = await import('@/services/partnerFunctionsApi');
+      return partnerFunctionsApi.createTicket({
+        customerName: user?.name || user?.email || 'Store Staff',
         branchId: ticketData.branchId,
-        orderId: ticketData.orderId || null,
-        customerId: user?.id || 'staff',
-        customerName: user?.name || 'Store Staff',
-        status: 'open',
-        priority: ticketData.priority || 'medium',
-        assignedTo: { tier: ticketData.targetTier || 'branch' },
-        branchReminderSent: false,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
+        category: category as 'wrong_item' | 'late_delivery' | 'food_quality' | 'payment_issue' | 'app_bug' | 'general_inquiry',
+        priority: ticketData.priority,
+        subject: subject.length >= 4 ? subject : `${subject} (ticket)`.slice(0, 120),
+        description: ticketData.message,
       });
     },
     onSuccess: () => {

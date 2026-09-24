@@ -10,6 +10,21 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import { RichOrder, INITIAL_RICH_ORDERS } from "../pages/ordersData";
+import { useAuthStore } from "@/stores/authStore";
+import { isGlobalRole } from "@/utils/branchScope";
+import { logger } from "@/core/logging/logger";
+
+/**
+ * Brand-wide reads are reserved for global roles (brand_owner, developer,
+ * support, regional_manager). Scoped roles (branch_owner, branch_staff)
+ * MUST pass a storeId — a null storeId is fail-closed to empty, never a
+ * global cross-branch scan (product decision 2026-09-23: no cross-branch
+ * PII for scoped managers).
+ */
+function globalReadAllowed(): boolean {
+  const role = useAuthStore.getState().user?.role;
+  return isGlobalRole(role);
+}
 
 export const adminOrdersService = {
   /**
@@ -21,6 +36,13 @@ export const adminOrdersService = {
     onUpdate: (orders: RichOrder[]) => void,
     onError: (err: Error) => void,
   ) {
+    if (!storeId && !globalReadAllowed()) {
+      logger.warn("adminOrdersService.global_read_denied", {
+        reason: "scoped_role_without_store",
+      });
+      onUpdate([]);
+      return () => {};
+    }
     let q;
     if (storeId) {
       q = query(
@@ -64,6 +86,12 @@ export const adminOrdersService = {
    * Fetch historical orders (completed/cancelled) for the given store.
    */
   async getHistory(storeId: string | null, limitCount = 50): Promise<RichOrder[]> {
+    if (!storeId && !globalReadAllowed()) {
+      logger.warn("adminOrdersService.global_read_denied", {
+        reason: "scoped_role_without_store",
+      });
+      return [];
+    }
     let q;
     if (storeId) {
       q = query(
@@ -90,8 +118,12 @@ export const adminOrdersService = {
       });
       return history;
     } catch (e) {
-      console.error("Error fetching historical orders:", e);
-      return [];
+      // Rethrow (never phantom-empty): the caller renders the error state
+      // with retry. A rules denial/offline used to look like "No orders".
+      logger.warn("adminOrdersService.getHistory_failed", {
+        message: e instanceof Error ? e.message : String(e),
+      });
+      throw e instanceof Error ? e : new Error(String(e));
     }
   },
 

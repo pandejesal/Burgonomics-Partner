@@ -44,18 +44,30 @@ import { INITIAL_RICH_ORDERS, RichOrder, getThermalReceiptText } from "./ordersD
 import { adminOrdersService } from "../services/adminOrdersService";
 import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
 import { useAdminAuthStore } from "@/admin/store/adminAuthStore";
+import { logger } from "@/core/logging/logger";
 
 interface AdminOrdersPageProps {
   defaultTab?: "live" | "history";
   defaultOrderId?: string;
 }
 
-// Sound Synthesizer Engine using Web Audio API to bypass asset file dependencies
+// Sound Synthesizer Engine using Web Audio API to bypass asset file dependencies.
+// Singleton context: the old code created (and never closed) a new
+// AudioContext per chime — a rush-hour tab leaked dozens of contexts.
+// The shared context is suspended after each chime.
+let sharedAudioCtx: AudioContext | null = null;
 const playIncomingChime = () => {
   try {
-    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContext) return;
-    const ctx = new AudioContext();
+    const AudioContextCtor =
+      window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextCtor) return;
+    if (!sharedAudioCtx || sharedAudioCtx.state === "closed") {
+      sharedAudioCtx = new AudioContextCtor();
+    }
+    const ctx = sharedAudioCtx;
+    if (ctx.state === "suspended") {
+      void ctx.resume().catch(() => undefined);
+    }
     const now = ctx.currentTime;
 
     // Play beautiful soft dual bell tone
@@ -82,6 +94,16 @@ const playIncomingChime = () => {
     osc1.stop(now + 0.6);
     osc2.start(now);
     osc2.stop(now + 0.6);
+    // Release the hardware voice shortly after the chime ends.
+    window.setTimeout(() => {
+      try {
+        if (sharedAudioCtx && sharedAudioCtx.state === "running") {
+          void sharedAudioCtx.suspend()?.catch?.(() => undefined);
+        }
+      } catch {
+        /* audio teardown is best-effort */
+      }
+    }, 800);
   } catch (e) {
     console.warn("Audio Context playback failed", e);
   }
@@ -153,7 +175,12 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
           ? null
           : filterStore;
 
-    adminOrdersService.getHistory(effectiveStoreFilter, 50).then(setOrders);
+    adminOrdersService
+      .getHistory(effectiveStoreFilter, 50)
+      .then(setOrders)
+      .catch((err) =>
+        setStreamError(err?.message || "Order history failed to load — retry."),
+      );
   }, [viewMode, filterStore, selectedRole, managerAssignedStoreId]);
 
   // Confirm actions
@@ -240,11 +267,22 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
         setSelectedOrder((prev) => (prev ? { ...prev, orderStatus: nextStatus } : prev));
       }
 
-      console.log(
-        `[AUDIT LOG] ${actor} modified order ${orderId} status to ${nextStatus} at ${new Date().toLocaleTimeString()}`,
-      );
+      // Audit trail via central logger with a redacted id (full ids link
+      // logs to customer PII) — never console.log order identifiers.
+      logger.info("adminOrders.status_changed", {
+        actor,
+        orderIdSuffix: orderId.slice(-6),
+        nextStatus,
+      });
     } catch (error) {
-      console.error("Failed to update status", error);
+      // Loud failure: the old code only console.error'd, so operators
+      // believed the bump worked while the server write failed.
+      const message = error instanceof Error ? error.message : "Status update failed.";
+      logger.warn("adminOrders.status_change_failed", {
+        orderIdSuffix: orderId.slice(-6),
+        message,
+      });
+      toast.error("Status update failed — order unchanged", { description: message });
     }
   };
 

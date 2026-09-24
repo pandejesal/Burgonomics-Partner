@@ -137,7 +137,9 @@ export function PorterDispatchCard({
   const shortCode =
     (order as any).shortCode ||
     (order as any).orderNumber ||
-    order.id.slice(-6).toUpperCase();
+    (typeof order.id === 'string' && order.id.length > 0
+      ? order.id.slice(-6).toUpperCase()
+      : 'ORDER');
 
   const riderMeta = getRiderStatusMeta(order);
   const isReady = order.status === 'ready';
@@ -167,8 +169,11 @@ export function PorterDispatchCard({
     order.deliveryAddress?.label ||
     'Customer Address';
 
-  const fareEstimate = quote ? `₹${quote.estimatedFare}` : '₹45';
-  const pickupTime = quote ? `${quote.estimatedPickupMinutes}m pickup` : '10m pickup';
+  // No invented fallback fare: without a live quote the card says so and
+  // the booking dialog states the fare is confirmed by Porter at booking.
+  // The old '₹45' default showed a fake fare for a real paid booking.
+  const fareEstimate = quote ? `₹${quote.estimatedFare}` : null;
+  const pickupTime = quote ? `${quote.estimatedPickupMinutes}m pickup` : null;
 
   return (
     <div className="p-5 rounded-3xl bg-[#090909] border border-neutral-800 space-y-4 shadow-lg hover:border-neutral-700 transition-colors">
@@ -199,9 +204,9 @@ export function PorterDispatchCard({
             Porter 2-Wheeler Quote
           </span>
           <span className="font-mono font-black text-sm text-[#FF6600]">
-            {loadingQuote ? 'Estimating...' : fareEstimate}
+            {loadingQuote ? 'Estimating...' : (fareEstimate ?? 'Quote unavailable')}
           </span>
-          <span className="text-[10px] text-neutral-500 block">{pickupTime}</span>
+          <span className="text-[10px] text-neutral-500 block">{pickupTime ?? '—'}</span>
         </div>
       </div>
 
@@ -341,7 +346,7 @@ export function PorterDispatchCard({
               className="flex-1 py-2.5 rounded-xl bg-[#FF6600] hover:bg-[#e05a00] text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50 min-h-[44px]"
             >
               <Zap className="w-3.5 h-3.5 fill-current" />
-              <span>{isDispatching ? 'Booking...' : `Call Porter (${fareEstimate})`}</span>
+              <span>{isDispatching ? 'Booking...' : `Call Porter${fareEstimate ? ` (${fareEstimate})` : ''}`}</span>
             </button>
             {confirmDispatch && (
               <ConfirmDialog
@@ -352,7 +357,9 @@ export function PorterDispatchCard({
                   onDispatchPorter(order);
                 }}
                 title="Book Porter courier?"
-                description={`This books a real paid courier for order ${shortCode} at an estimated fare of ${fareEstimate}. This action spends money.`}
+                description={fareEstimate
+                  ? `This books a real paid courier for order ${shortCode} at an estimated fare of ${fareEstimate}. This action spends money.`
+                  : `This books a real paid courier for order ${shortCode}. No local estimate is available — the final fare is confirmed by Porter at booking. This action spends money.`}
                 confirmLabel="Book Courier"
               />
             )}

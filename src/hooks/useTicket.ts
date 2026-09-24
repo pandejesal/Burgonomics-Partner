@@ -199,37 +199,51 @@ export function useTicket(ticketId: string) {
       authorName: string;
       authorRole: string;
     }) => {
-      const event = {
-        action: 'message_added',
-        actorName: messageData.authorName,
-        actorRole: messageData.authorRole,
-        message: messageData.text,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-
-      // Legacy tickets live in `tickets`, not `support_tickets` — try the
-      // primary collection first, then fall back so replies never hard-fail
-      // on a collection miss. A failure in BOTH collections still throws, so
-      // a failed reply always looks failed (retry), never sent.
-      let docRef = doc(db, 'support_tickets', ticketId);
+      // Server-side thread write (POST /tickets/message): sender identity
+      // and role bind to the verified caller — the old direct arrayUnion
+      // trusted a body-supplied authorRole (spoofable) and skipped
+      // notifications. Legacy-collection fallback stays for pre-migration
+      // docs the server does not know.
       try {
-        await updateDoc(docRef, {
-          timeline: arrayUnion(event),
-          updatedAt: Timestamp.now(),
+        const { partnerFunctionsApi } = await import('@/services/partnerFunctionsApi');
+        return await partnerFunctionsApi.sendTicketMessage({
+          ticketId,
+          text: messageData.text,
+          senderName: messageData.authorName,
         });
-      } catch (primaryErr) {
+      } catch (serverErr) {
+        const event = {
+          action: 'message_added',
+          actorName: messageData.authorName,
+          actorRole: messageData.authorRole,
+          message: messageData.text,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+
+        // Legacy tickets live in `tickets`, not `support_tickets` — try the
+        // primary collection first, then fall back so replies never hard-fail
+        // on a collection miss. A failure in BOTH collections still throws, so
+        // a failed reply always looks failed (retry), never sent.
+        let docRef = doc(db, 'support_tickets', ticketId);
         try {
-          docRef = doc(db, 'tickets', ticketId);
           await updateDoc(docRef, {
             timeline: arrayUnion(event),
             updatedAt: Timestamp.now(),
           });
-        } catch {
-          throw primaryErr;
+        } catch (primaryErr) {
+          try {
+            docRef = doc(db, 'tickets', ticketId);
+            await updateDoc(docRef, {
+              timeline: arrayUnion(event),
+              updatedAt: Timestamp.now(),
+            });
+          } catch {
+            throw primaryErr;
+          }
         }
-      }
 
-      return event;
+        return event;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ticket', ticketId] });

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, UserCheck, Bike, CheckCircle2 } from 'lucide-react';
+import { X, UserCheck } from 'lucide-react';
 import type { Order } from '@/types';
 import type { InHouseRiderInfo } from '../hooks/usePorterLogistics';
 import { isSafeTelNumber } from '@/utils/urlSafety';
@@ -11,23 +11,20 @@ interface RiderAssignmentModalProps {
   onConfirmAssign: (orderId: string, rider: InHouseRiderInfo) => void;
 }
 
-const STORE_RIDERS: InHouseRiderInfo[] = [
-  { name: 'Ramesh Patel', phone: '+91 98250 11223', vehicleNumber: 'GJ-01-EE-8821' },
-  { name: 'Sanjay Varma', phone: '+91 97123 44556', vehicleNumber: 'GJ-27-AK-1029' },
-  { name: 'Jayesh Parmar', phone: '+91 99090 77881', vehicleNumber: 'GJ-06-BQ-5544' },
-];
-
 export function RiderAssignmentModal({
   order,
   isOpen,
   onClose,
   onConfirmAssign,
 }: RiderAssignmentModalProps) {
-  const [selectedRider, setSelectedRider] = useState<InHouseRiderInfo>(STORE_RIDERS[0]);
+  // No preset rider list: the old STORE_RIDERS hardcoded real people's
+  // names/phones/plates and pre-selected the first entry, so taps without
+  // touching the list booked a stranger. Every assignment now requires an
+  // explicitly typed name + validated phone.
   const [customName, setCustomName] = useState('');
   const [customPhone, setCustomPhone] = useState('+91 ');
   const [customVehicle, setCustomVehicle] = useState('');
-  const [useCustom, setUseCustom] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [phoneError, setPhoneError] = useState<string | null>(null);
 
   if (!isOpen || !order) return null;
@@ -36,22 +33,24 @@ export function RiderAssignmentModal({
     e.preventDefault();
     // Loop: custom rider phone was type=tel + required only — the '+91 '
     // stub and short/invalid numbers sailed through into dispatch records
-    // (and tel: links). Require a real 10+-digit number, fail loud inline.
-    if (useCustom) {
-      const digits = customPhone.replace(/\D/g, '');
-      if (!isSafeTelNumber(customPhone) || digits.length < 10) {
-        setPhoneError('Enter a valid 10-digit mobile number.');
-        return;
-      }
-      setPhoneError(null);
+    // (and tel: links). Require a real name and a real 10+-digit number,
+    // fail loud inline. No placeholder fallbacks (99999/Store Fleet).
+    if (!customName.trim()) {
+      setFormError('Enter the rider\u2019s full name.');
+      return;
     }
-    const riderInfo: InHouseRiderInfo = useCustom
-      ? {
-          name: customName || 'Store In-House Rider',
-          phone: customPhone || '+91 99999 99999',
-          vehicleNumber: customVehicle || 'Store Fleet',
-        }
-      : selectedRider;
+    const digits = customPhone.replace(/\D/g, '');
+    if (!isSafeTelNumber(customPhone) || digits.length < 10) {
+      setPhoneError('Enter a valid 10-digit mobile number.');
+      return;
+    }
+    setFormError(null);
+    setPhoneError(null);
+    const riderInfo: InHouseRiderInfo = {
+      name: customName.trim(),
+      phone: customPhone.trim(),
+      vehicleNumber: customVehicle.trim() || undefined,
+    };
 
     onConfirmAssign(order.id, riderInfo);
     onClose();
@@ -83,51 +82,21 @@ export function RiderAssignmentModal({
             Assign internal store rider for Order #{order.id.slice(-6).toUpperCase()} to bypass 3PL courier fees.
           </p>
 
-          {/* Pre-defined Store Riders List */}
+          {/* Rider details (always explicit — no preset list) */}
           <div className="space-y-2">
             <label className="block text-xs font-bold uppercase text-neutral-400">
-              Select Available Staff
+              Rider Details
             </label>
-            <div className="space-y-2">
-              {STORE_RIDERS.map((r, idx) => {
-                const isSelected = !useCustom && selectedRider.name === r.name;
-                return (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => {
-                      setSelectedRider(r);
-                      setUseCustom(false);
-                    }}
-                    className={`w-full p-3 rounded-2xl border text-left flex items-center justify-between transition-colors cursor-pointer ${
-                      isSelected
-                        ? 'bg-[#0E4825] border-emerald-500 text-white shadow-xs'
-                        : 'bg-neutral-900 border-neutral-800 text-neutral-300 hover:text-white'
-                    }`}
-                  >
-                    <div>
-                      <p className="font-black text-sm">{r.name}</p>
-                      <p className="text-[11px] text-neutral-400">{r.phone} • {r.vehicleNumber}</p>
-                    </div>
-                    {isSelected && <CheckCircle2 className="w-5 h-5 text-emerald-300" />}
-                  </button>
-                );
-              })}
-            </div>
+            {formError && (
+              <p role="alert" className="text-[11px] font-bold text-rose-400">
+                {formError}
+              </p>
+            )}
           </div>
 
-          {/* Toggle Custom Rider */}
+          {/* Rider form */}
           <div className="pt-2 border-t border-neutral-800">
-            <button
-              type="button"
-              onClick={() => setUseCustom(!useCustom)}
-              className="text-[#FF6600] font-bold text-xs hover:underline cursor-pointer"
-            >
-              {useCustom ? '← Choose from staff list' : '+ Enter other rider details'}
-            </button>
-
-            {useCustom && (
-              <div className="mt-3 space-y-3 p-3 rounded-2xl bg-neutral-950 border border-neutral-800">
+            <div className="mt-3 space-y-3 p-3 rounded-2xl bg-neutral-950 border border-neutral-800">
                 <div>
                   <label className="block text-[11px] font-bold text-neutral-400 mb-1">Rider Full Name</label>
                   <input
@@ -171,7 +140,6 @@ export function RiderAssignmentModal({
                   />
                 </div>
               </div>
-            )}
           </div>
 
           {/* Actions */}

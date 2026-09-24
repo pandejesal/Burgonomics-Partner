@@ -9,6 +9,30 @@ interface KOTTimerBadgeProps {
 
 export type SlaTier = 'green' | 'amber' | 'red';
 
+// Shared 1-second clock: 30 makeline cards used to own 30 intervals.
+// One interval fans out to every mounted badge via a setter registry;
+// the last unmount stops the clock.
+const tickSetters = new Set<React.Dispatch<React.SetStateAction<number>>>();
+let sharedTickTimer: ReturnType<typeof setInterval> | null = null;
+function useSharedSecond(): void {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    tickSetters.add(setTick);
+    if (!sharedTickTimer) {
+      sharedTickTimer = setInterval(() => {
+        tickSetters.forEach((s) => s((t) => t + 1));
+      }, 1000);
+    }
+    return () => {
+      tickSetters.delete(setTick);
+      if (tickSetters.size === 0 && sharedTickTimer) {
+        clearInterval(sharedTickTimer);
+        sharedTickTimer = null;
+      }
+    };
+  }, []);
+}
+
 export function calculateKOTElaTier(elapsedSeconds: number): {
   tier: SlaTier;
   formatted: string;
@@ -35,30 +59,50 @@ export function calculateKOTElaTier(elapsedSeconds: number): {
 }
 
 export function KOTTimerBadge({ createdAt, className = '', onSlaBreach }: KOTTimerBadgeProps) {
-  const [now, setNow] = useState(Date.now());
+  useSharedSecond();
+  const now = Date.now();
+  const breachFiredRef = React.useRef(false);
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setNow(Date.now());
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const getMillis = (ts: any): number => {
-    if (!ts) return now;
-    if (typeof ts === 'number') return ts;
-    if (typeof ts.toDate === 'function') return ts.toDate().getTime();
-    if (typeof ts.toMillis === 'function') return ts.toMillis();
+  // Unknown time renders as unknown ("—"), never as a fresh green 00:00:
+  // the old fallback returned `now` for missing/unparseable input, painting
+  // untimed orders as just placed.
+  const getMillis = (ts: any): number | null => {
+    if (!ts) return null;
+    if (typeof ts === 'number') return Number.isFinite(ts) ? ts : null;
+    if (typeof ts.toDate === 'function') {
+      const ms = ts.toDate().getTime();
+      return Number.isFinite(ms) ? ms : null;
+    }
+    if (typeof ts.toMillis === 'function') {
+      const ms = ts.toMillis();
+      return typeof ms === 'number' && Number.isFinite(ms) ? ms : null;
+    }
     if (ts.seconds) return ts.seconds * 1000;
     const parsed = new Date(ts).getTime();
-    return isNaN(parsed) ? now : parsed;
+    return isNaN(parsed) ? null : parsed;
   };
 
-  const elapsedSeconds = Math.max(0, Math.floor((now - getMillis(createdAt)) / 1000));
+  const startedAt = getMillis(createdAt);
+  if (startedAt === null) {
+    return (
+      <div
+        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-neutral-900 border border-neutral-700 text-neutral-400 font-mono font-bold text-xs sm:text-sm tracking-wider select-none ${className}`}
+        title="Order time unknown"
+      >
+        <Clock className="w-3.5 h-3.5 shrink-0" />
+        <span>—</span>
+      </div>
+    );
+  }
+  const elapsedSeconds = Math.max(0, Math.floor((now - startedAt) / 1000));
   const { tier, formatted } = calculateKOTElaTier(elapsedSeconds);
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (tier === 'red' && onSlaBreach) {
+    // Once per mount: an inline parent callback re-fires every render while
+    // red, which used to re-trigger the breach alarm continuously.
+    if (tier === 'red' && onSlaBreach && !breachFiredRef.current) {
+      breachFiredRef.current = true;
       onSlaBreach();
     }
   }, [tier, onSlaBreach]);

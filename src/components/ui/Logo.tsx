@@ -57,6 +57,8 @@ export const Logo: FC<LogoProps> = ({
         fill="white"
         textAnchor="middle"
         letterSpacing="1"
+        textLength="120"
+        lengthAdjust="spacingAndGlyphs"
       >
         BURGONOMICS
       </text>

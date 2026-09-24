@@ -35,10 +35,18 @@ export async function getPorterDeliveryQuote(params: {
   customerName?: string;
   customerPhone?: string;
 }): Promise<PorterDeliveryQuote> {
-  const pickupLat = params.pickupLat || 23.0131;
-  const pickupLng = params.pickupLng || 72.5085;
-  const dropLat = params.dropLat || 23.0338;
-  const dropLng = params.dropLng || 72.5262;
+  // Fail-closed GPS: a quote from fabricated coordinates bills a fantasy
+  // distance. The old Ahmedabad defaults masked missing branch geocodes and
+  // customer pins. Callers (fetchOrderQuote) catch this into "quote
+  // unavailable" — never a number.
+  const coords = [params.pickupLat, params.pickupLng, params.dropLat, params.dropLng];
+  if (!coords.every((c) => typeof c === 'number' && Number.isFinite(c))) {
+    throw new Error('Quote needs real pickup and drop coordinates — refusing to estimate from defaults.');
+  }
+  const pickupLat = params.pickupLat as number;
+  const pickupLng = params.pickupLng as number;
+  const dropLat = params.dropLat as number;
+  const dropLng = params.dropLng as number;
 
   // Calculate distance in km (Haversine formula)
   const R = 6371; // Earth radius in km
@@ -66,7 +74,7 @@ export async function getPorterDeliveryQuote(params: {
     estimatedFare,
     estimatedPickupMinutes: 8,
     vehicleType: '2-Wheeler (Bike Express)',
-    quoteId: `QTE-PRTR-${Math.floor(10000 + Math.random() * 90000)}`,
+    quoteId: `QTE-PRTR-${crypto.randomUUID().replace(/-/g, '').slice(0, 12).toUpperCase()}`,
     source: 'porter_standard_rate_card',
     validForSeconds: TTL_SECONDS,
     expiresAt,

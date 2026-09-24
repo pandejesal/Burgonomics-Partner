@@ -9,6 +9,9 @@ import {
   getDocs,
   Timestamp,
 } from "firebase/firestore";
+import { useAuthStore } from "@/stores/authStore";
+import { isGlobalRole, FIRESTORE_IN_LIMIT } from "@/utils/branchScope";
+import { logger } from "@/core/logging/logger";
 import {
   DashboardCounts,
   RevenueSummary,
@@ -84,6 +87,38 @@ function toMonthBucket(millis: number): string {
 
 export class DashboardService {
   /**
+   * Branch scope for money dashboards (product decision 2026-09-23).
+   * Returns null for global roles (brand-wide view) or the set of order
+   * ids belonging to the caller's assigned branches otherwise. An empty
+   * set means no access — callers filter to nothing, never to everything.
+   */
+  protected async scopedOrderIds(): Promise<Set<string> | null> {
+    try {
+      const user = useAuthStore.getState().user;
+      if (isGlobalRole(user?.role)) return null;
+      const assigned = (user?.branchIds ?? []).filter(
+        (b): b is string => typeof b === "string" && !!b
+      );
+      if (assigned.length === 0) return new Set<string>();
+      const snap = await getDocs(
+        query(
+          collection(db, "orders"),
+          where("branchId", "in", assigned.slice(0, FIRESTORE_IN_LIMIT)),
+          limit(1000)
+        )
+      );
+      const ids = new Set<string>();
+      snap.forEach((d) => ids.add(d.id));
+      return ids;
+    } catch (err) {
+      logger.warn("dashboardService.scope_resolve_failed", {
+        message: err instanceof Error ? err.message : String(err),
+      });
+      return new Set<string>();
+    }
+  }
+
+  /**
    * Helper: Retrieve all orders from Firestore (with optional storeId filter)
    */
   protected async fetchOrders(storeId?: string): Promise<any[]> {
@@ -128,16 +163,19 @@ export class DashboardService {
   }
 
   /**
-   * Helper: Retrieve payments from Firestore
+   * Helper: Retrieve payments from Firestore (branch-scoped for non-global
+   * roles via the linked order id).
    */
   protected async fetchPayments(): Promise<PaymentStats[]> {
     try {
       const snap = await getDocs(
         query(collection(db, "payments"), orderBy("createdAt", "desc"), limit(200)),
       );
+      const allowed = await this.scopedOrderIds();
       const payments: PaymentStats[] = [];
       snap.forEach((doc) => {
         const data = doc.data();
+        if (allowed && !allowed.has(data.orderId || "")) return;
         payments.push({
           id: doc.id,
           orderId: data.orderId || "",
@@ -158,16 +196,19 @@ export class DashboardService {
   }
 
   /**
-   * Helper: Retrieve refunds from Firestore
+   * Helper: Retrieve refunds from Firestore (branch-scoped for non-global
+   * roles via the linked order id).
    */
   protected async fetchRefunds(): Promise<RefundStats[]> {
     try {
       const snap = await getDocs(
         query(collection(db, "refunds"), orderBy("createdAt", "desc"), limit(100)),
       );
+      const allowed = await this.scopedOrderIds();
       const refunds: RefundStats[] = [];
       snap.forEach((doc) => {
         const data = doc.data();
+        if (allowed && !allowed.has(data.orderId || "")) return;
         refunds.push({
           id: doc.id,
           paymentId: data.paymentId || "",
@@ -185,11 +226,11 @@ export class DashboardService {
   }
 
   /**
-   * Helper: Retrieve users from Firestore
+   * Helper: Retrieve users from Firestore (bounded — never an open scan).
    */
   protected async fetchUsers(): Promise<any[]> {
     try {
-      const usersSnap = await getDocs(collection(db, "users"));
+      const usersSnap = await getDocs(query(collection(db, "users"), limit(500)));
       const users: any[] = [];
       usersSnap.forEach((doc) => {
         users.push({ id: doc.id, ...doc.data() });
@@ -598,11 +639,13 @@ export class DashboardService {
    */
   async getDuplicatePayments(_windowMinutes = 60): Promise<DuplicatePayment[]> {
     try {
-      const snap = await getDocs(collection(db, "payment_discrepancies"));
+      const snap = await getDocs(query(collection(db, "payment_discrepancies"), limit(200)));
+      const allowed = await this.scopedOrderIds();
       const duplicates: DuplicatePayment[] = [];
       snap.forEach((doc) => {
         const d = doc.data();
         if (d.orderId) {
+          if (allowed && !allowed.has(d.orderId)) return;
           duplicates.push({ orderId: d.orderId, count: d.count || 2 });
         }
       });

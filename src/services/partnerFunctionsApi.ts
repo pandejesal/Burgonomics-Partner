@@ -243,9 +243,10 @@ export const partnerFunctionsApi = {
     },
 
     /**
-     * Cancels a booked Porter rider. Calls server POST /porter/cancel which
-     * contacts Porter provider to cancel the live booking before flipping
-     * local status. Returns success boolean.
+     * Cancels a booked Porter rider. Server POST /porter/cancel releases the
+     * order locally (rider_cancelled + needsRebook) and requires staff to
+     * confirm the cancellation in the Porter enterprise dashboard — no
+     * provider cancel API is documented. Returns success boolean + message.
      */
     async cancelPorterRider(orderId: string): Promise<{ success: boolean; message?: string }> {
       return await apiRequest('/porter/cancel', { orderId }, {
@@ -460,6 +461,38 @@ export const partnerFunctionsApi = {
   },
 
   /**
+   * Raises a support ticket server-side (POST /tickets/create). Runs spam
+   * guards + branch assignment + customer binding server-side — never a
+   * direct Firestore addDoc that skips all three.
+   */
+  async createTicket(params: {
+    customerName: string;
+    customerPhone?: string;
+    orderId?: string;
+    branchId: string;
+    category: 'wrong_item' | 'late_delivery' | 'food_quality' | 'payment_issue' | 'app_bug' | 'general_inquiry';
+    priority?: 'low' | 'medium' | 'high' | 'urgent';
+    subject: string;
+    description: string;
+    attachments?: string[];
+  }): Promise<{ id: string; ticketNumber: string; status: string }> {
+    return await apiRequest('/tickets/create', params);
+  },
+
+  /**
+   * Posts a ticket thread message server-side (POST /tickets/message).
+   * Sender identity/role bind to the verified caller — never trust a
+   * body-supplied role.
+   */
+  async sendTicketMessage(params: {
+    ticketId: string;
+    text: string;
+    senderName?: string;
+  }): Promise<{ success: boolean }> {
+    return await apiRequest('/tickets/message', params);
+  },
+
+  /**
    * Staff broadcast fan-out to an FCM topic (e.g. upcoming_<branchId>).
    * Returns the server's honest delivery outcome — never claim sent
    * without it (Loop 5).
@@ -470,5 +503,18 @@ export const partnerFunctionsApi = {
     body: string;
   }): Promise<{ success: boolean }> {
     return await apiRequest('/notifications/dispatch', params);
+  },
+
+  /**
+   * KDS order-status bump server-side (POST /orders/bumpStatus).
+   * Branch-checked + Delivery-compatible object write — never a direct
+   * Firestore flip that skips scope enforcement.
+   */
+  async bumpOrderStatus(params: {
+    orderId: string;
+    status: string;
+    cancellationReason?: string;
+  }): Promise<{ orderId: string; status: Record<string, any> }> {
+    return await apiRequest('/orders/bumpStatus', params);
   },
 };

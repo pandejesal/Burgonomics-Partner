@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/config/firebase';
 import { doc, getDoc, onSnapshot, updateDoc, Timestamp } from 'firebase/firestore';
 import type { Order, OrderStatus } from '@/types';
-import { normalizeOrderDoc, toDeliveryStatusMeta, toPartnerStatus } from '@/utils/orderContract';
+import { normalizeOrderDoc, toDeliveryStatusMeta } from '@/utils/orderContract';
 import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
 import { logger } from '@/core/logging/logger';
 import { toast } from 'sonner';
@@ -65,50 +65,18 @@ export function useOrder(orderId: string) {
       status: OrderStatus;
       cancellationReason?: string;
     }) => {
-      const orderRef = doc(db, 'orders', orderId);
-      const payload: Record<string, any> = {
-        status: toDeliveryStatusMeta(status),
-        updatedAt: Timestamp.now(),
-      };
-      if (cancellationReason) {
-        payload.cancellationReason = cancellationReason;
-      }
-      await updateDoc(orderRef, payload);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['order', orderId] });
-      queryClient.invalidateQueries({ queryKey: ['orders'] });
-    },
-    onError: notifyMutationError('Status update'),
-  });
-
-  const assignRider = useMutation({
-    mutationFn: async (riderData: {
-      riderName: string;
-      riderPhone: string;
-      riderVehicleNumber?: string;
-      riderTrackingUrl?: string;
-      markOutForDelivery?: boolean;
-    }) => {
-      const orderRef = doc(db, 'orders', orderId);
-      const nextStatus = toPartnerStatus(
-        riderData.markOutForDelivery ? 'out_for_delivery' : (order?.status || 'ready')
-      );
-      await updateDoc(orderRef, {
-        riderName: riderData.riderName,
-        riderPhone: riderData.riderPhone,
-        riderVehicleNumber: riderData.riderVehicleNumber || '',
-        riderTrackingUrl: riderData.riderTrackingUrl || '',
-        deliveryStatus: 'manually_assigned',
-        status: toDeliveryStatusMeta(nextStatus),
-        updatedAt: Timestamp.now(),
+      // Server-side bump (POST /orders/bumpStatus): branch-checked write.
+      await partnerFunctionsApi.bumpOrderStatus({
+        orderId,
+        status,
+        ...(cancellationReason ? { cancellationReason } : {}),
       });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['order', orderId] });
       queryClient.invalidateQueries({ queryKey: ['orders'] });
     },
-    onError: notifyMutationError('Rider assignment'),
+    onError: notifyMutationError('Status update'),
   });
 
   const pushToPetpooja = useMutation({
@@ -138,7 +106,6 @@ export function useOrder(orderId: string) {
     isLoading,
     error,
     updateStatus,
-    assignRider,
     pushToPetpooja,
     autoDispatchPorter,
   };

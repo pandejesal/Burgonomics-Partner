@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useOrder } from '@/hooks/useOrder';
+import { useBranches } from '@/hooks/useBranches';
 import {
   KOTPrintPreview,
   OrderStatusStepper,
@@ -56,24 +57,32 @@ export function OrderDetailPage() {
   // Porter quote state
   const [porterQuote, setPorterQuote] = useState<PorterDeliveryQuote | null>(null);
   const [loadingQuote, setLoadingQuote] = useState(false);
+  const { branches } = useBranches();
   const [isDispatchingPorter, setIsDispatchingPorter] = useState(false);
   // Loop: dispatch books a real paid courier — confirm first (same as the
   // PorterDispatchCard confirm; fare shown before commit).
   const [confirmPorterDispatch, setConfirmPorterDispatch] = useState(false);
 
   // Quote inputs as stable scalars — dep on the whole `order` object
-  // refetched on every snapshot churn. Only a new order id or a changed
-  // drop point justifies a fresh quote.
+  // refetched on every snapshot churn. Only a new order id, a changed
+  // drop point, or resolved branch pickup justifies a fresh quote.
   const orderIdForQuote = order?.id;
   const dropLat = order?.deliveryAddress?.lat;
   const dropLng = order?.deliveryAddress?.lng;
+  const pickupBranch = branches.find((b) => b.id === (order as any)?.branchId);
+  const pickupLat = pickupBranch?.coordinates?.lat;
+  const pickupLng = pickupBranch?.coordinates?.lng;
   const isDeliveryOrder =
     order?.orderType === 'delivery' || (order as any)?.fulfillment === 'delivery';
 
   useEffect(() => {
     if (!order || !isDeliveryOrder) return;
     setLoadingQuote(true);
+    // Pickup from the branch record's real coordinates (fail-closed in the
+    // service when missing — never fabricated defaults).
     getPorterDeliveryQuote({
+      pickupLat,
+      pickupLng,
       dropLat,
       dropLng,
       customerName: order.customerName,
@@ -91,7 +100,7 @@ export function OrderDetailPage() {
         });
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderIdForQuote, dropLat, dropLng, isDeliveryOrder]);
+  }, [orderIdForQuote, dropLat, dropLng, pickupLat, pickupLng, isDeliveryOrder]);
 
   if (isLoading) {
     return (
@@ -127,7 +136,25 @@ export function OrderDetailPage() {
     order.id.slice(-6).toUpperCase();
 
   const handleCopyId = () => {
-    navigator.clipboard.writeText(order.id);
+    // Clipboard API throws on insecure origins — toast a fallback instead
+    // of an unhandled rejection.
+    try {
+      const done = navigator.clipboard.writeText(order.id);
+      if (done && typeof (done as Promise<void>).then === 'function') {
+        (done as Promise<void>)
+          .then(() => {
+            setCopiedId(true);
+            setTimeout(() => setCopiedId(false), 2000);
+          })
+          .catch(() => {
+            toast.error('Copy failed — long-press the order ID to copy it manually.');
+          });
+        return;
+      }
+    } catch {
+      toast.error('Copy failed — long-press the order ID to copy it manually.');
+      return;
+    }
     setCopiedId(true);
     setTimeout(() => setCopiedId(false), 2000);
   };

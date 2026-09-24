@@ -54,7 +54,7 @@ export function KDSOrderCard({
   const allItemsChecked =
     !order.items || order.items.length === 0
       ? true
-      : order.items.every((_, idx) => !!checkedItems[`${order.id}_${idx}`]);
+      : order.items.every((_, idx) => !!checkedItems[`${order.id}::${idx}`]);
 
   // Determine bump action based on current status
   const isPending = order.status === 'pending' || (order.status as any) === 'placed';
@@ -66,6 +66,9 @@ export function KDSOrderCard({
   const bumpGated = isPreparing && !allItemsChecked;
 
   const handleBump = () => {
+    // Defense in depth alongside the disabled button + hook ref guard:
+    // programmatic/assistive-tech activation must not double-fire either.
+    if (isBumping) return;
     if (isPending) {
       onBumpOrder(order.id, 'preparing');
     } else if (isPreparing) {
@@ -148,7 +151,7 @@ export function KDSOrderCard({
       <div className="p-3.5 flex-1 space-y-2.5 overflow-y-auto max-h-[320px]">
         {order.items && order.items.length > 0 ? (
           order.items.map((item, idx) => {
-            const isChecked = !!checkedItems[`${order.id}_${idx}`];
+            const isChecked = !!checkedItems[`${order.id}::${idx}`];
             const rawModifiers = (item as any).modifiers || (item as any).customizations || [];
             const modifiers = Array.isArray(rawModifiers) ? rawModifiers : [];
 
