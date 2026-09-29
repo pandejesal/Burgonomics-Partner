@@ -14,7 +14,7 @@ import {
   RefreshCw,
   AlertTriangle,
 } from "lucide-react";
-import { useAdminAuthStore } from "../../store/adminAuthStore";
+import { useAdmin } from "../../hooks/useAdmin";
 
 interface QueueStats {
   name: string;
@@ -37,7 +37,7 @@ interface FailedJob {
 }
 
 export const SystemQueueTab: React.FC = () => {
-  const { accessToken } = useAdminAuthStore();
+  const { accessToken } = useAdmin();
   const [queues, setQueues] = useState<QueueStats[]>([]);
   const [selectedQueueName, setSelectedQueueName] = useState<string | null>(null);
   const [failedJobs, setFailedJobs] = useState<FailedJob[]>([]);

@@ -10,7 +10,7 @@ import {
   Eye,
   AlertTriangle,
 } from "lucide-react";
-import { useAdminAuthStore } from "../../store/adminAuthStore";
+import { useAdmin } from "../../hooks/useAdmin";
 
 interface UserSession {
   id?: string;
@@ -89,7 +89,9 @@ const INITIAL_BACKUPS = [
 ];
 
 export const SystemSecurityTab: React.FC = () => {
-  const { accessToken, admin } = useAdminAuthStore();
+  // Single sign-in: token comes from the unified Firebase session (null-safe;
+  // the sessions endpoint is server-side, so null renders empty, never fake).
+  const { accessToken, admin } = useAdmin();
   // Demo rows are DEV-only: the sessions endpoint does not exist server-side
   // (fetch always fails), so production must render empty — never fabricated
   // admin emails, IPs, and backup files.

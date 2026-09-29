@@ -1,3 +1,12 @@
+/**
+ * @deprecated SINGLE SIGN-IN — retained for build compatibility only.
+ *
+ * The Partner console replaced the standalone admin portal: one Firebase
+ * session (`useAuthStore`), one login (`/login`). Routing no longer calls
+ * login()/bootstrap() here. New code must use `useAdmin()` from
+ * `@/admin/hooks/useAdmin`, which derives the same AdminUser shape from the
+ * unified session.
+ */
 import { create } from "zustand";
 import { adminAuthService, AdminUser, LoginResponse } from "../services/adminAuthService";
 import { auth } from "@/core/config/firebase";

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Navigate } from 'react-router-dom';
 import { useBranches, type CreateBranchInput } from '@/hooks/useBranches';
 import { useAuthStore } from '@/stores/authStore';
 import { BranchConfigModal } from '@/features/branches/components/BranchConfigModal';
@@ -47,6 +48,14 @@ export function BranchesPage() {
   const [broadcastingBranch, setBroadcastingBranch] = useState<Branch | null>(null);
   const [activatingBranch, setActivatingBranch] = useState<Branch | null>(null);
   const [petpoojaInputId, setPetpoojaInputId] = useState('');
+
+  // Defense-in-depth page guard: router-level ProtectedRoute is the primary
+  // gate, but this page must never render branch data for roles outside the
+  // brand-level allowlist (mirrors allowedRoles on the /branches route).
+  const BRANCH_PAGE_ROLES = ['brand_owner', 'developer', 'support', 'regional_manager'] as const;
+  if (!user || !(BRANCH_PAGE_ROLES as readonly string[]).includes(user.role)) {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   const isGlobalRole =
     user?.role === 'brand_owner' || user?.role === 'developer' || user?.role === 'support';

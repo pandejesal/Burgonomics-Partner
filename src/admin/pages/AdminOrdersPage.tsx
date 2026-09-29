@@ -43,7 +43,7 @@ import { toast } from "sonner";
 import { INITIAL_RICH_ORDERS, RichOrder, getThermalReceiptText } from "./ordersData";
 import { adminOrdersService } from "../services/adminOrdersService";
 import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
-import { useAdminAuthStore } from "@/admin/store/adminAuthStore";
+import { useAdmin } from "@/admin/hooks/useAdmin";
 import { logger } from "@/core/logging/logger";
 
 interface AdminOrdersPageProps {
@@ -113,8 +113,8 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
   defaultTab = "live",
   defaultOrderId,
 }) => {
-  // Use real Admin Auth Role
-  const { admin } = useAdminAuthStore();
+  // Single sign-in: role comes from the unified partner session.
+  const { admin } = useAdmin();
   const selectedRole =
     (admin?.role?.name as "Developer" | "Operations" | "Store Manager" | "Finance") || "Developer";
 

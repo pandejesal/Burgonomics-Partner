@@ -142,7 +142,7 @@ export function CustomersPage() {
             <span className="text-xs font-bold uppercase">Grill Coins Issued</span>
             <Coins className="w-4 h-4 text-amber-400" />
           </div>
-          <p className="text-2xl font-black text-amber-400">{totalLoyalty.toLocaleString('en-IN')} 🪙</p>
+          <p className="text-2xl font-black text-amber-400">{totalLoyalty.toLocaleString('en-IN')}</p>
           <p className="text-[11px] text-neutral-500">Circulating loyalty balance</p>
         </div>
 

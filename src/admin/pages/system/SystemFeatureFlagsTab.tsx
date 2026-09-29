@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Search, Plus, Trash2, Sparkles, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
-import { useAdminAuthStore } from "../../store/adminAuthStore";
+import { useAdmin } from "../../hooks/useAdmin";
 
 interface FeatureFlag {
   key: string;
@@ -11,7 +11,7 @@ interface FeatureFlag {
 }
 
 export const SystemFeatureFlagsTab: React.FC = () => {
-  const { accessToken } = useAdminAuthStore();
+  const { accessToken } = useAdmin();
   const [flags, setFlags] = useState<FeatureFlag[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [isAdding, setIsAdding] = useState(false);

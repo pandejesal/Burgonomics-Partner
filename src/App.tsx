@@ -19,7 +19,7 @@ import { DeliveryQueuePage } from '@/pages/DeliveryQueuePage';
 import { KDSPage } from '@/pages/KDSPage';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { ProtectedRoute } from '@/core/auth/ProtectedRoute';
-import { AdminRoutes } from '@/pages/admin/AdminRoutes';
+import { AdminRoutes, ADMIN_PORTAL_ROLES } from '@/pages/admin/AdminRoutes';
 import { ChatPage } from '@/pages/ChatPage';
 
 import { AuthProvider } from '@/core/auth/AuthContext';
@@ -45,14 +45,26 @@ function App() {
       <AuthProvider>
         <Router>
         <Routes>
-          {/* Public routes */}
+          {/* Public routes — single sign-in lives here. The legacy
+              second login at /admin/login is gone (redirects to /login). */}
           <Route path="/login" element={<LoginPage />} />
 
-          {/* Admin Portal (44 pages) */}
-          <Route path="/admin/*" element={<AdminRoutes />} />
-
-          {/* Protected partner routes */}
+          {/* Protected partner routes — one Firebase session for everything,
+              including the migrated Control Room (/admin/*). */}
           <Route element={<ProtectedRoute />}>
+            {/* Control Room (migrated admin portal, 44 pages).
+                Role gate lives in AdminPortalLayout; this wrapper only
+                guarantees authentication. */}
+            <Route
+              path="/admin/*"
+              element={
+                <ProtectedRoute
+                  allowedRoles={[...ADMIN_PORTAL_ROLES]}
+                >
+                  <AdminRoutes />
+                </ProtectedRoute>
+              }
+            />
             {/* Fullscreen Dedicated Kitchen Display System */}
             <Route path="/kds" element={<KDSPage />} />
 

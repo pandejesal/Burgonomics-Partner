@@ -14,7 +14,7 @@ import {
   LogOut,
   User,
 } from "lucide-react";
-import { useAdminAuthStore } from "../store/adminAuthStore";
+import { useAdmin } from "../hooks/useAdmin";
 import { db } from "@/core/config/firebase";
 import { toast } from "sonner";
 import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
@@ -25,7 +25,8 @@ import { AdminAvatar } from "../components/Utilities";
 import { secureStorage } from "@/core/storage/secureStorage";
 
 export const AdminProfilePage: React.FC = () => {
-  const { admin } = useAdminAuthStore();
+  // Single sign-in: profile identity is the unified partner session.
+  const { admin } = useAdmin();
   const [activeTab, setActiveTab] = useState<"security" | "sessions" | "permissions">("security");
 
   // Password fields

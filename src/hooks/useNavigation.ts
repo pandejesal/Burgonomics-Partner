@@ -13,6 +13,7 @@ import {
   BarChart3,
   UserCheck,
   Settings,
+  ShieldCheck,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -90,6 +91,15 @@ const navItems: NavItem[] = [
     icon: UserCheck,
     path: '/users',
     roles: ['brand_owner', 'developer', 'support', 'regional_manager'],
+  },
+  {
+    // Migrated Control Room (former standalone admin portal, 44 pages).
+    // Single sign-in — visible only to brand-level roles permitted by
+    // AdminPortalLayout + routePolicy (/admin stays denied for branch/support).
+    label: 'Control Room',
+    icon: ShieldCheck,
+    path: '/admin',
+    roles: ['brand_owner', 'developer', 'regional_manager'],
   },
   {
     label: 'Settings',

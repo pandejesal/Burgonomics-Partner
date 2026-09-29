@@ -287,6 +287,7 @@ export function MenuPage() {
               onClick={() => {
                 setSearchQuery('');
                 setSelectedCategory('all');
+                setOnlyJainFilter(false);
               }}
               className="mt-3 px-4 py-2 rounded-xl bg-[#0E4825] hover:bg-[#135d30] text-emerald-300 text-xs font-bold transition-colors cursor-pointer min-h-[44px]"
             >

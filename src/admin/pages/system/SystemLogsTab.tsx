@@ -9,7 +9,7 @@ import {
   UserCheck,
   RefreshCw,
 } from "lucide-react";
-import { useAdminAuthStore } from "../../store/adminAuthStore";
+import { useAdmin } from "../../hooks/useAdmin";
 import { toast } from "sonner";
 
 interface SystemLog {
@@ -70,7 +70,7 @@ interface AuditRecord {
 }
 
 export const SystemLogsTab: React.FC = () => {
-  const { accessToken } = useAdminAuthStore();
+  const { accessToken } = useAdmin();
   // Loop: the seed + 4s streaming interval fabricate log lines (wrong
   // business facts included — Delhi/Gurgaon stores, fake refunds) with
   // ERROR/CRITICAL levels staff could chase. DEV-only; prod shows the
