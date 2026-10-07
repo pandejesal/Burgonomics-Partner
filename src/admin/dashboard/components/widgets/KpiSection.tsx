@@ -13,7 +13,106 @@ import {
   Store,
   AlertTriangle,
 } from "lucide-react";
-import { useAnalyticsSummary, useLiveCounts } from "../../hooks/useDashboardData";
+import {
+  useAnalyticsSummary,
+  useLiveCounts,
+  useRevenueSeries,
+  useOrderSeries,
+} from "../../hooks/useDashboardData";
+import type { OrderStatusBreakdown } from "../../types";
+
+/* ------------------------------------------------------------------ *
+ * P0-4 honesty helpers — pure, unit-tested in KpiSection.trend.test.ts.
+ * No KPI card below may carry a literal trend %, sparkline shape, or
+ * freshness string: trends come from computeTrend() over two real range
+ * queries, sparklines from real series buckets, freshness from
+ * formatFreshness(query dataUpdatedAt).
+ * ------------------------------------------------------------------ */
+
+/** Round to one decimal, halves away from zero (1.25 → 1.3, -1.25 → -1.3). */
+export function roundOneDecimal(n: number): number {
+  return ((n < 0 ? -1 : 1) * Math.round(Math.abs(n) * 10)) / 10;
+}
+
+/**
+ * Real period-over-period delta in percent (one decimal), or undefined
+ * whenever either side is missing/unusable — no prev baseline loaded,
+ * non-finite input, or a zero baseline a percentage cannot divide
+ * through. Undefined renders NO trend chip (never a fabricated one).
+ */
+export function computeTrend(
+  current: number | null | undefined,
+  previous: number | null | undefined,
+): { value: number; isPositive: boolean } | undefined {
+  if (typeof current !== "number" || typeof previous !== "number") return undefined;
+  if (!Number.isFinite(current) || !Number.isFinite(previous)) return undefined;
+  if (previous === 0) return undefined; // zero baseline: % change undefined
+  const delta = ((current - previous) / previous) * 100;
+  if (!Number.isFinite(delta)) return undefined;
+  return { value: roundOneDecimal(delta), isPositive: delta >= 0 };
+}
+
+/**
+ * Honest freshness label derived from a react-query `dataUpdatedAt`
+ * (ms since epoch). Never loaded (null/undefined/0) → "—".
+ */
+export function formatFreshness(
+  updatedAt: number | null | undefined,
+  now: number = Date.now(),
+): string {
+  if (typeof updatedAt !== "number" || !Number.isFinite(updatedAt) || updatedAt <= 0) return "—";
+  const seconds = Math.floor(Math.max(0, now - updatedAt) / 1000);
+  if (seconds < 10) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${Math.floor(minutes / 60)}h ago`;
+}
+
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The shifted comparison window: same duration as `range`, ending one
+ * day earlier (today-so-far vs yesterday-same-period). An unparseable
+ * range degrades to { from: "", to: "" }, which disables the comparison
+ * query — both trend sides then read as unavailable and no chip renders.
+ */
+export function shiftRangeByOneDay(range: {
+  from: string;
+  to: string;
+}): { from: string; to: string } {
+  const fromMs = Date.parse(range.from);
+  const toMs = Date.parse(range.to);
+  if (Number.isNaN(fromMs) || Number.isNaN(toMs)) return { from: "", to: "" };
+  return {
+    from: new Date(fromMs - ONE_DAY_MS).toISOString(),
+    to: new Date(toMs - ONE_DAY_MS).toISOString(),
+  };
+}
+
+/** Series bucket size for the active range: hours for ≤2-day windows, days beyond. */
+export function granularityForRange(range: { from: string; to: string }): "hour" | "day" {
+  const fromMs = Date.parse(range.from);
+  const toMs = Date.parse(range.to);
+  if (Number.isNaN(fromMs) || Number.isNaN(toMs)) return "day";
+  return toMs - fromMs <= 48 * 60 * 60 * 1000 ? "hour" : "day";
+}
+
+/**
+ * Count for a status group inside a breakdown. Undefined when the whole
+ * breakdown is unavailable (no query data); 0 when it is loaded but has
+ * no match — a real zero, not a missing side.
+ */
+function statusCount(
+  breakdown: OrderStatusBreakdown[] | undefined,
+  keys: string[],
+): number | undefined {
+  if (!breakdown) return undefined;
+  return breakdown.find((s) => keys.includes(s.status.toUpperCase()))?.count ?? 0;
+}
+
+const COMPLETED_STATUSES = ["COMPLETED", "DELIVERED"];
+const CANCELLED_STATUSES = ["CANCELLED"];
 
 interface SparklineProps {
   points: number[];
@@ -21,6 +120,11 @@ interface SparklineProps {
 }
 
 const Sparkline: React.FC<SparklineProps> = ({ points, isPositive }) => {
+  // A series needs at least two real buckets to draw a shape; anything
+  // less (empty query, single bucket) renders no line rather than a
+  // fabricated or degenerate one.
+  if (!points || points.length < 2) return null;
+
   const max = Math.max(...points, 1);
   const min = Math.min(...points, 0);
   const range = max - min;
@@ -58,8 +162,8 @@ interface KpiCardProps {
     value: number;
     isPositive: boolean;
   };
-  sparklineData: number[];
-  lastUpdated: string;
+  sparklineData?: number[];
+  lastUpdated?: string;
   isLoading: boolean;
   isError: boolean;
   refetch: () => void;
@@ -148,6 +252,8 @@ const KpiCard: React.FC<KpiCardProps> = ({
 
       <div className="flex justify-between items-end border-t border-gray-50/50 dark:border-gray-800/10 pt-3">
         <div className="flex items-center gap-1.5">
+          {/* P0-4: no trend → NO chip at all (the old "STABLE" fallback
+              asserted stability that was never measured). */}
           {trend ? (
             <span
               className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
@@ -159,14 +265,19 @@ const KpiCard: React.FC<KpiCardProps> = ({
               {isPositive ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
               <span>{trend.value}%</span>
             </span>
-          ) : (
-            <span className="text-[10px] text-gray-400 font-bold">STABLE</span>
-          )}
-          <Sparkline points={sparklineData} isPositive={isPositive} />
+          ) : null}
+          {sparklineData ? (
+            <Sparkline points={sparklineData} isPositive={isPositive} />
+          ) : null}
         </div>
-        <span className="text-[9px] text-gray-400 font-bold uppercase tracking-wider shrink-0">
-          Sync {lastUpdated}
-        </span>
+        {/* P0-4: freshness chip renders only when a real label exists
+            (omitted entirely while the query is fetching); its content
+            derives from dataUpdatedAt, never a literal. */}
+        {lastUpdated !== undefined ? (
+          <span className="text-[9px] text-gray-400 font-bold uppercase tracking-wider shrink-0">
+            Sync {lastUpdated}
+          </span>
+        ) : null}
       </div>
     </div>
   );
@@ -175,23 +286,54 @@ const KpiCard: React.FC<KpiCardProps> = ({
 interface KpiSectionProps {
   dateRange: { from: string; to: string };
   storeId?: string;
-  lastUpdatedTime: string;
 }
 
-export const KpiSection: React.FC<KpiSectionProps> = ({ dateRange, storeId, lastUpdatedTime }) => {
+export const KpiSection: React.FC<KpiSectionProps> = ({ dateRange, storeId }) => {
   const {
     data: summaryData,
     isLoading: isSummaryLoading,
     isError: isSummaryError,
+    isFetching: isSummaryFetching,
+    dataUpdatedAt: summaryUpdatedAt,
     refetch: refetchSummary,
   } = useAnalyticsSummary(dateRange);
+
+  // P0-4: ONE shifted-window query (same duration, ending one day
+  // earlier) — every period-over-period trend below is computed from
+  // this real comparison window, never from a literal.
+  const prevRange = shiftRangeByOneDay(dateRange);
+  const { data: prevSummary } = useAnalyticsSummary(prevRange);
 
   const {
     data: liveCounts,
     isLoading: isLiveLoading,
     isError: isLiveError,
+    isFetching: isLiveFetching,
+    dataUpdatedAt: liveUpdatedAt,
     refetch: refetchLive,
   } = useLiveCounts();
+
+  // P0-4: real bucketed series feed the sparklines. Cards without an
+  // honest series for their own metric get no sparkline at all.
+  const granularity = granularityForRange(dateRange);
+  const { data: revenueSeries } = useRevenueSeries({
+    from: dateRange.from,
+    to: dateRange.to,
+    granularity,
+  });
+  const { data: orderSeries } = useOrderSeries({
+    from: dateRange.from,
+    to: dateRange.to,
+    granularity,
+  });
+  const revenueSparkline =
+    revenueSeries && revenueSeries.length > 1
+      ? revenueSeries.map((point) => point.value)
+      : undefined;
+  const orderSparkline =
+    orderSeries && orderSeries.length > 1
+      ? orderSeries.map((point) => point.value)
+      : undefined;
 
   // Metrics details
   const todayRevenue = summaryData?.revenue?.totalRevenuePaise
@@ -206,15 +348,46 @@ export const KpiSection: React.FC<KpiSectionProps> = ({ dateRange, storeId, last
   const newCustomers = summaryData?.customers?.newCustomers ?? 0;
 
   // Extract completed/cancelled counts from statusBreakdown
-  const statusBreakdown = summaryData?.statusBreakdown || [];
   const completedCount =
-    statusBreakdown.find((s) => ["COMPLETED", "DELIVERED"].includes(s.status.toUpperCase()))
-      ?.count ?? 0;
+    statusCount(summaryData?.statusBreakdown, COMPLETED_STATUSES) ?? 0;
   const cancelledCount =
-    statusBreakdown.find((s) => ["CANCELLED"].includes(s.status.toUpperCase()))?.count ?? 0;
+    statusCount(summaryData?.statusBreakdown, CANCELLED_STATUSES) ?? 0;
 
   const liveOrders = liveCounts?.ordersActive ?? 0;
   const activeStores = liveCounts?.storesActive ?? 0;
+
+  // P0-4: real deltas — (today - prev) / prev * 100, one decimal.
+  // Either side unavailable (prev query still loading / errored /
+  // disabled) → undefined → the card renders no trend chip.
+  const revenueTrend = computeTrend(
+    summaryData?.revenue?.totalRevenuePaise,
+    prevSummary?.revenue?.totalRevenuePaise,
+  );
+  const ordersTrend = computeTrend(
+    summaryData?.revenue?.orderCount,
+    prevSummary?.revenue?.orderCount,
+  );
+  const aovTrend = computeTrend(summaryData?.revenue?.aov, prevSummary?.revenue?.aov);
+  const completedTrend = computeTrend(
+    completedCount,
+    statusCount(prevSummary?.statusBreakdown, COMPLETED_STATUSES),
+  );
+  const cancelledTrend = computeTrend(
+    cancelledCount,
+    statusCount(prevSummary?.statusBreakdown, CANCELLED_STATUSES),
+  );
+  // New Customers deliberately has NO trend: the summary's newCustomers
+  // is a rolling 7-day count that ignores the date range, so the shifted
+  // window returns the SAME window, not a previous period — comparing
+  // them would fabricate a baseline. undefined → no chip.
+
+  // P0-4: freshness from each query's real dataUpdatedAt. While a query
+  // is fetching the chip is omitted entirely (label would be mid-flight);
+  // never loaded → formatFreshness renders "—".
+  const summaryFreshness = isSummaryFetching
+    ? undefined
+    : formatFreshness(summaryUpdatedAt);
+  const liveFreshness = isLiveFetching ? undefined : formatFreshness(liveUpdatedAt);
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -223,9 +396,9 @@ export const KpiSection: React.FC<KpiSectionProps> = ({ dateRange, storeId, last
         title="Today's Revenue"
         value={todayRevenue}
         icon={IndianRupee}
-        trend={{ value: 12.4, isPositive: true }}
-        sparklineData={[12000, 15000, 18200, 14000, 22000, 19000, 25420]}
-        lastUpdated={lastUpdatedTime}
+        trend={revenueTrend}
+        sparklineData={revenueSparkline}
+        lastUpdated={summaryFreshness}
         isLoading={isSummaryLoading}
         isError={isSummaryError}
         refetch={refetchSummary}
@@ -237,9 +410,9 @@ export const KpiSection: React.FC<KpiSectionProps> = ({ dateRange, storeId, last
         title="Today's Orders"
         value={todayOrders}
         icon={ShoppingBag}
-        trend={{ value: 8.2, isPositive: true }}
-        sparklineData={[42, 55, 68, 51, 72, 60, todayOrders || 78]}
-        lastUpdated={lastUpdatedTime}
+        trend={ordersTrend}
+        sparklineData={orderSparkline}
+        lastUpdated={summaryFreshness}
         isLoading={isSummaryLoading}
         isError={isSummaryError}
         refetch={refetchSummary}
@@ -251,9 +424,7 @@ export const KpiSection: React.FC<KpiSectionProps> = ({ dateRange, storeId, last
         title="Live Orders"
         value={liveOrders}
         icon={Radio}
-        trend={undefined}
-        sparklineData={[2, 4, 3, 5, 4, liveOrders, liveOrders]}
-        lastUpdated="10s ago"
+        lastUpdated={liveFreshness}
         isLoading={isLiveLoading}
         isError={isLiveError}
         refetch={refetchLive}
@@ -265,9 +436,8 @@ export const KpiSection: React.FC<KpiSectionProps> = ({ dateRange, storeId, last
         title="Completed Orders"
         value={completedCount}
         icon={CheckCircle}
-        trend={{ value: 15.1, isPositive: true }}
-        sparklineData={[30, 42, 50, 48, 62, 55, completedCount || 68]}
-        lastUpdated={lastUpdatedTime}
+        trend={completedTrend}
+        lastUpdated={summaryFreshness}
         isLoading={isSummaryLoading}
         isError={isSummaryError}
         refetch={refetchSummary}
@@ -279,9 +449,8 @@ export const KpiSection: React.FC<KpiSectionProps> = ({ dateRange, storeId, last
         title="Cancelled Orders"
         value={cancelledCount}
         icon={XCircle}
-        trend={{ value: 33.3, isPositive: false }} // Red trend represents higher cancellation
-        sparklineData={[2, 4, 1, 3, 2, 5, cancelledCount || 1]}
-        lastUpdated={lastUpdatedTime}
+        trend={cancelledTrend}
+        lastUpdated={summaryFreshness}
         isLoading={isSummaryLoading}
         isError={isSummaryError}
         refetch={refetchSummary}
@@ -293,23 +462,22 @@ export const KpiSection: React.FC<KpiSectionProps> = ({ dateRange, storeId, last
         title="Avg Order Value"
         value={aov}
         icon={Calculator}
-        trend={{ value: 3.8, isPositive: true }}
-        sparklineData={[280, 295, 310, 290, 305, 315, 320]}
-        lastUpdated={lastUpdatedTime}
+        trend={aovTrend}
+        lastUpdated={summaryFreshness}
         isLoading={isSummaryLoading}
         isError={isSummaryError}
         refetch={refetchSummary}
         navigateTo="/admin/analytics"
       />
 
-      {/* New Customers */}
+      {/* New Customers — no trend by design (see above): the metric
+          ignores the date range, so no honest previous-period baseline
+          exists. */}
       <KpiCard
         title="New Customers"
         value={newCustomers}
         icon={Users}
-        trend={{ value: 5.6, isPositive: true }}
-        sparklineData={[8, 12, 10, 15, 14, 18, newCustomers || 15]}
-        lastUpdated={lastUpdatedTime}
+        lastUpdated={summaryFreshness}
         isLoading={isSummaryLoading}
         isError={isSummaryError}
         refetch={refetchSummary}
@@ -321,9 +489,7 @@ export const KpiSection: React.FC<KpiSectionProps> = ({ dateRange, storeId, last
         title="Active Stores"
         value={`${activeStores} Active`}
         icon={Store}
-        trend={undefined}
-        sparklineData={[4, 4, 4, 4, 4, activeStores, activeStores]}
-        lastUpdated="10s ago"
+        lastUpdated={liveFreshness}
         isLoading={isLiveLoading}
         isError={isLiveError}
         refetch={refetchLive}

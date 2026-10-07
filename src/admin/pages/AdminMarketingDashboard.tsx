@@ -146,13 +146,16 @@ export const AdminMarketingDashboard: React.FC = () => {
           title="Total Messages Dispatched"
           value={totalSent.toLocaleString()}
           icon={Mail}
-          trend={{ value: 12.8, label: "vs last month", isPositive: true }}
+          // P0-4 honesty: no prior-month trend — marketingStorage
+          // holds only current totals, no previous-period baseline to
+          // compare against. Omitted prop renders no chip.
         />
         <StatCard
           title="Consolidated CTR"
           value={`${clickThroughRate}%`}
           icon={Zap}
-          trend={{ value: 1.4, label: "Avg Open-to-Click", isPositive: true }}
+          // P0-4 honesty: no fabricated delta — a real trend needs a
+          // second measured period, which this data layer doesn't keep.
         />
         <StatCard
           title="Campaign Revenue"

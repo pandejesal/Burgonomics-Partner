@@ -273,7 +273,6 @@ export const AdminDashboardPlaceholder: React.FC = () => {
       <KpiSection
         dateRange={dateRange}
         storeId={selectedStore !== "all" ? selectedStore : undefined}
-        lastUpdatedTime={lastUpdated ? lastUpdated.split(" ")[0] : "just now"}
       />
 
       {/* Main split: Analytics & Live pipeline grids */}
