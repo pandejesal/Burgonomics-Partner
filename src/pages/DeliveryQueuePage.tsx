@@ -27,8 +27,14 @@ export function DeliveryQueuePage() {
     loadingQuotes,
     dispatchingOrderIds,
     rebookingOrderIds,
+    fareConfirms,
+    manualLanes,
+    pastingOrderIds,
     fetchOrderQuote,
     dispatchPorter,
+    confirmFareDispatch,
+    dismissFareConfirm,
+    savePorterManual,
     assignInHouseRider,
     cancelPorter,
     rebookPorter,
@@ -37,6 +43,11 @@ export function DeliveryQueuePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterTab, setFilterTab] = useState<'all' | 'ready' | 'in_transit' | 'unassigned'>('all');
   const [assigningOrder, setAssigningOrder] = useState<Order | null>(null);
+
+  // Honest connectivity: quotes only holds successful dispatch quote
+  // responses from this session, so a non-empty map is the only evidence
+  // we have that the Porter API answered. Empty => unverified, not dead.
+  const porterReachable = Object.keys(quotes).length > 0;
 
   // Filtered orders list
   const filteredOrders = useMemo(() => {
@@ -83,7 +94,7 @@ export function DeliveryQueuePage() {
           <h1 className="text-2xl font-black text-white tracking-wide flex items-center gap-2.5">
             <span>Delivery Queue & Porter Logistics</span>
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-orange-950 border border-orange-500/40 text-orange-400 font-bold">
-              3PL Dispatch Live
+              3PL Dispatch
             </span>
           </h1>
           <p className="text-xs text-neutral-400">
@@ -128,7 +139,16 @@ export function DeliveryQueuePage() {
           </div>
           <div>
             <span className="text-xs font-bold text-neutral-400 block uppercase">Porter API Status</span>
-            <span className="font-mono text-base font-black text-emerald-400">Connected ✓ (Instant)</span>
+            <span
+              className={`font-mono text-base font-black ${porterReachable ? 'text-emerald-400' : 'text-neutral-500'}`}
+              title={
+                porterReachable
+                  ? 'A dispatch quote returned successfully this session.'
+                  : 'No Porter API call has succeeded this session — status not verified.'
+              }
+            >
+              {porterReachable ? 'Reachable ✓ (this session)' : 'Unknown — not checked'}
+            </span>
           </div>
         </div>
       </div>
@@ -222,11 +242,19 @@ export function DeliveryQueuePage() {
               loadingQuote={loadingQuotes[order.id]}
               isDispatching={dispatchingOrderIds[order.id]}
               isRebooking={rebookingOrderIds[order.id]}
+              fareConfirm={fareConfirms[order.id]}
+              manualLane={manualLanes[order.id]}
+              isPasting={pastingOrderIds[order.id]}
               onFetchQuote={fetchOrderQuote}
               onDispatchPorter={dispatchPorter}
               onOpenAssignModal={setAssigningOrder}
               onCancelPorter={cancelPorter}
               onRebookPorter={rebookPorter}
+              onConfirmFare={confirmFareDispatch}
+              onDismissFareConfirm={(o) => dismissFareConfirm(o.id)}
+              onPastePorter={(o, porterOrderId, trackingUrl) =>
+                savePorterManual(o.id, porterOrderId, trackingUrl)
+              }
             />
           ))}
         </div>
