@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useChats } from '@/hooks/useChats';
+import { useBranches } from '@/hooks/useBranches';
 import { useAuthStore } from '@/stores/authStore';
 import { AttachReferenceModal } from '@/components/chat/AttachReferenceModal';
 import {
@@ -37,6 +38,13 @@ export const ChatPage: React.FC = () => {
     createOrOpenBranchChannel,
     createOrOpenDirectDm,
   } = useChats();
+  const { branches } = useBranches();
+
+  const myBranches = branches.filter((b) => !!user?.branchIds?.includes(b.id));
+  const homeBranch = branches.find((b) => b.id === user?.branchIds?.[0]);
+
+  const threadLabel = (t: ChatThread) =>
+    t.title || (t.type === 'branch_channel' ? 'Branch channel' : 'Direct message');
 
   const [inputMessage, setInputMessage] = useState('');
   const [activeTab, setActiveTab] = useState<'channels' | 'direct'>('channels');
@@ -54,18 +62,7 @@ export const ChatPage: React.FC = () => {
       ? ({
           id: activeThreadId,
           type: activeThreadId.startsWith('channel_') ? 'branch_channel' : 'direct_dm',
-          title:
-            activeThreadId === 'channel_branch_surat_01'
-              ? 'Surat Adajan Operations Hub'
-              : activeThreadId === 'channel_branch_ahmedabad_01'
-              ? 'Ahmedabad SG Operations Hub'
-              : 'Branch Operations Hub',
-          branchName:
-            activeThreadId === 'channel_branch_surat_01'
-              ? 'Surat Adajan'
-              : activeThreadId === 'channel_branch_ahmedabad_01'
-              ? 'Ahmedabad SG'
-              : 'Branch',
+          title: activeThreadId.startsWith('channel_') ? 'Branch channel' : 'Direct message',
           participantIds: [],
           participantNames: {},
           createdAt: { toDate: () => new Date() } as any,
@@ -154,7 +151,7 @@ export const ChatPage: React.FC = () => {
     const matchesTab =
       activeTab === 'channels' ? t.type === 'branch_channel' : t.type === 'direct_dm';
     const matchesSearch =
-      t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      threadLabel(t).toLowerCase().includes(searchQuery.toLowerCase()) ||
       (t.branchName && t.branchName.toLowerCase().includes(searchQuery.toLowerCase()));
     return matchesTab && matchesSearch;
   });
@@ -183,7 +180,7 @@ export const ChatPage: React.FC = () => {
             onClick={() =>
               createOrOpenBranchChannel(
                 user.branchIds[0],
-                user.name ? `${user.name}'s Branch` : 'My Branch'
+                homeBranch?.name ?? 'Branch room'
               )
             }
             className="hidden sm:inline-flex items-center px-3.5 py-2 text-xs font-bold rounded-xl bg-accent hover:bg-accent-hover text-white transition-colors shadow-md cursor-pointer"
@@ -254,27 +251,22 @@ export const ChatPage: React.FC = () => {
                     ? 'Branch channels appear when operational updates are broadcast.'
                     : 'Start a 1:1 conversation with Brand Owners, Developers or Support.'}
                 </p>
-                {/* Fallback default rooms */}
-                <div className="pt-2 flex flex-col space-y-2">
-                  <button
-                    onClick={async () => {
-                      await createOrOpenBranchChannel('branch_surat_01', 'Surat Adajan Hub');
-                      setShowMobileList(false);
-                    }}
-                    className="px-3 py-2 text-xs bg-surface hover:bg-surface-hover border border-border text-zinc-200 rounded-xl text-left font-bold cursor-pointer"
-                  >
-                    + Join Surat Adajan Hub
-                  </button>
-                  <button
-                    onClick={async () => {
-                      await createOrOpenBranchChannel('branch_ahmedabad_01', 'Ahmedabad SG Hub');
-                      setShowMobileList(false);
-                    }}
-                    className="px-3 py-2 text-xs bg-surface hover:bg-surface-hover border border-border text-zinc-200 rounded-xl text-left font-bold cursor-pointer"
-                  >
-                    + Join Ahmedabad SG Hub
-                  </button>
-                </div>
+                {myBranches.length > 0 && (
+                  <div className="pt-2 flex flex-col space-y-2">
+                    {myBranches.map((b) => (
+                      <button
+                        key={b.id}
+                        onClick={async () => {
+                          await createOrOpenBranchChannel(b.id, b.name);
+                          setShowMobileList(false);
+                        }}
+                        className="px-3 py-2 text-xs bg-surface hover:bg-surface-hover border border-border text-zinc-200 rounded-xl text-left font-bold cursor-pointer"
+                      >
+                        + Open {b.name} room
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : (
               filteredThreads.map((thread) => {
@@ -300,7 +292,7 @@ export const ChatPage: React.FC = () => {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-1">
                         <span className="font-bold text-xs text-white truncate">
-                          {thread.title}
+                          {threadLabel(thread)}
                         </span>
                         {thread.lastMessageAt && (
                           <span className="text-[10px] text-zinc-500 shrink-0">

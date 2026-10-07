@@ -31,13 +31,10 @@ const roleLabels: Record<string, string> = {
 
 export function SettingsPage() {
   const { user, signOut } = useAuthStore();
-  const { branches } = useBranches();
+  const { branches, isLoading: branchesLoading } = useBranches();
   const [showDevDiagnostics, setShowDevDiagnostics] = useState(false);
 
-  const myBranch =
-    branches.find((b) => user?.branchIds?.includes(b.id)) ||
-    branches[0] ||
-    null;
+  const myBranch = branches.find((b) => user?.branchIds?.includes(b.id)) ?? null;
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-16 select-none">
@@ -94,7 +91,12 @@ export function SettingsPage() {
           <div className="p-3 rounded-2xl bg-neutral-950 border border-neutral-850 space-y-1">
             <span className="text-neutral-500 font-bold uppercase text-[10px] block">Assigned Outlet</span>
             <p className="font-semibold text-neutral-200 truncate">
-              {myBranch?.name || user?.branchIds?.[0] || 'Surat Adajan'}
+              {myBranch?.name ??
+                (branchesLoading
+                  ? 'Loading outlet…'
+                  : user?.branchIds?.length
+                    ? 'Outlet unavailable'
+                    : 'Not assigned to an outlet')}
             </p>
           </div>
 
