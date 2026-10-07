@@ -49,7 +49,7 @@ import {
   RichStoreHours,
   WeeklySchedule,
 } from "./storesData";
-import { useAdminAuthStore } from "@/admin/store/adminAuthStore";
+import { useAdmin } from "@/admin/hooks/useAdmin";
 import { adminStoresService } from "../services/adminStoresService";
 import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
 
@@ -91,6 +91,191 @@ export function markStoresSynced(
   );
 }
 
+// P0-3: store ids come from timestamp/random entropy, never a list-length
+// counter (the old `str_0` + row-count scheme collided across deletes and let
+// two concurrent creates overwrite each other).
+export function generateStoreId(): string {
+  return `str_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// P0-3: everything the operator typed (plus the validated phone), and nothing
+// else. Server-owned health/compliance/analytics fields get honest
+// "never measured" defaults instead of plausible fiction:
+//
+//   field                 value
+//   --------------------- ---------------------------------------------
+//   id                    str_<base36 ms>_<rand6> (regenerated on collision)
+//   name/address/city/area input as entered
+//   lat/lng               parseFloat of the form coordinates
+//   phone                 normalized/validated input (no placeholder numbers)
+//   petpoojaRestId        trimmed input, or null (no invented rest_ mapping)
+//   imageUrl              null
+//   hours                 { open: "10:00", close: "23:00" } (opening default)
+//   isOpen/isBusy         false / false
+//   isRecentlyOpened      true (it was literally just registered)
+//   supports              { delivery, takeaway, dineIn } = true
+//   etaMinutes/pickupEtaMinutes/deliveryFee
+//                         30 / 15 / 29 (delivery params)
+//   deliveryRadiusKm/MinOrder/MaxDistance
+//                         5 / 150 / 7 (delivery params)
+//   richHours             default 10:00–23:00 week
+//   email                 null → "No contact email on file"
+//   managerName/managerPhone null (nobody hired yet)
+//   webhookUrl            null → "Not configured"
+//   webhookStatus         "unknown" → "Not connected"
+//   circuitBreaker        null → "NOT CONNECTED"
+//   lastSyncTime          null → "Never"
+//   menuVersion           null → "—"
+//   webhookFailures/retryCount 0 (no traffic has occurred)
+//   queue counters        0, queueWorkerStatus "unknown" → "NOT CONNECTED"
+//   todayRevenue/todayOrders/avgOrderValue/customerCount 0 (no orders yet)
+//   weekly/monthly trend  [0 x 7] / [0 x 30]
+//   popularItem/peakHour/repeatCustomerPercentage
+//                         key ABSENT — unmeasured analytics are omitted, not 0
+//   autoAccept/kitchenDisplay/onlinePayment/cashOnDelivery true (settings)
+//   staff                 [] → "No staff assigned yet…"
+//   documents             [] → "No compliance documents uploaded…"
+//   media                 { heroBanner: null, logo: null, gallery: [] }
+export interface NewStoreInput {
+  name: string;
+  city: string;
+  area: string;
+  address: string;
+  /** Normalized by normalizeIndianMobile before the call. */
+  phone: string;
+  petpoojaRestId?: string | null;
+  lat?: string | number;
+  lng?: string | number;
+}
+
+const parseCoord = (value: string | number | undefined): number => {
+  if (typeof value === "number") return value;
+  return parseFloat(value ?? "");
+};
+
+export function buildNewStore(
+  input: NewStoreInput,
+  existingStores: readonly RichStore[],
+): RichStore {
+  const taken = new Set(existingStores.map((s) => s.id));
+  let id = generateStoreId();
+  while (taken.has(id)) id = generateStoreId();
+
+  return {
+    id,
+    name: input.name,
+    address: input.address,
+    city: input.city,
+    area: input.area,
+    lat: parseCoord(input.lat),
+    lng: parseCoord(input.lng),
+    phone: input.phone,
+    imageUrl: null,
+    hours: { open: "10:00", close: "23:00" },
+    isOpen: false,
+    isBusy: false,
+    isRecentlyOpened: true,
+    supports: { delivery: true, takeaway: true, dineIn: true },
+    etaMinutes: 30,
+    pickupEtaMinutes: 15,
+    deliveryFee: 29,
+    petpoojaRestId: input.petpoojaRestId?.trim() || null,
+    richHours: {
+      monday: { open: "10:00", close: "23:00" },
+      tuesday: { open: "10:00", close: "23:00" },
+      wednesday: { open: "10:00", close: "23:00" },
+      thursday: { open: "10:00", close: "23:00" },
+      friday: { open: "10:00", close: "23:59" },
+      saturday: { open: "10:00", close: "23:59" },
+      sunday: { open: "10:00", close: "23:59" },
+    },
+    email: null,
+    managerName: null,
+    managerPhone: null,
+    webhookUrl: null,
+    webhookStatus: "unknown",
+    circuitBreaker: null,
+    lastSyncTime: null,
+    menuVersion: null,
+    webhookFailures: 0,
+    retryCount: 0,
+    queueOrdersWaiting: 0,
+    queueOrdersActive: 0,
+    queueFailedJobs: 0,
+    queueDeadLetters: 0,
+    queueWorkerStatus: "unknown",
+    todayRevenue: 0,
+    todayOrders: 0,
+    avgOrderValue: 0,
+    customerCount: 0,
+    weeklyRevenueTrend: [0, 0, 0, 0, 0, 0, 0],
+    monthlyRevenueTrend: Array.from({ length: 30 }).map(() => 0),
+    autoAcceptOrders: true,
+    kitchenDisplayEnabled: true,
+    onlinePaymentEnabled: true,
+    cashOnDeliveryEnabled: true,
+    staff: [],
+    documents: [],
+    deliveryRadiusKm: 5,
+    deliveryMinOrder: 150,
+    deliveryMaxDistance: 7,
+    media: { heroBanner: null, logo: null, gallery: [] },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// P0-3 honest render helpers — every health/compliance render site in this
+// page routes through these so an unmeasured value can never be dressed up
+// as a live reading. The tests assert on these exact strings.
+// ---------------------------------------------------------------------------
+
+/** HealthBadge status for the Petpooja link: "not connected" for unknown. */
+export function petpoojaHealthStatus(
+  status: RichStore["webhookStatus"],
+): "healthy" | "degraded" | "not connected" {
+  if (status === "active") return "healthy";
+  if (status === "unknown") return "not connected";
+  return "degraded";
+}
+
+export function displayMenuVersion(menuVersion: RichStore["menuVersion"]): string {
+  return menuVersion || "—";
+}
+
+export function displayCircuitBreaker(
+  circuitBreaker: RichStore["circuitBreaker"],
+): string {
+  return circuitBreaker ? circuitBreaker.toUpperCase() : "NOT CONNECTED";
+}
+
+export function displayLastSyncTime(lastSyncTime: RichStore["lastSyncTime"]): string {
+  if (!lastSyncTime) return "Never";
+  const at = new Date(lastSyncTime);
+  return Number.isNaN(at.getTime()) ? "Never" : at.toLocaleTimeString();
+}
+
+export function displayWebhookUrl(webhookUrl: RichStore["webhookUrl"]): string {
+  return webhookUrl || "Not configured";
+}
+
+export function displayEmail(email: RichStore["email"]): string {
+  return email || "No contact email on file";
+}
+
+export function displayQueueWorkerStatus(
+  status: RichStore["queueWorkerStatus"],
+): string {
+  return status === "unknown" ? "NOT CONNECTED" : status;
+}
+
+// P0-3: honest empty-state copy for zero-length relations — exported so the
+// render sites and the honesty tests read the exact same strings.
+export const STAFF_EMPTY_STATE =
+  "No staff assigned yet — use Assign Staff to add your team.";
+export const DOCUMENTS_EMPTY_STATE =
+  "No compliance documents uploaded for this outlet yet.";
+
+
 export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boolean }> = ({
   defaultStoreId,
   isCreate: initialIsCreate,
@@ -127,8 +312,8 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
     return true;
   };
 
-  // Use real Admin Auth Role
-  const { admin } = useAdminAuthStore();
+  // Single sign-in: role comes from the unified partner session.
+  const { admin } = useAdmin();
   const selectedRole = (admin?.role?.name as RoleType) || "Developer";
 
   // Real apps might store the assigned store in the user profile/claims
@@ -211,10 +396,17 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
         if (selectedStatus === "Busy" && !store.isBusy) return false;
       }
 
-      // 4. Sync Filter
+      // 4. Sync Filter — unknown/unlinked stores are their own bucket; they
+      // are neither healthy nor a measured connection fault (P0-3).
       if (selectedSync !== "All") {
         if (selectedSync === "Healthy" && store.webhookStatus !== "active") return false;
-        if (selectedSync === "Degraded" && store.webhookStatus === "active") return false;
+        if (
+          selectedSync === "Degraded" &&
+          (store.webhookStatus === "active" || store.webhookStatus === "unknown")
+        )
+          return false;
+        if (selectedSync === "NotConnected" && store.webhookStatus !== "unknown")
+          return false;
       }
 
       // 5. Search Query
@@ -225,7 +417,8 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
           store.area.toLowerCase().includes(q) ||
           store.address.toLowerCase().includes(q) ||
           (store.petpoojaRestId && store.petpoojaRestId.toLowerCase().includes(q)) ||
-          store.managerName.toLowerCase().includes(q) ||
+          (store.managerName && store.managerName.toLowerCase().includes(q)) ||
+          (store.email && store.email.toLowerCase().includes(q)) ||
           store.id.toLowerCase().includes(q)
         );
       }
@@ -258,8 +451,8 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
     const total = visible.length;
     const open = visible.filter((s) => s.isOpen).length;
     const busy = visible.filter((s) => s.isBusy).length;
-    const rev = visible.reduce((sum, s) => sum + s.todayRevenue, 0);
-    const ords = visible.reduce((sum, s) => sum + s.todayOrders, 0);
+    const rev = visible.reduce((sum, s) => sum + (s.todayRevenue ?? 0), 0);
+    const ords = visible.reduce((sum, s) => sum + (s.todayOrders ?? 0), 0);
     const healthySyncs = visible.filter((s) => s.webhookStatus === "active").length;
 
     return { total, open, busy, rev, ords, healthySyncs };
@@ -288,13 +481,14 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
     const updated = stores.map((s) => {
       if (s.id === confirmToggleStore.id) {
         const nextOpen = !s.isOpen;
+        // P0-3: flipping open/closed used to also stamp webhookStatus
+        // active/failed, a circuit-breaker state and a fresh lastSyncTime —
+        // all fabricated, none of them measured by this action. Only the
+        // operator-controlled flags change here.
         return {
           ...s,
           isOpen: nextOpen,
           isBusy: nextOpen ? s.isBusy : false,
-          webhookStatus: nextOpen ? ("active" as const) : ("failed" as const),
-          circuitBreaker: nextOpen ? ("closed" as const) : ("open" as const),
-          lastSyncTime: new Date().toISOString(),
         };
       }
       return s;
@@ -438,99 +632,30 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
       return;
     }
 
-    const newId = `str_0${stores.length + 1}`;
-    const newStore: RichStore = {
-      id: newId,
-      name: newStoreName,
-      address: newStoreAddress,
-      city: newStoreCity,
-      area: newStoreArea,
-      lat: parseFloat(newStoreLat),
-      lng: parseFloat(newStoreLng),
-      phone: validPhone,
-      imageUrl: null,
-      hours: { open: "10:00", close: "23:00" },
-      isOpen: true,
-      isBusy: false,
-      isRecentlyOpened: true,
-      supports: { delivery: true, takeaway: true, dineIn: true },
-      etaMinutes: 30,
-      pickupEtaMinutes: 15,
-      deliveryFee: 29,
-      petpoojaRestId: newStorePetpoojaId || `rest_${newStoreArea.toLowerCase().replace(/\s/g, "")}`,
-      richHours: {
-        monday: { open: "10:00", close: "23:00" },
-        tuesday: { open: "10:00", close: "23:00" },
-        wednesday: { open: "10:00", close: "23:00" },
-        thursday: { open: "10:00", close: "23:00" },
-        friday: { open: "10:00", close: "23:59" },
-        saturday: { open: "10:00", close: "23:59" },
-        sunday: { open: "10:00", close: "23:59" },
+    // P0-3: build the record from the operator's inputs only. Everything the
+    // server owns (webhook link, sync time, menu version, staff, documents,
+    // media, analytics) starts as null/"unknown"/empty and renders honestly —
+    // see buildNewStore's field table. (No Petpooja mapping call happens here
+    // — the old toast claimed one.)
+    const newStore = buildNewStore(
+      {
+        name: newStoreName,
+        city: newStoreCity,
+        area: newStoreArea,
+        address: newStoreAddress,
+        phone: validPhone,
+        petpoojaRestId: newStorePetpoojaId,
+        lat: newStoreLat,
+        lng: newStoreLng,
       },
-      email: `${newStoreName.toLowerCase().replace(/\s/g, "")}@burgonomics.com`,
-      managerName: "Operational Lead",
-      managerPhone: validPhone,
-      webhookUrl: `https://api.burgonomics.com/webhooks/petpooja/v1/${newId}`,
-      webhookStatus: "active",
-      circuitBreaker: "closed",
-      lastSyncTime: new Date().toISOString(),
-      menuVersion: "v3.12.1",
-      webhookFailures: 0,
-      retryCount: 0,
-      queueOrdersWaiting: 0,
-      queueOrdersActive: 0,
-      queueFailedJobs: 0,
-      queueDeadLetters: 0,
-      queueWorkerStatus: "healthy",
-      todayRevenue: 0,
-      todayOrders: 0,
-      avgOrderValue: 0,
-      popularItem: "Classic Cheese Overload",
-      peakHour: "19:00 - 21:00",
-      customerCount: 0,
-      repeatCustomerPercentage: 40,
-      weeklyRevenueTrend: [0, 0, 0, 0, 0, 0, 0],
-      monthlyRevenueTrend: Array.from({ length: 30 }).map(() => 0),
-      autoAcceptOrders: true,
-      kitchenDisplayEnabled: true,
-      onlinePaymentEnabled: true,
-      cashOnDeliveryEnabled: true,
-      staff: [
-        {
-          id: `STF-${newId}-01`,
-          name: "Operational Lead",
-          role: "Manager",
-          phone: validPhone,
-          email: "manager@burgonomics.com",
-          isOnline: true,
-        },
-      ],
-      documents: [
-        {
-          id: `DOC-${newId}-01`,
-          name: "FSSAI Food License.pdf",
-          type: "FSSAI",
-          expiryDate: "2027-12-31",
-          status: "active",
-        },
-      ],
-      deliveryRadiusKm: 5,
-      deliveryMinOrder: 150,
-      deliveryMaxDistance: 7,
-      media: {
-        heroBanner:
-          "https://images.unsplash.com/photo-1552566626-52f8b828add9?auto=format&fit=crop&w=800&q=80",
-        logo: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=150&q=80",
-        gallery: [],
-      },
-    };
+      stores,
+    );
 
     const updated = [newStore, ...stores];
-    // Loop 6/120 honest persist: surface the real save outcome. (No Petpooja
-    // mapping call happens here — the old toast claimed one.)
+    // Loop 6/120 honest persist: surface the real save outcome.
     if (!(await saveStores(updated))) return;
     setIsCreating(false);
-    setActiveStoreId(newId);
+    setActiveStoreId(newStore.id);
     toast.success(`Store "${newStoreName}" saved to the store directory.`);
 
     // Reset Form
@@ -555,8 +680,11 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
       name: newStaffName,
       role: newStaffRole,
       phone: newStaffPhone,
-      email: newStaffEmail || `${newStaffName.toLowerCase().replace(/\s/g, "")}@burgonomics.com`,
-      isOnline: true,
+      // P0-3: never invent an email address — blank stays blank.
+      email: newStaffEmail.trim(),
+      // Online status is observed, not assumed: a freshly assigned member
+      // has not been seen online.
+      isOnline: false,
     };
 
     const updated = stores.map((s) => {
@@ -592,21 +720,63 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
     toast.success("Staff member unassigned from store roster.");
   };
 
-  // Export Directory Simulator
-  const handleExportDirectory = (format: "csv" | "xlsx" | "pdf") => {
-    toast.info(
-      `Generating ${format.toUpperCase()} export containing ${filteredStores.length} stores...`,
+  // Honest CSV export: builds a real CSV from the filtered directory and
+  // downloads it immediately. No fake formats, no fabricated delay, no JSON
+  // blob mislabeled as csv/xlsx/pdf.
+  const handleExportDirectory = () => {
+    if (filteredStores.length === 0) {
+      toast.info("No stores match the current filters — nothing to export.");
+      return;
+    }
+    const escapeCsv = (value: unknown): string => {
+      const s = value == null ? "" : String(value);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const headers = [
+      "id",
+      "name",
+      "city",
+      "area",
+      "address",
+      "phone",
+      "isOpen",
+      "isBusy",
+      "petpoojaRestId",
+      "webhookStatus",
+      "menuVersion",
+      "todayRevenue",
+      "todayOrders",
+    ];
+    const rows = filteredStores.map((s) =>
+      [
+        s.id,
+        s.name,
+        s.city,
+        s.area,
+        s.address,
+        s.phone ?? "",
+        s.isOpen,
+        s.isBusy,
+        s.petpoojaRestId ?? "",
+        s.webhookStatus,
+        s.menuVersion,
+        s.todayRevenue,
+        s.todayOrders,
+      ]
+        .map(escapeCsv)
+        .join(",")
     );
-    setTimeout(() => {
-      const dataStr = JSON.stringify(filteredStores, null, 2);
-      const blob = new Blob([dataStr], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `burgonomics-stores-export.${format === "pdf" ? "pdf" : format}`;
-      link.click();
-      toast.success(`Directory exported successfully in ${format.toUpperCase()}!`);
-    }, 1000);
+    const csv = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "burgonomics-stores-export.csv";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${filteredStores.length} stores to CSV.`);
   };
 
   // Spatial Radar Positioning Centering on current filter average
@@ -785,6 +955,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                         <option value="All">All Sync Status</option>
                         <option value="Healthy">Healthy (Linked)</option>
                         <option value="Degraded">Connection Fault</option>
+                        <option value="NotConnected">Not connected</option>
                       </select>
                     </div>
 
@@ -799,7 +970,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                       </button>
                       <div className="h-4 w-[1px] bg-gray-200 dark:bg-gray-800" />
                       <button
-                        onClick={() => handleExportDirectory("csv")}
+                        onClick={handleExportDirectory}
                         className="rounded-lg bg-gray-50 p-1 text-gray-400 hover:text-primary dark:bg-gray-900"
                         title="Export CSV"
                       >
@@ -906,7 +1077,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                                     Revenue (Today)
                                   </span>
                                   <span className="font-mono text-base font-black text-gray-900 dark:text-white">
-                                    ₹{store.todayRevenue.toLocaleString()}
+                                    ₹{(store.todayRevenue ?? 0).toLocaleString()}
                                   </span>
                                 </div>
                                 <div>
@@ -926,12 +1097,10 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                                 <div className="flex items-center gap-1 text-gray-500">
                                   <HealthBadge
                                     system="petpooja"
-                                    status={
-                                      store.webhookStatus === "active" ? "healthy" : "degraded"
-                                    }
+                                    status={petpoojaHealthStatus(store.webhookStatus)}
                                   />
                                   <span className="font-mono text-[10px] font-bold text-gray-400">
-                                    {store.menuVersion}
+                                    {displayMenuVersion(store.menuVersion)}
                                   </span>
                                 </div>
 
@@ -988,7 +1157,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                                 <td className="py-4 px-6">
                                   <div className="font-mono">
                                     <span className="block font-black text-gray-900 dark:text-white">
-                                      ₹{store.todayRevenue.toLocaleString()}
+                                      ₹{(store.todayRevenue ?? 0).toLocaleString()}
                                     </span>
                                     <span className="block text-[10px] text-gray-400 font-bold">
                                       {store.todayOrders} live orders
@@ -1001,12 +1170,19 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                                       className={`h-2 w-2 rounded-full ${
                                         store.webhookStatus === "active"
                                           ? "bg-emerald-500"
-                                          : "bg-red-500"
+                                          : store.webhookStatus === "unknown"
+                                            ? "bg-gray-300 dark:bg-gray-600"
+                                            : "bg-red-500"
                                       }`}
                                     />
                                     <span className="font-mono text-xs font-bold">
                                       {store.petpoojaRestId || "No mapping"}
                                     </span>
+                                    {store.webhookStatus === "unknown" && (
+                                      <span className="text-[10px] font-black uppercase text-gray-400">
+                                        Not connected
+                                      </span>
+                                    )}
                                   </div>
                                 </td>
                                 <td className="py-4 px-6">
@@ -1515,7 +1691,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                       </div>
                       <div className="flex items-center gap-2">
                         <FileText size={16} className="text-gray-400" />
-                        <span className="text-xs">{activeStore.email}</span>
+                        <span className="text-xs">{displayEmail(activeStore.email)}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <Clock size={16} className="text-gray-400" />
@@ -1609,6 +1785,11 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                     </div>
 
                     <div className="space-y-2.5 max-h-[220px] overflow-y-auto pr-2">
+                      {activeStore.staff.length === 0 && (
+                        <p className="rounded-xl border border-dashed border-gray-200 p-3 text-xs font-semibold text-gray-500 dark:border-gray-700">
+                          {STAFF_EMPTY_STATE}
+                        </p>
+                      )}
                       {activeStore.staff.map((member) => (
                         <div
                           key={member.id}
@@ -1662,6 +1843,11 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                     </div>
 
                     <div className="space-y-2">
+                      {activeStore.documents.length === 0 && (
+                        <p className="rounded-xl border border-dashed border-gray-200 p-3 text-xs font-semibold text-gray-500 dark:border-gray-700">
+                          {DOCUMENTS_EMPTY_STATE}
+                        </p>
+                      )}
                       {activeStore.documents.map((doc) => (
                         <div
                           key={doc.id}
@@ -1768,7 +1954,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                       </div>
                       <HealthBadge
                         system="petpooja"
-                        status={activeStore.webhookStatus === "active" ? "healthy" : "degraded"}
+                        status={petpoojaHealthStatus(activeStore.webhookStatus)}
                       />
                     </div>
 
@@ -1798,14 +1984,20 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-400">Circuit Breaker:</span>
-                          <span className="font-mono text-emerald-500 font-bold">
-                            {activeStore.circuitBreaker.toUpperCase()}
+                          <span
+                            className={`font-mono font-bold ${
+                              activeStore.circuitBreaker
+                                ? "text-emerald-500"
+                                : "text-gray-400"
+                            }`}
+                          >
+                            {displayCircuitBreaker(activeStore.circuitBreaker)}
                           </span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-400">Last Synced POS:</span>
                           <span className="font-mono text-gray-500">
-                            {new Date(activeStore.lastSyncTime).toLocaleTimeString()}
+                            {displayLastSyncTime(activeStore.lastSyncTime)}
                           </span>
                         </div>
                       </div>
@@ -1814,7 +2006,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                         <div className="flex justify-between">
                           <span className="text-gray-400">Menu Version:</span>
                           <span className="font-mono font-bold text-accent dark:text-accent-light">
-                            {activeStore.menuVersion}
+                            {displayMenuVersion(activeStore.menuVersion)}
                           </span>
                         </div>
                         <div className="flex justify-between">
@@ -1837,13 +2029,23 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                         Webhook Endpoint URL
                       </span>
                       <div className="flex items-center justify-between rounded-lg bg-gray-50 p-2 font-mono text-[10px] dark:bg-gray-900/50">
-                        <span className="truncate text-gray-500">{activeStore.webhookUrl}</span>
-                        <button
-                          onClick={() => handleCopyText(activeStore.webhookUrl, "Webhook URL")}
-                          className="text-primary dark:text-emerald-400 hover:underline shrink-0 ml-2"
-                        >
-                          COPY
-                        </button>
+                        <span className="truncate text-gray-500">
+                          {displayWebhookUrl(activeStore.webhookUrl)}
+                        </span>
+                        {activeStore.webhookUrl ? (
+                          <button
+                            onClick={() =>
+                              handleCopyText(activeStore.webhookUrl as string, "Webhook URL")
+                            }
+                            className="text-primary dark:text-emerald-400 hover:underline shrink-0 ml-2"
+                          >
+                            COPY
+                          </button>
+                        ) : (
+                          <span className="shrink-0 ml-2 text-[9px] font-black uppercase text-gray-400">
+                            Not connected
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -1887,10 +2089,12 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                           className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase ${
                             activeStore.queueWorkerStatus === "healthy"
                               ? "bg-emerald-100 text-emerald-800"
-                              : "bg-red-100 text-red-800"
+                              : activeStore.queueWorkerStatus === "unknown"
+                                ? "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+                                : "bg-red-100 text-red-800"
                           }`}
                         >
-                          {activeStore.queueWorkerStatus}
+                          {displayQueueWorkerStatus(activeStore.queueWorkerStatus)}
                         </span>
                       </div>
 
