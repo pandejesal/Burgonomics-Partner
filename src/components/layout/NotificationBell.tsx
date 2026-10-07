@@ -1,9 +1,18 @@
 import { Link } from 'react-router-dom';
 import { useNotifications } from '@/hooks/useNotifications';
+import { useAuthStore } from '@/stores/authStore';
+import { canAccessRoute } from '@/core/auth/routePolicy';
 import { Bell } from 'lucide-react';
 
 export function NotificationBell() {
   const { unreadCount } = useNotifications();
+  const { user } = useAuthStore();
+
+  // /notifications is denied for roles outside the policy allowlist
+  // (e.g. branch_staff) — hide the bell instead of linking to a bounce.
+  if (!canAccessRoute(user?.role, '/notifications')) {
+    return null;
+  }
 
   return (
     <Link

@@ -11,6 +11,11 @@ export function canAccessRoute(role: UserRole | undefined, pathname: string): bo
   // Normalize: strip trailing slashes so "/orders/" polices like "/orders".
   const path = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
 
+  // Customer accounts can never hold a partner-console session (authStore
+  // rejects them at sign-in). Deny explicitly so the full-access fallthrough
+  // below can never read as a customer grant.
+  if (role === 'customer') return false;
+
   // Kitchen staff: KDS and base order views only
   if (role === 'branch_staff') {
     const allowed = ['/kds', '/orders', '/dashboard', '/menu', '/delivery-queue'];
@@ -31,4 +36,26 @@ export function canAccessRoute(role: UserRole | undefined, pathname: string): bo
 
   // brand_owner, developer, regional_manager: full partner-console access
   return true;
+}
+
+/**
+ * Console roles that may hold a partner session. 'customer' is excluded by
+ * design (denied above) — it never appears in sidebar/header navigation.
+ */
+export const PARTNER_CONSOLE_ROLES: UserRole[] = [
+  'brand_owner',
+  'developer',
+  'support',
+  'regional_manager',
+  'branch_owner',
+  'branch_staff',
+];
+
+/**
+ * Roles permitted to reach `pathname`, per the enforced policy above.
+ * Navigation consumes this so nav role lists can never disagree with the
+ * guard: `navItem.roles` IS `rolesForRoute(navItem.path)`.
+ */
+export function rolesForRoute(pathname: string): UserRole[] {
+  return PARTNER_CONSOLE_ROLES.filter((role) => canAccessRoute(role, pathname));
 }
