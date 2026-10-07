@@ -35,19 +35,20 @@ export function PetpoojaDashboardPage() {
 
   const { data: health, refetch: refetchHealth } = useQuery({
     queryKey: ["petpooja-gateway-health"],
-    queryFn: () => petpoojaGateway.getHealth(),
+    // P0-2: deferred so the gateway Proxy flag-check never throws sync.
+    queryFn: () => Promise.resolve().then(() => petpoojaGateway.getHealth()),
     refetchInterval: refreshInterval * 1000,
   });
 
   const { data: metrics, refetch: refetchMetrics } = useQuery({
     queryKey: ["petpooja-gateway-metrics"],
-    queryFn: () => petpoojaGateway.getMetrics(),
+    queryFn: () => Promise.resolve().then(() => petpoojaGateway.getMetrics()),
     refetchInterval: refreshInterval * 1000,
   });
 
   const { data: queues, refetch: refetchQueues } = useQuery({
     queryKey: ["petpooja-gateway-queues"],
-    queryFn: () => petpoojaGateway.getQueues(),
+    queryFn: () => Promise.resolve().then(() => petpoojaGateway.getQueues()),
     refetchInterval: refreshInterval * 1000,
   });
 

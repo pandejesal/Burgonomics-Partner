@@ -819,7 +819,13 @@ export async function syncPetpoojaMenuForBranch(branchId: string): Promise<{
   syncedAt: Date;
 }> {
   const { petpoojaGateway } = await import("@/core/integrations/petpooja");
-  if (petpoojaGateway.implementation === "live") {
+  // P0-2: defer the Proxy flag-check — this async fn already turned the sync
+  // throw into a rejection, so semantics are unchanged (off ⇒ still rejects
+  // fail-closed), it just can never be a bare synchronous access.
+  const implementation = await Promise.resolve().then(
+    () => petpoojaGateway.implementation,
+  );
+  if (implementation === "live") {
     const { partnerFunctionsApi } = await import("./partnerFunctionsApi");
     const res = await partnerFunctionsApi.syncPetpoojaMenu(branchId);
     return {

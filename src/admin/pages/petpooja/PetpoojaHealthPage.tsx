@@ -40,17 +40,23 @@ export function PetpoojaHealthPage() {
   } | null>(null);
 
   const loadHealth = () => {
-    void petpoojaGateway.getHealth().then((h) => {
-      setCircuitBreakers(h.circuitBreakers);
-      setServices(h.services);
-      setCacheMetrics({
-        memory: h.cacheMetrics.sizeFormatted,
-        keys: h.cacheMetrics.keyCount,
-        hits: 0,
-        misses: 0,
-        status: h.cacheMetrics.status,
-      });
-    });
+    // P0-2: defer the Proxy access — called from the mount effect below, so a
+    // synchronous throw would escape React and kill the router. On failure the
+    // last known (or initial idle) state stays; nothing is fabricated.
+    void Promise.resolve()
+      .then(() => petpoojaGateway.getHealth())
+      .then((h) => {
+        setCircuitBreakers(h.circuitBreakers);
+        setServices(h.services);
+        setCacheMetrics({
+          memory: h.cacheMetrics.sizeFormatted,
+          keys: h.cacheMetrics.keyCount,
+          hits: 0,
+          misses: 0,
+          status: h.cacheMetrics.status,
+        });
+      })
+      .catch(() => undefined);
   };
 
   useEffect(() => {

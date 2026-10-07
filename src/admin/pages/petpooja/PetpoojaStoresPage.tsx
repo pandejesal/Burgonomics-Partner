@@ -59,24 +59,30 @@ export function PetpoojaStoresPage() {
   } | null>(null);
 
   useEffect(() => {
-    void petpoojaGateway.getStores().then((list) => {
-      setStores(list);
-      if (list.length > 0) {
-        setSelectedStoreId(list[0].id);
-        // Pre-fetch operational states
-        Promise.all(
-          list.map((s) =>
-            petpoojaGateway.getStoreStatus(s.id).then((st) => ({ id: s.id, state: st })),
-          ),
-        ).then((results) => {
-          const map: Record<string, StoreOperationalState> = {};
-          results.forEach((r) => {
-            map[r.id] = r.state;
+    // P0-2: the gateway Proxy throws synchronously when the flag is off —
+    // defer the property access into the promise chain so the effect can
+    // never escape React and hit the app-level error boundary.
+    void Promise.resolve()
+      .then(() => petpoojaGateway.getStores())
+      .then((list) => {
+        setStores(list);
+        if (list.length > 0) {
+          setSelectedStoreId(list[0].id);
+          // Pre-fetch operational states
+          Promise.all(
+            list.map((s) =>
+              petpoojaGateway.getStoreStatus(s.id).then((st) => ({ id: s.id, state: st })),
+            ),
+          ).then((results) => {
+            const map: Record<string, StoreOperationalState> = {};
+            results.forEach((r) => {
+              map[r.id] = r.state;
+            });
+            setStoreStates(map);
           });
-          setStoreStates(map);
-        });
-      }
-    });
+        }
+      })
+      .catch(() => setStores([]));
   }, []);
 
   const selectedStore = stores.find((s) => s.id === selectedStoreId) || stores[0] || null;

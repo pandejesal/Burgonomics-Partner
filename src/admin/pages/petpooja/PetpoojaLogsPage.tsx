@@ -27,7 +27,12 @@ export function PetpoojaLogsPage() {
   const [stores, setStores] = useState<GatewayStore[]>([]);
 
   useEffect(() => {
-    void petpoojaGateway.getStores().then(setStores);
+    // P0-2: defer the Proxy access — a sync throw here would escape React
+    // into the app-level boundary and white-screen the router.
+    void Promise.resolve()
+      .then(() => petpoojaGateway.getStores())
+      .then(setStores)
+      .catch(() => setStores([]));
   }, []);
 
   const {
@@ -36,7 +41,8 @@ export function PetpoojaLogsPage() {
     refetch,
   } = useQuery({
     queryKey: ["petpooja-gateway-sync-logs"],
-    queryFn: () => petpoojaGateway.getSyncLogs(),
+    // P0-2: deferred so the gateway flag check can never throw synchronously.
+    queryFn: () => Promise.resolve().then(() => petpoojaGateway.getSyncLogs()),
     refetchInterval: 10000,
   });
 

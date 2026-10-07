@@ -19,8 +19,18 @@ export const PetpoojaOperationsLayout: React.FC<{ children?: React.ReactNode }> 
   const location = useLocation();
   const [alerts, setAlerts] = useState<GatewayAlert[]>([]);
 
+  // P0-2 gate: the real flag from env.ts (default false). Evaluated BEFORE the
+  // child subtree renders — a child rendered-then-hidden would still run its
+  // mount effects, so the conditional wraps the element itself.
+  const petpoojaEnabled = appConfig.integrations.petpoojaEnabled;
+
   useEffect(() => {
-    void petpoojaGateway.getAlerts().then(setAlerts);
+    // getAlerts() throws synchronously when the gateway is disabled (flag
+    // off) — defer into the promise chain so the standby layout survives.
+    void Promise.resolve()
+      .then(() => petpoojaGateway.getAlerts())
+      .then(setAlerts)
+      .catch(() => setAlerts([]));
   }, []);
 
   const dismissAlert = (id: string) => {
@@ -68,6 +78,26 @@ export const PetpoojaOperationsLayout: React.FC<{ children?: React.ReactNode }> 
   ];
 
   const tabs = allTabs.filter((tab) => !tab.requiresOps || appConfig.featureFlags.adminOps);
+
+  // Honest standby card (P0-2) — modeled on the SystemHealth STANDBY card:
+  // says exactly why nothing is shown, no fake live states, no loading claim.
+  const integrationStandbyCard = (
+    <div className="rounded-[20px] border border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] p-6 space-y-3">
+      <div className="flex justify-between items-center">
+        <span className="font-bold text-sm text-gray-900 dark:text-white uppercase font-sans">
+          Petpooja Bridge Sub-pages
+        </span>
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black border bg-gray-50 text-gray-500 border-gray-200 dark:bg-gray-900 dark:text-gray-400 dark:border-gray-800">
+          STANDBY
+        </span>
+      </div>
+      <p className="text-xs font-semibold text-gray-400">
+        Integration disabled — set VITE_PETPOOJA_ENABLED=true and redeploy to
+        enable the Petpooja gateway. No bridge data is loaded on this page
+        until then.
+      </p>
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -152,8 +182,14 @@ export const PetpoojaOperationsLayout: React.FC<{ children?: React.ReactNode }> 
         </div>
       </div>
 
-      {/* Route Content Frame */}
-      <div className="w-full">{children ?? <Outlet />}</div>
+      {/* Route Content Frame — explicit children (e.g. delivery-queue, which
+          never touches the gateway) always render; the matched Petpooja route
+          child via <Outlet> is gated. Swapping (not hiding) the element is
+          what keeps child mount effects from ever running while the
+          integration is off. */}
+      <div className="w-full">
+        {children ?? (petpoojaEnabled ? <Outlet /> : integrationStandbyCard)}
+      </div>
     </div>
   );
 };
