@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useSystemHealth } from "../../hooks/useDashboardData";
+import type { SystemHealthResponse } from "../../types";
 import {
   ShieldCheck,
   AlertTriangle,
@@ -11,49 +12,107 @@ import {
   HardDrive,
 } from "lucide-react";
 
+/**
+ * P0-5 standby guard: telemetry is "live" only when the backend reported at
+ * least one key. Test key COUNT, not presence — `!!{}` is truthy, so an empty
+ * `details: {}` / `info: {}` object would defeat a truthiness guard
+ * (`!!(health?.details ?? health?.info)`) and render fabricated numbers as if
+ * they were measured.
+ */
+export function hasLiveTelemetry(
+  resp?: Pick<SystemHealthResponse, "info" | "details">,
+): boolean {
+  return (
+    Object.keys(resp?.details ?? {}).length > 0 ||
+    Object.keys(resp?.info ?? {}).length > 0
+  );
+}
+
 export const SystemHealth: React.FC = () => {
   const { data: health, isLoading, isError, refetch } = useSystemHealth();
+
+  // Uptime base is DERIVED from the reported payload only — there is no
+  // hardcoded fallback number, so no uptime is ever fabricated (P0-5).
+  const reportedUptime = (health as any)?.info?.uptime ?? (health as any)?.uptime;
+  const uptimeKnown = typeof reportedUptime === "number" && Number.isFinite(reportedUptime);
+
   const [uptimeSeconds, setUptimeSeconds] = useState<number>(0);
 
-  // Parse health details
-  const dbStatus = health?.details?.database?.status || health?.info?.database?.status || "up";
-  const dbLatency = health?.details?.database?.latency || health?.info?.database?.latency || 4.2;
-
-  const redisStatus = health?.details?.redis?.status || health?.info?.redis?.status || "up";
-  const redisLatency = health?.details?.redis?.latency || health?.info?.redis?.latency || 1.1;
-
-  const queueStatus = (health as any)?.details?.queue?.status || (health as any)?.info?.queue?.status || "up";
-
-  const petpoojaApiStatus =
-    health?.details?.petpooja?.status || health?.info?.petpooja?.status || "up";
-  const razorpayApiStatus =
-    health?.details?.razorpay?.status || health?.info?.razorpay?.status || "up";
-  const firebaseApiStatus =
-    health?.details?.firebase?.status || health?.info?.firebase?.status || "up";
-
-  // Memory & Disk defaults
-  const ramUsedBytes = (health as any)?.details?.process?.memory?.heapUsed || 184 * 1024 * 1024;
-  const ramLimitBytes = (health as any)?.details?.process?.memory?.heapLimit || 1024 * 1024 * 1024;
-  const ramPct = Math.min(100, Math.round((ramUsedBytes / ramLimitBytes) * 100));
-
-  const diskUsedBytes = (health as any)?.details?.disk?.used || 4.2 * 1024 * 1024 * 1024;
-  const diskLimitBytes = (health as any)?.details?.disk?.limit || 15 * 1024 * 1024 * 1024;
-  const diskPct = Math.min(100, Math.round((diskUsedBytes / diskLimitBytes) * 100));
-
-  // Handle live ticking uptime
+  // Seed the ticker with the real reported value and tick once per second —
+  // but ONLY while a reported numeric base exists (`if (!uptimeKnown) return;`).
+  // This effect must stay above the early return below (rules of hooks): the
+  // conditional render must never change the hook count between renders.
   useEffect(() => {
-    if (health) {
-      const initialUptime = (health as any)?.info?.uptime || (health as any)?.uptime || 382410;
-      setUptimeSeconds(initialUptime);
-    }
-  }, [health]);
-
-  useEffect(() => {
+    if (!uptimeKnown) return;
+    setUptimeSeconds(reportedUptime);
     const timer = setInterval(() => {
       setUptimeSeconds((prev) => prev + 1);
     }, 1000);
     return () => clearInterval(timer);
-  }, []);
+    // Dep is known-ness: the effect re-seeds whenever uptime transitions
+    // from not-reported to reported.
+  }, [uptimeKnown]);
+
+  // No live telemetry at all (no backend probes yet): show an honest
+  // standby card instead of rendering default "up" statuses and fabricated
+  // metric numbers as if they were measured.
+  const liveTelemetry = hasLiveTelemetry(health);
+  if (!liveTelemetry) {
+    return (
+      <div className="rounded-[20px] border border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] p-6 space-y-3 h-full">
+        <div className="flex justify-between items-center">
+          <span className="font-bold text-sm text-gray-900 dark:text-white uppercase font-sans">
+            Core Cluster Health
+          </span>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black border bg-gray-50 text-gray-500 border-gray-200 dark:bg-gray-900 dark:text-gray-400 dark:border-gray-800">
+            STANDBY
+          </span>
+        </div>
+        <p className="text-xs font-semibold text-gray-400">
+          Live server metrics are not connected. Connect the monitoring backend
+          to populate this panel — nothing below is measured until then.
+        </p>
+        <button
+          onClick={() => refetch()}
+          className="px-4 py-2 rounded-xl bg-gray-50 dark:bg-gray-900 text-gray-600 dark:text-gray-300 text-xs font-bold transition-all cursor-pointer"
+        >
+          Check Again
+        </button>
+      </div>
+    );
+  }
+
+  // Parse health details — unknown (not "up") when the backend omits a field.
+  const dbStatus = health?.details?.database?.status || health?.info?.database?.status || "unknown";
+  const dbLatency = health?.details?.database?.latency ?? health?.info?.database?.latency ?? null;
+
+  const redisStatus = health?.details?.redis?.status || health?.info?.redis?.status || "unknown";
+  const redisLatency = health?.details?.redis?.latency ?? health?.info?.redis?.latency ?? null;
+
+  const queueStatus = (health as any)?.details?.queue?.status || (health as any)?.info?.queue?.status || "unknown";
+
+  const petpoojaApiStatus =
+    health?.details?.petpooja?.status || health?.info?.petpooja?.status || "unknown";
+  const razorpayApiStatus =
+    health?.details?.razorpay?.status || health?.info?.razorpay?.status || "unknown";
+  const firebaseApiStatus =
+    health?.details?.firebase?.status || health?.info?.firebase?.status || "unknown";
+
+  // Memory & Disk — no numeric fallbacks: a metric we were never given
+  // renders as "—", never as an invented constant (P0-5 / ban-list B4).
+  const ramUsedBytes = (health as any)?.details?.process?.memory?.heapUsed ?? null;
+  const ramLimitBytes = (health as any)?.details?.process?.memory?.heapLimit ?? null;
+  const ramPct =
+    ramUsedBytes != null && ramLimitBytes
+      ? Math.min(100, Math.round((ramUsedBytes / ramLimitBytes) * 100))
+      : null;
+
+  const diskUsedBytes = (health as any)?.details?.disk?.used ?? null;
+  const diskLimitBytes = (health as any)?.details?.disk?.limit ?? null;
+  const diskPct =
+    diskUsedBytes != null && diskLimitBytes
+      ? Math.min(100, Math.round((diskUsedBytes / diskLimitBytes) * 100))
+      : null;
 
   const formatUptime = (totalSeconds: number) => {
     const days = Math.floor(totalSeconds / 86400);
@@ -87,7 +146,7 @@ export const SystemHealth: React.FC = () => {
           <AlertTriangle size={18} className="text-red-500" />
         </div>
         <p className="text-xs font-semibold text-gray-400">
-          Failed to aggregate server-side container metrics and health checks.
+          Health check failed — no telemetry available.
         </p>
         <button
           onClick={() => refetch()}
@@ -110,7 +169,7 @@ export const SystemHealth: React.FC = () => {
               System Clusters & Health
             </h4>
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-0.5">
-              Live server-side telemetry aggregated from virtual private nodes
+              Server-side telemetry reported by the monitoring backend
             </p>
           </div>
           <span
@@ -140,14 +199,14 @@ export const SystemHealth: React.FC = () => {
                   PostgreSQL Database
                 </span>
                 <span className="block text-[9px] font-mono text-gray-400">
-                  Latency {dbLatency}ms
+                  Latency {dbLatency == null ? "—" : `${dbLatency}ms`}
                 </span>
               </div>
             </div>
             <span
-              className={`text-[10px] font-black uppercase ${dbStatus === "up" ? "text-emerald-500" : "text-red-500"}`}
+              className={`text-[10px] font-black uppercase ${dbStatus === "up" ? "text-emerald-500" : dbStatus === "unknown" ? "text-gray-400" : "text-red-500"}`}
             >
-              ● {dbStatus === "up" ? "Online" : "Offline"}
+              ● {dbStatus === "up" ? "Online" : dbStatus === "unknown" ? "Unknown" : "Offline"}
             </span>
           </div>
 
@@ -161,14 +220,14 @@ export const SystemHealth: React.FC = () => {
                   Redis Memory Cache
                 </span>
                 <span className="block text-[9px] font-mono text-gray-400">
-                  Latency {redisLatency}ms
+                  Latency {redisLatency == null ? "—" : `${redisLatency}ms`}
                 </span>
               </div>
             </div>
             <span
-              className={`text-[10px] font-black uppercase ${redisStatus === "up" ? "text-emerald-500" : "text-red-500"}`}
+              className={`text-[10px] font-black uppercase ${redisStatus === "up" ? "text-emerald-500" : redisStatus === "unknown" ? "text-gray-400" : "text-red-500"}`}
             >
-              ● {redisStatus === "up" ? "Online" : "Offline"}
+              ● {redisStatus === "up" ? "Online" : redisStatus === "unknown" ? "Unknown" : "Offline"}
             </span>
           </div>
 
@@ -180,20 +239,20 @@ export const SystemHealth: React.FC = () => {
             <div className="grid grid-cols-3 gap-2 text-[10px] font-bold font-mono">
               <div className="flex items-center justify-between p-1.5 rounded bg-white dark:bg-gray-900 border border-gray-50 dark:border-gray-950">
                 <span className="text-gray-400">Petpooja</span>
-                <span className={petpoojaApiStatus === "up" ? "text-emerald-500" : "text-red-500"}>
-                  {petpoojaApiStatus === "up" ? "CONNECTED" : "FAIL"}
+                <span className={petpoojaApiStatus === "up" ? "text-emerald-500" : petpoojaApiStatus === "unknown" ? "text-gray-400" : "text-red-500"}>
+                  {petpoojaApiStatus === "up" ? "CONNECTED" : petpoojaApiStatus === "unknown" ? "UNKNOWN" : "FAIL"}
                 </span>
               </div>
               <div className="flex items-center justify-between p-1.5 rounded bg-white dark:bg-gray-900 border border-gray-50 dark:border-gray-950">
                 <span className="text-gray-400">Razorpay</span>
-                <span className={razorpayApiStatus === "up" ? "text-emerald-500" : "text-red-500"}>
-                  {razorpayApiStatus === "up" ? "CONNECTED" : "FAIL"}
+                <span className={razorpayApiStatus === "up" ? "text-emerald-500" : razorpayApiStatus === "unknown" ? "text-gray-400" : "text-red-500"}>
+                  {razorpayApiStatus === "up" ? "CONNECTED" : razorpayApiStatus === "unknown" ? "UNKNOWN" : "FAIL"}
                 </span>
               </div>
               <div className="flex items-center justify-between p-1.5 rounded bg-white dark:bg-gray-900 border border-gray-50 dark:border-gray-950">
                 <span className="text-gray-400">Firebase</span>
-                <span className={firebaseApiStatus === "up" ? "text-emerald-500" : "text-red-500"}>
-                  {firebaseApiStatus === "up" ? "CONNECTED" : "FAIL"}
+                <span className={firebaseApiStatus === "up" ? "text-emerald-500" : firebaseApiStatus === "unknown" ? "text-gray-400" : "text-red-500"}>
+                  {firebaseApiStatus === "up" ? "CONNECTED" : firebaseApiStatus === "unknown" ? "UNKNOWN" : "FAIL"}
                 </span>
               </div>
             </div>
@@ -207,17 +266,21 @@ export const SystemHealth: React.FC = () => {
             <div className="flex justify-between items-center mb-1 text-[10px] font-bold">
               <span className="text-gray-400 uppercase">Heap Memory Utilization</span>
               <span className="font-mono text-gray-700 dark:text-gray-300">
-                {(ramUsedBytes / 1024 / 1024).toFixed(0)}MB /{" "}
-                {(ramLimitBytes / 1024 / 1024).toFixed(0)}MB ({ramPct}%)
+                {ramPct == null
+                  ? "—"
+                  : `${(ramUsedBytes! / 1024 / 1024).toFixed(0)}MB / ${(ramLimitBytes! / 1024 / 1024).toFixed(0)}MB (${ramPct}%)`}
               </span>
             </div>
+            {/* Empty gray track when unknown — never a colored bar with a made-up figure */}
             <div className="w-full h-1.5 bg-gray-50 dark:bg-gray-900 rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${
-                  ramPct > 80 ? "bg-red-500" : ramPct > 50 ? "bg-accent" : "bg-primary"
-                }`}
-                style={{ width: `${ramPct}%` }}
-              />
+              {ramPct != null && (
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    ramPct > 80 ? "bg-red-500" : ramPct > 50 ? "bg-accent" : "bg-primary"
+                  }`}
+                  style={{ width: `${ramPct}%` }}
+                />
+              )}
             </div>
           </div>
 
@@ -226,17 +289,21 @@ export const SystemHealth: React.FC = () => {
             <div className="flex justify-between items-center mb-1 text-[10px] font-bold">
               <span className="text-gray-400 uppercase">Container Ephemeral Storage</span>
               <span className="font-mono text-gray-700 dark:text-gray-300">
-                {(diskUsedBytes / 1024 / 1024 / 1024).toFixed(1)}GB /{" "}
-                {(diskLimitBytes / 1024 / 1024 / 1024).toFixed(1)}GB ({diskPct}%)
+                {diskPct == null
+                  ? "—"
+                  : `${(diskUsedBytes! / 1024 / 1024 / 1024).toFixed(1)}GB / ${(diskLimitBytes! / 1024 / 1024 / 1024).toFixed(1)}GB (${diskPct}%)`}
               </span>
             </div>
+            {/* Empty gray track when unknown — never a colored bar with a made-up figure */}
             <div className="w-full h-1.5 bg-gray-50 dark:bg-gray-900 rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${
-                  diskPct > 85 ? "bg-red-500" : diskPct > 60 ? "bg-accent" : "bg-primary"
-                }`}
-                style={{ width: `${diskPct}%` }}
-              />
+              {diskPct != null && (
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    diskPct > 85 ? "bg-red-500" : diskPct > 60 ? "bg-accent" : "bg-primary"
+                  }`}
+                  style={{ width: `${diskPct}%` }}
+                />
+              )}
             </div>
           </div>
         </div>
@@ -249,7 +316,7 @@ export const SystemHealth: React.FC = () => {
             Continuous Uptime
           </span>
           <span className="font-black font-mono text-gray-800 dark:text-gray-200">
-            {uptimeSeconds > 0 ? formatUptime(uptimeSeconds) : "Syncing node..."}
+            {uptimeKnown ? formatUptime(uptimeSeconds) : "—"}
           </span>
         </div>
         <button

@@ -67,9 +67,9 @@ export interface SystemHealthInfo {
 
 export interface SystemHealthResponse {
   status: "ok" | "error" | "shutting_down" | "standby";
-  info: Record<string, SystemHealthInfo>;
+  info?: Record<string, SystemHealthInfo>;
   error?: Record<string, any>;
-  details: Record<string, SystemHealthInfo>;
+  details?: Record<string, SystemHealthInfo>;
 }
 
 export interface PetpoojaSyncHealth {

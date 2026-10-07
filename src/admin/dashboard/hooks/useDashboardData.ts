@@ -33,12 +33,15 @@ export function useDashboardSnapshot(
 export function useSystemHealth(enabled = true) {
   return useQuery({
     queryKey: ["admin", "dashboard", "health"],
-    queryFn: async (): Promise<SystemHealthResponse> => ({
-      status: "standby",
-      info: {},
-      details: {},
-    }),
-    refetchInterval: 15000,
+    // Standby stub — return ONLY the status. Never add `info: {}` /
+    // `details: {}` empty-object placeholders: `!!{}` is truthy, so
+    // empty objects are what made the standby guard in SystemHealth.tsx
+    // (`!!(health?.details ?? health?.info)`) always pass and render
+    // fabricated telemetry. Presence must be tested by key count, and
+    // the stub must not fake any keys either.
+    // No refetchInterval: polling a constant implies a live probe. The
+    // stub never changes, so refetch on mount/reconnect only (enabled/retry).
+    queryFn: async (): Promise<SystemHealthResponse> => ({ status: "standby" }),
     enabled,
     retry: 2,
   });
