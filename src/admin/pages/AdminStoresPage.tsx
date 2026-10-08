@@ -54,7 +54,6 @@ import { adminStoresService } from "../services/adminStoresService";
 import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
 
 type ViewTab = "list" | "grid" | "radar";
-type RoleType = "Developer" | "Operations" | "Store Manager" | "Finance";
 
 // Loop 6/120: shared validator so store creation cannot persist fabricated
 // contact numbers. Returns normalized display form or null.
@@ -275,6 +274,22 @@ export const STAFF_EMPTY_STATE =
 export const DOCUMENTS_EMPTY_STATE =
   "No compliance documents uploaded for this outlet yet.";
 
+// Finding 12: store-directory RBAC derives from the real session roles
+// (brand_owner / developer / regional_manager), not the retired portal role
+// names, which matched no live session. Fail-closed: an empty role name
+// (logged out / unreachable session) grants neither directory management nor
+// sync, whatever the derived flags say.
+export function storeDirectoryAccess(
+  roleName: string,
+  isDeveloper: boolean,
+  permissions: string[],
+): { isReadOnly: boolean; canRunSync: boolean } {
+  const hasRole = roleName !== "";
+  const canManageStores = hasRole && isDeveloper;
+  const canRunSync =
+    hasRole && (isDeveloper || permissions.includes("admin.petpooja.sync"));
+  return { isReadOnly: !canManageStores, canRunSync };
+}
 
 export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boolean }> = ({
   defaultStoreId,
@@ -313,11 +328,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
   };
 
   // Single sign-in: role comes from the unified partner session.
-  const { admin } = useAdmin();
-  const selectedRole = (admin?.role?.name as RoleType) || "Developer";
-
-  // Real apps might store the assigned store in the user profile/claims
-  const managerAssignedStoreId = admin?.assignedStoreId || "str_001";
+  const { admin, role: selectedRole, isDeveloper, permissions } = useAdmin();
 
   // Filter state
   const [searchQuery, setSearchQuery] = useState("");
@@ -372,15 +383,30 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
     }
   }, [activeStoreId, stores]);
 
-  // Handle RBAC View Filtering
-  const isReadOnly = selectedRole === "Finance";
-  const isStoreManager = selectedRole === "Store Manager";
+  // Handle RBAC View Filtering — derived from the real session role; an
+  // empty/unrecognized role fails closed (read-only, no sync).
+  const { isReadOnly, canRunSync } = storeDirectoryAccess(
+    selectedRole,
+    isDeveloper,
+    permissions,
+  );
+  // branch_owner is denied /admin by the layout; if it ever reaches this
+  // page, a missing store assignment shows ZERO stores — never a foreign
+  // default store id.
+  const scopedStoreId =
+    !isDeveloper && selectedRole === "branch_owner"
+      ? (admin?.assignedStoreId ?? null)
+      : null;
 
   // Visible stores matching filters and RBAC constraints
   const filteredStores = useMemo(() => {
     return stores.filter((store) => {
-      // 1. RBAC Check: Store Manager can only see their assigned store
-      if (isStoreManager && store.id !== managerAssignedStoreId) {
+      // 1. RBAC Check: branch_owner can only see its assigned store
+      // (fail-closed on a missing assignment).
+      if (
+        selectedRole === "branch_owner" &&
+        (scopedStoreId === null || store.id !== scopedStoreId)
+      ) {
         return false;
       }
 
@@ -427,12 +453,12 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
     });
   }, [
     stores,
-    managerAssignedStoreId,
+    scopedStoreId,
+    selectedRole,
     selectedCity,
     selectedStatus,
     selectedSync,
     searchQuery,
-    isStoreManager,
   ]);
 
   const activeStore = useMemo(() => {
@@ -467,7 +493,9 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
   // Multi-action store operation handlers
   const handleToggleStoreActiveState = (storeId: string) => {
     if (isReadOnly) {
-      toast.error("Access Denied: Read-only role cannot alter store operations.");
+      toast.error(
+        "Access denied — store directory management is limited to brand owners and developers.",
+      );
       return;
     }
     const target = stores.find((s) => s.id === storeId);
@@ -502,7 +530,9 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
 
   const handleToggleBusyState = (storeId: string) => {
     if (isReadOnly) {
-      toast.error("Access Denied: Read-only role.");
+      toast.error(
+        "Access denied — store directory management is limited to brand owners and developers.",
+      );
       return;
     }
     const updated = stores.map((s) => {
@@ -530,8 +560,8 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
   // real POST /petpooja/syncMenu; the server is fail-closed on unlinked
   // branches, so failures toast loud and flip no state.
   const handleSyncStore = async (storeId: string) => {
-    if (isReadOnly) {
-      toast.error("Access Denied: Read-only role.");
+    if (!canRunSync) {
+      toast.error("Access denied — Petpooja sync is not permitted for your role.");
       return;
     }
     const target = stores.find((s) => s.id === storeId);
@@ -566,8 +596,8 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
   // POST /petpooja/syncMenu and reports an honest summary; failed stores
   // keep their existing state.
   const handleSyncAllStores = async () => {
-    if (isReadOnly) {
-      toast.error("Access Denied: Read-only role.");
+    if (!canRunSync) {
+      toast.error("Access denied — Petpooja sync is not permitted for your role.");
       return;
     }
     const targets = stores.filter((s) => s.isOpen);
@@ -609,7 +639,12 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
   // Firestore here and report the real outcome instead of a blind success.
   const handleUpdateStoreSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isReadOnly) return;
+    if (isReadOnly) {
+      toast.error(
+        "Access denied — store directory management is limited to brand owners and developers.",
+      );
+      return;
+    }
     // saveStores toasts loud on failure and returns false — only claim
     // success when the directory actually persisted.
     if (!(await saveStores(stores))) return;
@@ -2052,7 +2087,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                     <div className="mt-4 flex flex-wrap gap-2">
                       <button
                         onClick={() => handleSyncStore(activeStore.id)}
-                        disabled={syncingStoreId === activeStore.id || isReadOnly}
+                        disabled={syncingStoreId === activeStore.id || !canRunSync}
                         className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-primary text-white py-2 text-xs font-black hover:bg-[#082E17] disabled:bg-gray-100 disabled:text-gray-400"
                       >
                         <RotateCw
@@ -2074,7 +2109,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                   </div>
 
                   {/* QUEUE MONITOR PANEL (DEVELOPER ONLY) */}
-                  {selectedRole === "Developer" && (
+                  {import.meta.env.DEV && isDeveloper && (
                     <div className="rounded-[20px] border border-red-200 bg-red-50/20 p-5 shadow-sm dark:border-red-950/25 dark:bg-red-950/5">
                       <div className="flex items-center justify-between mb-4">
                         <div>
@@ -2133,62 +2168,9 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                         </div>
                       </div>
 
-                      <div className="mt-4 flex gap-2">
-                        <button
-                          onClick={() => {
-                            if (activeStore.queueFailedJobs === 0) {
-                              toast.info("No failed jobs present in queue.");
-                              return;
-                            }
-                            toast.loading("Re-enqueuing failed sync payload sessions...");
-                            setTimeout(() => {
-                              const updated = stores.map((s) => {
-                                if (s.id === activeStore.id) {
-                                  return {
-                                    ...s,
-                                    queueFailedJobs: 0,
-                                    queueOrdersWaiting: s.queueOrdersWaiting + s.queueFailedJobs,
-                                  };
-                                }
-                                return s;
-                              });
-                              saveStores(updated);
-                              toast.dismiss();
-                              toast.success("All failed synchronization jobs re-queued.");
-                            }, 1000);
-                          }}
-                          className="flex-1 rounded-lg bg-white border border-red-200 py-1.5 text-xs font-black text-red-800 hover:bg-red-50 dark:bg-gray-800 dark:border-red-950/30 dark:text-red-400"
-                        >
-                          Retry Failed Jobs
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (activeStore.queueDeadLetters === 0) {
-                              toast.info("Dead Letter Queue is empty.");
-                              return;
-                            }
-                            toast.loading("Replaying DLQ envelopes into active channel...");
-                            setTimeout(() => {
-                              const updated = stores.map((s) => {
-                                if (s.id === activeStore.id) {
-                                  return {
-                                    ...s,
-                                    queueDeadLetters: 0,
-                                    queueOrdersWaiting: s.queueOrdersWaiting + s.queueDeadLetters,
-                                  };
-                                }
-                                return s;
-                              });
-                              saveStores(updated);
-                              toast.dismiss();
-                              toast.success("Dead letter envelopes replayed.");
-                            }, 1000);
-                          }}
-                          className="flex-1 rounded-lg bg-white border border-red-200 py-1.5 text-xs font-black text-red-800 hover:bg-red-50 dark:bg-gray-800 dark:border-red-950/30 dark:text-red-400"
-                        >
-                          Replay Dead Letters
-                        </button>
-                      </div>
+                      <p className="text-[11px] font-bold text-red-700 dark:text-red-400">
+                        Queue controls are unavailable — no queue backend is connected in this build.
+                      </p>
                     </div>
                   )}
 
@@ -2345,7 +2327,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
         />
       )}
 
-      {/* COMPLIANCE SECURE DOCUMENT VIEWER MODAL */}
+      {/* Compliance document metadata viewer (no file stored) */}
       {viewDoc && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-[2px]">
           <div className="relative w-full max-w-xl rounded-2xl bg-white p-5 dark:bg-[#1C1C1E] shadow-xl border border-gray-100 dark:border-gray-800 animate-in fade-in zoom-in duration-150">
@@ -2366,10 +2348,10 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
             <div className="my-6 rounded-lg bg-gray-50 dark:bg-gray-900 border border-dashed border-gray-200 dark:border-gray-800 p-8 text-center">
               <FileText size={48} className="mx-auto text-gray-300" />
               <span className="block mt-4 text-xs font-black text-gray-700 dark:text-gray-200">
-                BURGONOMICS ENVELOPE SECURE DOCUMENT ARCHIVE
+                COMPLIANCE RECORD — METADATA ONLY
               </span>
               <p className="mt-1 text-[10px] text-gray-400 font-mono">
-                DOCUMENT METADATA HASH: MD5_{viewDoc.id.replace(/-/g, "_")}_CERT_SECURE
+                Metadata record — no file is stored for this document.
               </p>
 
               <div className="mt-6 flex flex-wrap justify-center gap-4 text-xs">
@@ -2383,7 +2365,17 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                   <span className="block text-[8px] font-black text-gray-400 uppercase">
                     Compliance Expiry
                   </span>
-                  <span className="font-bold text-emerald-600">{viewDoc.expiryDate}</span>
+                  <span
+                    className={`font-bold ${
+                      viewDoc.status === "expired"
+                        ? "text-rose-600"
+                        : viewDoc.status === "expiring"
+                          ? "text-amber-600"
+                          : "text-emerald-600"
+                    }`}
+                  >
+                    {viewDoc.expiryDate}
+                  </span>
                 </div>
               </div>
             </div>
@@ -2393,17 +2385,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                 onClick={() => setViewDoc(null)}
                 className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-xs font-black text-gray-500 hover:bg-gray-50 dark:bg-gray-800 dark:border-gray-700"
               >
-                CLOSE VAULT
-              </button>
-              <button
-                onClick={() => {
-                  toast.success("Document downloaded securely onto administration terminal.");
-                  setViewDoc(null);
-                }}
-                className="flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-black text-white hover:bg-[#082E17]"
-              >
-                <Download size={14} />
-                <span>SECURE DOWNLOAD</span>
+                CLOSE
               </button>
             </div>
           </div>

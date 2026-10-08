@@ -13,6 +13,7 @@ import {
   displayQueueWorkerStatus,
   STAFF_EMPTY_STATE,
   DOCUMENTS_EMPTY_STATE,
+  storeDirectoryAccess,
   type NewStoreInput,
 } from "./AdminStoresPage";
 import StoreAnalyticsCharts from "./StoreAnalyticsCharts";
@@ -210,5 +211,49 @@ describe("P0-3: honest placeholders for a freshly created store", () => {
     );
     expect(staffMarkup).toContain(STAFF_EMPTY_STATE);
     expect(staffMarkup).not.toContain(FABRICATION_MARKERS[4]);
+  });
+});
+
+// Finding 12: store-directory RBAC derives from the real session roles
+// (brand_owner / developer / regional_manager). No fabricated role fallback —
+// an empty or unknown role fails closed (read-only, no sync).
+describe("storeDirectoryAccess: real-role store directory RBAC", () => {
+  it("developer and brand_owner keep directory management and sync", () => {
+    expect(storeDirectoryAccess("developer", true, ["admin.developer"])).toEqual({
+      isReadOnly: false,
+      canRunSync: true,
+    });
+    expect(storeDirectoryAccess("brand_owner", true, ["admin.developer"])).toEqual({
+      isReadOnly: false,
+      canRunSync: true,
+    });
+  });
+
+  it("regional_manager is read-only for the directory but keeps its sync permission", () => {
+    expect(
+      storeDirectoryAccess("regional_manager", false, [
+        "admin.dashboard.view",
+        "admin.petpooja.sync",
+        "admin.stores.view",
+      ]),
+    ).toEqual({ isReadOnly: true, canRunSync: true });
+  });
+
+  it("an unknown role without permissions fails closed", () => {
+    expect(storeDirectoryAccess("auditor", false, [])).toEqual({
+      isReadOnly: true,
+      canRunSync: false,
+    });
+  });
+
+  it("an empty role fails closed even with contradictory derived flags", () => {
+    expect(storeDirectoryAccess("", false, [])).toEqual({
+      isReadOnly: true,
+      canRunSync: false,
+    });
+    expect(storeDirectoryAccess("", true, ["admin.petpooja.sync"])).toEqual({
+      isReadOnly: true,
+      canRunSync: false,
+    });
   });
 });
