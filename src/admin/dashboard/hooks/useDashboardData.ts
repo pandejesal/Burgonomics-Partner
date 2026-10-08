@@ -104,53 +104,10 @@ export function useQueueStats(enabled = true) {
   return useQuery({
     queryKey: ["admin", "ops", "queues"],
     queryFn: async (): Promise<QueueStats[]> => [],
-    refetchInterval: 15000,
+    // stub never changes; constant polling implies a live probe (P0-5 precedent).
     enabled,
     retry: 1,
   });
-}
-
-export function useQueueMutations() {
-  const queryClient = useQueryClient();
-
-  const pauseMutation = useMutation({
-    mutationFn: async (_name: string) => ({ ok: true }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "ops", "queues"] });
-    },
-  });
-
-  const resumeMutation = useMutation({
-    mutationFn: async (_name: string) => ({ ok: true }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "ops", "queues"] });
-    },
-  });
-
-  const retryFailedMutation = useMutation({
-    mutationFn: async (_payload: { name: string; jobIds?: string[] }) => ({ retried: 0 }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "ops", "queues"] });
-    },
-  });
-
-  const replayDlqMutation = useMutation({
-    mutationFn: async (_name: string) => ({ replayed: 0 }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "ops", "queues"] });
-    },
-  });
-
-  return {
-    pause: pauseMutation.mutateAsync,
-    isPausing: pauseMutation.isPending,
-    resume: resumeMutation.mutateAsync,
-    isResuming: resumeMutation.isPending,
-    retryFailed: retryFailedMutation.mutateAsync,
-    isRetrying: retryFailedMutation.isPending,
-    replayDlq: replayDlqMutation.mutateAsync,
-    isReplaying: replayDlqMutation.isPending,
-  };
 }
 
 export function useDuplicatePayments(windowMinutes = 60, enabled = true) {

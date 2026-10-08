@@ -467,7 +467,7 @@ export const KpiSection: React.FC<KpiSectionProps> = ({ dateRange, storeId }) =>
         isLoading={isSummaryLoading}
         isError={isSummaryError}
         refetch={refetchSummary}
-        navigateTo="/admin/analytics"
+        navigateTo="/admin/analytics-hub"
       />
 
       {/* New Customers — no trend by design (see above): the metric

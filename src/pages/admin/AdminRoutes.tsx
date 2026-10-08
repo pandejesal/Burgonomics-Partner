@@ -355,6 +355,14 @@ export function AdminRoutes() {
           <Route path="security" element={<AdminSystemPage activeView="security" />} />
           <Route path="settings" element={<AdminSystemPage activeView="settings" />} />
         </Route>
+
+        {/* Legacy/deep-link targets: the AOV KPI card and old bookmarks point at
+            /admin/analytics, which was never a route — redirect to the registered
+            hub instead of an empty content pane. */}
+        <Route path="analytics" element={<Navigate to="/admin/analytics-hub" replace />} />
+        {/* Unregistered /admin/... paths rendered an empty pane (sidebar stayed,
+            content blank) — bounce them to the admin home. */}
+        <Route path="*" element={<Navigate to="/admin" replace />} />
       </Route>
     </Routes>
   );
