@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Store,
   Clock,
@@ -23,7 +23,44 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
     branch?.acceptingOrdersStatus || (branch?.active ? 'open' : 'closed')
   );
   const [prepTime, setPrepTime] = useState<number>(branch?.prepTimeMinutes || 20);
+  const [lastSavedPrep, setLastSavedPrep] = useState<number | undefined>(branch?.prepTimeMinutes);
   const [emergencyReason, setEmergencyReason] = useState<string | null>(null);
+
+  const prepDirty = !!branch?.id && prepTime !== (lastSavedPrep ?? 20);
+
+  // 6a: re-mirror the incoming branch into local state. Deps are primitives
+  // only, so a background refetch that returns unchanged values cannot
+  // clobber a prep-time drag in progress.
+  useEffect(() => {
+    setStatus(branch?.acceptingOrdersStatus || (branch?.active ? 'open' : 'closed'));
+    setPrepTime(branch?.prepTimeMinutes || 20);
+    setLastSavedPrep(branch?.prepTimeMinutes);
+  }, [
+    branch?.id,
+    branch?.acceptingOrdersStatus,
+    branch?.active,
+    branch?.prepTimeMinutes,
+  ]);
+
+  // 6g: prep-time has its own save path — awaited Firestore write first,
+  // success toast only after it resolves.
+  const savePrepTime = async () => {
+    if (!branch?.id) {
+      toast.error('No outlet linked — prep time was not saved.');
+      return;
+    }
+    try {
+      await updateBranchSettings.mutateAsync({
+        branchId: branch.id,
+        settings: { prepTimeMinutes: prepTime },
+      });
+      setLastSavedPrep(prepTime);
+      toast.success(`Prep time buffer saved: ${prepTime} mins`);
+    } catch {
+      setPrepTime(branch.prepTimeMinutes ?? 20);
+      toast.error('Prep time save failed — reverted to the last saved value.');
+    }
+  };
 
   const handleUpdateStatus = async (
     newStatus: AcceptingOrdersStatus,
@@ -48,11 +85,17 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
         });
         toast.success(`Store operations status updated: ${newStatus.toUpperCase()}`);
       } catch (err) {
-        toast.error('Failed to update branch operating status');
+        setStatus(branch?.acceptingOrdersStatus || (branch?.active ? 'open' : 'closed'));
+        if (bufferMins) {
+          setPrepTime(branch?.prepTimeMinutes || 20);
+        }
+        toast.error(
+          'Failed to update branch operating status — the previous status is still active.'
+        );
       }
     } else {
-      // Loop: was toast.success("updated locally") while persisting NOTHING
-      // (component state only, lost on unmount). Fail loud instead.
+      // No branch id: there is nothing to write to — fail loud instead of
+      // pretending component state was persisted.
       toast.error('No branch linked — status was not saved.');
     }
   };
@@ -69,14 +112,16 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
               <span>Store Operating Status & Surge Controls</span>
               <span
                 className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold border ${
-                  status === 'open'
+                  !branch
+                    ? 'bg-zinc-900 border-zinc-600 text-zinc-300'
+                    : status === 'open'
                     ? 'bg-emerald-950 border-emerald-500/40 text-emerald-400'
                     : status === 'busy'
                     ? 'bg-amber-950 border-amber-500/40 text-amber-400'
                     : 'bg-rose-950 border-rose-500/40 text-rose-400'
                 }`}
               >
-                {status.toUpperCase()}
+                {branch ? status.toUpperCase() : 'NO OUTLET'}
               </span>
             </h2>
             <p className="text-xs text-neutral-400">
@@ -174,21 +219,41 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
         {/* Prep Time Slider */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <label className="text-xs font-bold uppercase text-neutral-400">
+            <label htmlFor="prepTimeSlider" className="text-xs font-bold uppercase text-neutral-400">
               Kitchen Preparation Time Buffer
             </label>
-            <span className="font-mono font-bold text-xs text-[#4ADE80]">{prepTime} mins</span>
+            <div className="flex items-center gap-2">
+              {prepDirty && (
+                <span className="text-[10px] font-bold uppercase text-amber-400">Unsaved</span>
+              )}
+              <span className="font-mono font-bold text-xs text-[#4ADE80]">{prepTime} mins</span>
+              <button
+                type="button"
+                onClick={savePrepTime}
+                disabled={!prepDirty || updateBranchSettings.isPending}
+                className="px-3 py-1.5 rounded-lg bg-[#0E4825] text-white text-[11px] font-black disabled:opacity-50 cursor-pointer"
+              >
+                {updateBranchSettings.isPending ? 'Saving…' : 'Save prep time'}
+              </button>
+            </div>
           </div>
 
           <input
+            id="prepTimeSlider"
             type="range"
             min="10"
             max="60"
             step="5"
             value={prepTime}
             onChange={(e) => setPrepTime(Number(e.target.value))}
-            className="w-full accent-[#FF6600] h-2 bg-neutral-800 rounded-lg cursor-pointer"
+            disabled={!branch?.id}
+            className="w-full accent-[#FF6600] h-2 bg-neutral-800 rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           />
+          {!branch?.id && (
+            <p className="text-[10px] text-amber-400">
+              No outlet loaded — nothing can be saved yet.
+            </p>
+          )}
         </div>
       </div>
     </div>
