@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, AlertCircle, Send, Paperclip, ShieldAlert, Sparkles, Zap } from 'lucide-react';
+import { toast } from "sonner";
 import type { TicketCategory, TicketPriority } from '@/types';
 
 interface RaiseTicketModalProps {
@@ -36,6 +37,7 @@ export const RaiseTicketModal: React.FC<RaiseTicketModalProps> = ({
   const [targetTier, setTargetTier] = useState<'branch' | 'brand_support' | 'developer_team'>('branch');
   const [message, setMessage] = useState('');
   const [attachmentUrl, setAttachmentUrl] = useState('');
+  const [formError, setFormError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -84,12 +86,17 @@ export const RaiseTicketModal: React.FC<RaiseTicketModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     if (!title.trim() || !message.trim()) {
-      alert('Please fill out the ticket summary and description');
+      const msg = 'Please fill out the ticket summary and description';
+      setFormError(msg);
+      toast.error(msg);
       return;
     }
     if (!defaultBranchId) {
-      alert('No branch context — ask your manager to assign your outlet before raising tickets.');
+      const msg = 'No branch context — ask your manager to assign your outlet before raising tickets.';
+      setFormError(msg);
+      toast.error(msg);
       return;
     }
 
@@ -155,6 +162,9 @@ export const RaiseTicketModal: React.FC<RaiseTicketModalProps> = ({
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-5 space-y-3.5 max-h-[calc(100vh-14rem)] overflow-y-auto">
+          {formError && (
+            <div role="alert" className="p-3 rounded-xl bg-rose-950/60 border border-rose-800/60 text-rose-300 text-xs">{formError}</div>
+          )}
           <div>
             <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
               Issue Summary / Headline <span className="text-accent-light">*</span>
