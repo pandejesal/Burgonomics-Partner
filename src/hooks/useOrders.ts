@@ -463,15 +463,40 @@ export function useOrders(params: UseOrdersParams = {}) {
       }
     },
     enabled: !!user,
+    // One-shot getDocs: without a poll the "Auto-refreshes" badge was a lie
+    // — the list froze at mount until a manual navigation. 30s keeps the
+    // orders board current without a listener; the KDS owns its own
+    // onSnapshot stream and is unaffected.
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
   });
 
   const updateOrderStatus = useMutation({
-    mutationFn: async ({ orderId, status }: { orderId: string; status: OrderStatus }) => {
+    mutationFn: async ({
+      orderId,
+      status,
+      expectedStatus,
+    }: {
+      orderId: string;
+      status: OrderStatus;
+      /**
+       * The status the caller's screen currently shows for this order —
+       * lost-update precondition for the server transaction. Optional so a
+       * caller with no live status (e.g. a replayed offline queue entry
+       * written before this contract existed) still bumps, loudly, rather
+       * than silently dropping the action.
+       */
+      expectedStatus?: OrderStatus;
+    }) => {
       // Server-side bump (POST /orders/bumpStatus): branch-checked write in
       // the Delivery-compatible object form. The old direct updateDoc skipped
       // scope enforcement on every KDS bump.
       const { partnerFunctionsApi } = await import('@/services/partnerFunctionsApi');
-      await partnerFunctionsApi.bumpOrderStatus({ orderId, status });
+      await partnerFunctionsApi.bumpOrderStatus({
+        orderId,
+        status,
+        ...(expectedStatus ? { expectedStatus } : {}),
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['orders'] });

@@ -17,7 +17,14 @@ import { formatDistanceToNow } from 'date-fns';
 type NotificationTab = 'all' | 'order' | 'ticket' | 'system';
 
 export function NotificationsPage() {
-  const { notifications = [], isLoading, markAsRead, markAllAsRead } = useNotifications();
+  const {
+    notifications = [],
+    isLoading,
+    isReadError,
+    readFailCopy,
+    markAsRead,
+    markAllAsRead,
+  } = useNotifications();
   const [activeTab, setActiveTab] = useState<NotificationTab>('all');
 
   const filteredNotifications = useMemo(() => {
@@ -70,6 +77,32 @@ export function NotificationsPage() {
           </Link>
         </div>
       </div>
+
+      {/* F15: failures are announced inline (role=alert) as well as by toast —
+          a denied read or denied batch must never look like "all caught up". */}
+      {(isReadError || markAllAsRead?.isError) && (
+        <div
+          role="alert"
+          className="rounded-xl border border-red-500/40 bg-red-950/30 px-4 py-3 text-xs font-semibold text-red-300"
+        >
+          {isReadError && (
+            <p>
+              <span className="font-black uppercase tracking-wide">Read failed — </span>
+              {readFailCopy} The list below may be incomplete, and the unread badge may be
+              wrong. Pull to retry.
+            </p>
+          )}
+          {markAllAsRead?.isError && (
+            <p className={isReadError ? 'mt-2 border-t border-red-500/20 pt-2' : ''}>
+              <span className="font-black uppercase tracking-wide">Mark-all failed — </span>
+              {markAllAsRead.error instanceof Error
+                ? markAllAsRead.error.message
+                : String(markAllAsRead.error)}{' '}
+              Nothing was marked read.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Filter Tabs */}
       <div className="flex items-center gap-1 p-1 rounded-2xl bg-neutral-900 border border-neutral-800 overflow-x-auto">

@@ -16,9 +16,14 @@ import {
 import { useAuthStore } from '@/stores/authStore';
 import { useAppStore } from '@/stores/appStore';
 import { db } from '@/config/firebase';
-import { doc, setDoc, Timestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, Timestamp } from 'firebase/firestore';
 import type { Order, OrderStatus, OrderType, OrderItem } from '@/types';
 import { toDeliveryStatusMeta } from '@/utils/orderContract';
+import {
+  WALK_IN_CUSTOMER_ID,
+  createOrderDocIfAbsent,
+  generateWalkInOrderId,
+} from '@/features/orders/utils/walkInOrder';
 
 interface ManualOrderCreateModalProps {
   isOpen: boolean;
@@ -119,7 +124,6 @@ export function ManualOrderCreateModal({
 
     setIsSubmitting(true);
 
-    const orderId = `ord_pos_${Date.now().toString().slice(-6)}`;
     // Loop 49/120: no fallback branch — a walk-in order stamped to the wrong
     // outlet corrupts branch revenue, KDS routing, and Porter dispatch.
     // Block loudly when the operator has no branch context.
@@ -127,6 +131,14 @@ export function ManualOrderCreateModal({
     if (!branchId) {
       setSubmitError(
         "No branch context — select your outlet (or ask your manager to assign one) before creating walk-in orders."
+      );
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (!user?.id) {
+      setSubmitError(
+        'No signed-in operator — counter orders must be stamped with your user id before they can be saved.'
       );
       setIsSubmitting(false);
       return;
@@ -141,9 +153,21 @@ export function ManualOrderCreateModal({
       specialInstructions: i.notes,
     }));
 
+    // Random Firestore auto-id — never Date.now(): the old 6-digit stamp
+    // wrapped every ~16.7 minutes and the blind setDoc that followed silently
+    // OVERWROTE the earlier walk-in order (revenue + KOT lost, no error).
+    const orderId = generateWalkInOrderId();
+
     const newOrder: Order = {
       id: orderId,
-      customerId: 'cust_walkin',
+      customerId: WALK_IN_CUSTOMER_ID,
+      // firestore.rules orders create requires customerId == auth.uid OR
+      // userId == auth.uid. A counter order's customerId is the walk-in
+      // sentinel and can never match, so the creating operator's uid MUST be
+      // stamped here or every walk-in create is denied. DEPENDENCY: the
+      // rules lane is adding the `userId == uid` accept branch in the same
+      // session — both fields must exist on every order this modal writes.
+      userId: user.id,
       customerName: customerName || 'Walk-in Customer',
       customerPhone: phone,
       branchId,
@@ -178,7 +202,10 @@ export function ManualOrderCreateModal({
     setSubmitError(null);
     try {
       const orderRef = doc(db, 'orders', orderId);
-      await setDoc(orderRef, newOrder);
+      await createOrderDocIfAbsent(orderRef, newOrder, {
+        get: (ref) => getDoc(ref as typeof orderRef),
+        set: (ref, data) => setDoc(ref as typeof orderRef, data as Order),
+      });
     } catch (err: any) {
       setIsSubmitting(false);
       setSubmitError(

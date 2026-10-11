@@ -10,7 +10,6 @@ import {
   doc,
   setDoc,
   updateDoc,
-  deleteDoc,
   Timestamp,
 } from 'firebase/firestore';
 import type { UserRole } from '@/types';
@@ -241,11 +240,16 @@ export function useUsers() {
 
   const revokeUser = useMutation({
     mutationFn: async (userId: string) => {
-      // Loop 43/120: let denial reject loudly — the old catch swallowed the
-      // rules-denied delete and onSuccess still fired, so revoked users
-      // "vanished" until the next refetch resurrected them.
-      const userRef = doc(db, 'users', userId);
-      await deleteDoc(userRef);
+      // F13: revoking access means clearing the target's RBAC claims, which
+      // only the server can do — POST /auth/revokeRole (brand-admin asserted
+      // server-side). The old `deleteDoc(users/{userId})` was hard-denied by
+      // rules (`allow delete: if false`), so every revoke failed while the
+      // dialog promised credentials were disabled. Failures now propagate to
+      // UsersPage, which toasts them instead of closing the modal.
+      const { partnerFunctionsApi } = await import(
+        "@/services/partnerFunctionsApi"
+      );
+      return await partnerFunctionsApi.revokeUserRole({ targetUid: userId });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['team-users'] });

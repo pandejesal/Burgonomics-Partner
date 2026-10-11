@@ -47,10 +47,10 @@ export function UsersPage() {
     return true;
   });
 
-  // Loop 43/120: staff mutations hit rules walls (invite creates others'
-  // docs, revoke deletes, cross-user edits) — every one of these used to
-  // fail silently (hung modal / phantom revoke). Loud now; a server staff-
-  // invite endpoint is QUEUED (client cannot mint roles by rules design).
+  // Loop 43/120: staff mutations hit rules walls (cross-user edits) — these
+  // used to fail silently (hung modal / phantom revoke). Loud now. Invite
+  // runs through POST /staff/invite and revoke through POST /auth/revokeRole;
+  // the client cannot mint or clear roles by rules design.
   const handleInviteSubmit = async (data: any) => {
     try {
       await inviteUser.mutateAsync(data);
@@ -80,9 +80,12 @@ export function UsersPage() {
     if (!revokingUser) return;
     try {
       await revokeUser.mutateAsync(revokingUser.id);
+      toast.success('Access revoked.', {
+        description: `${revokingUser.name}'s RBAC claims were cleared server-side (role → customer); their profile record is kept.`,
+      });
       setRevokingUser(null);
     } catch (err) {
-      toast.error('Revoke FAILED — user was not removed.', {
+      toast.error('Revoke FAILED — access was NOT removed.', {
         description: err instanceof Error ? err.message : String(err),
       });
     }
@@ -246,7 +249,10 @@ export function UsersPage() {
               <span>Revoke Access for {revokingUser.name}?</span>
             </h3>
             <p className="text-xs text-zinc-300 leading-relaxed">
-              Revoking access will immediately disable this user's POS & KDS credentials and log an audit security event.
+              Revoking clears this user's RBAC claims server-side (POST /auth/revokeRole): they
+              drop to <span className="font-mono text-rose-300">customer</span>, their POS & KDS
+              tokens refresh without the staff role, and the profile record is kept. Brand owners
+              and developers only — anyone else gets a 403 from the server.
             </p>
 
             <div className="flex items-center justify-end space-x-3 pt-2">

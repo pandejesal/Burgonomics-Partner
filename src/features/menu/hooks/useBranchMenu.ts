@@ -90,9 +90,12 @@ export function useBranchMenu() {
         updatedAt: Timestamp.now(),
         lastSyncedAt: Timestamp.now(),
       };
-      await updateDoc(itemRef, payload).catch(async () => {
-        await setDoc(itemRef, { ...payload, branchId }, { merge: true });
-      });
+      // F16: no create-on-fail fallback. The old `.catch(() => setDoc(…,
+      // { merge: true }))` turned ANY update failure — a rules denial, or a
+      // transient error on a doc that already exists — into a partial
+      // product document carrying only stock fields. Denials now reject and
+      // the optimistic rollback + onError toast below tell staff the truth.
+      await updateDoc(itemRef, payload);
       // Server confirmation first, then POS propagation (best-effort): the
       // returned status drives the honest POS-sync toast in onSuccess.
       const posStatus = await pushStock(branchId, baseMenu.items, itemId, activeState);
@@ -170,12 +173,21 @@ export function useBranchMenu() {
         eightSixDuration: duration,
         updatedAt: Timestamp.now(),
       };
-      await updateDoc(itemRef, payload).catch(async () => {
-        await setDoc(itemRef, { ...payload, branchId }, { merge: true });
-      });
+      // F16: no create-on-fail fallback (see toggleAvailability) — a denied
+      // update must not plant a nameless product doc.
+      await updateDoc(itemRef, payload);
       // Loop 6: report POS propagation honestly — the page toast must not
       // claim "& POS" when the best-effort push failed or skipped.
       return { posSynced: (await pushStock(branchId, baseMenu.items, itemId, false)) === 'synced' };
+    },
+    // F16: this mutation had no error path at all — a denied write failed
+    // silently while the drawer stayed open. There is no optimistic flip
+    // here (state comes from the invalidated snapshot), so nothing to roll
+    // back — just say the 86 was not saved.
+    onError: (err) => {
+      toast.error('Could not 86 this item — it was NOT marked out of stock.', {
+        description: err instanceof Error ? err.message : 'Firestore write failed.',
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['menuItems', branchId] });

@@ -33,10 +33,23 @@ import { toast } from 'sonner';
 import type { OrderStatus } from '@/types';
 import { ConfirmDialog } from '../admin/components/Utilities';
 import { DeliveryOtpModal } from '@/components/DeliveryOtpModal';
+import { useAuthStore } from '@/stores/authStore';
+import { useQueryClient } from '@tanstack/react-query';
+import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
+
+/**
+ * POST /payments/refund is requireRole(["brand_owner","developer","support"])
+ * server-side — anyone else gets a 403. Mirrored here so branch staff get an
+ * honest message instead of a guaranteed server rejection.
+ */
+const REFUND_ROLES = ['brand_owner', 'developer', 'support'];
 
 export function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuthStore();
+  const queryClient = useQueryClient();
+  const canReleaseRefund = !!user?.role && REFUND_ROLES.includes(user.role);
 
   const {
     order,
@@ -177,7 +190,12 @@ export function OrderDetailPage() {
     setIsUpdatingStatus(true);
     try {
       if (updateStatus && typeof updateStatus.mutateAsync === 'function') {
-        await updateStatus.mutateAsync({ status: nextStatus });
+        await updateStatus.mutateAsync({
+          status: nextStatus,
+          // Precondition: what this screen is showing — a concurrent bump on
+          // another terminal is refused server-side instead of clobbered.
+          ...(order ? { expectedStatus: order.status } : {}),
+        });
       }
       toast.success(`Order status advanced to ${nextStatus.toUpperCase()}`);
     } catch (err) {
@@ -193,14 +211,66 @@ export function OrderDetailPage() {
         await updateStatus.mutateAsync({
           status: 'cancelled',
           cancellationReason: notes ? `${reason}: ${notes}` : reason,
+          // Precondition: the status this screen is showing.
+          ...(order ? { expectedStatus: order.status } : {}),
         });
       }
-      toast.success(
-        `Order cancelled (${reason}).${shouldRefund ? ' Process the refund from Payments to complete it.' : ''}`
-      );
     } catch (err) {
       toast.error('Failed to cancel order — no changes were made.');
       throw err;
+    }
+
+    // Refund is a SEPARATE server round-trip (POST /payments/refund,
+    // requireRole brand/developer/support) — cancelling never moves money.
+    // Failure here is loud and specific: the order IS cancelled, the refund
+    // is NOT.
+    if (!shouldRefund) {
+      toast.success(`Order cancelled (${reason}).`);
+      return;
+    }
+
+    if (!canReleaseRefund) {
+      // The server would 403 this caller anyway — say so honestly instead of
+      // firing a request we know is refused.
+      toast.info('Order cancelled — refund NOT issued by this screen.', {
+        description: `Refunds of ₹${order.total} are released by brand admins. Ask a brand admin to release it.`,
+      });
+      return;
+    }
+
+    const paymentId =
+      (order as any)?.payment?.razorpayPaymentId ||
+      (order as any)?.razorpayPaymentId ||
+      '';
+    if (!paymentId) {
+      toast.error('Order cancelled, but NO refund was issued.', {
+        description:
+          'No Razorpay payment id is recorded on this order — a brand admin must locate the capture and release the refund manually.',
+      });
+      return;
+    }
+
+    try {
+      const res = await partnerFunctionsApi.releaseRefund({
+        orderId: order.id,
+        razorpayPaymentId: paymentId,
+        amountRupees: order.total,
+        reason: `Cancelled (${reason})`,
+      });
+      toast.success(
+        `Order cancelled and refund released via Razorpay${
+          (res as any)?.reused ? ' (already processed — idempotent replay)' : ''
+        }.`,
+        { description: `Refund ID: ${(res as any)?.id ?? 'confirmed'}` }
+      );
+      queryClient.invalidateQueries({ queryKey: ['order', order.id] });
+    } catch (err) {
+      toast.error('Order cancelled, but the refund FAILED — no money moved.', {
+        description:
+          err instanceof Error
+            ? err.message
+            : 'Retry from Payments, or ask a brand admin to release it.',
+      });
     }
   };
 

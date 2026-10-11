@@ -40,6 +40,14 @@ export function usePorterLogistics() {
   const [manualLanes, setManualLanes] = useState<Record<string, DispatchManualLane>>({});
   const [pastingOrderIds, setPastingOrderIds] = useState<Record<string, boolean>>({});
 
+  // Status this screen is currently showing for an order — carried as the
+  // expectedStatus precondition so a concurrent bump elsewhere is refused
+  // server-side instead of silently clobbered.
+  const currentStatusOf = useCallback(
+    (orderId: string) => orders.find((o) => o.id === orderId)?.status,
+    [orders]
+  );
+
   // Filter only active delivery orders for branch. Fail-closed like the
   // KDS makeline: unroutable orders (no branchId) never render anywhere.
   const activeDeliveryOrders = useMemo(() => {
@@ -160,7 +168,12 @@ export function usePorterLogistics() {
 
       // Booked (fresh booking or idempotent reuse of the stored summary).
       if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
-        await updateOrderStatus.mutateAsync({ orderId, status: 'out_for_delivery' });
+        const expectedStatus = currentStatusOf(orderId);
+        await updateOrderStatus.mutateAsync({
+          orderId,
+          status: 'out_for_delivery',
+          ...(expectedStatus ? { expectedStatus } : {}),
+        });
       }
       setFareConfirms((prev) => {
         const next = { ...prev };
@@ -182,7 +195,7 @@ export function usePorterLogistics() {
         description: `${shortCode} · ${res.providerOrderId || ''}${res.reused ? ' · existing booking reused' : ''}${failoverNote}`,
       });
     },
-    [updateOrderStatus],
+    [updateOrderStatus, currentStatusOf],
   );
 
   // Dispatch the cheapest serviceable provider (POST /dispatch/book).
@@ -278,7 +291,12 @@ export function usePorterLogistics() {
           return next;
         });
         if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
-          await updateOrderStatus.mutateAsync({ orderId, status: 'out_for_delivery' });
+          const expectedStatus = currentStatusOf(orderId);
+          await updateOrderStatus.mutateAsync({
+            orderId,
+            status: 'out_for_delivery',
+            ...(expectedStatus ? { expectedStatus } : {}),
+          });
         }
         toast.success(`Porter booking saved: ${res.porterOrderId}`, {
           description: `Order #${orderId.slice(-6).toUpperCase()} now tracked via Porter${
@@ -324,9 +342,11 @@ export function usePorterLogistics() {
         staffName,
       });
       if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
+        const expectedStatus = currentStatusOf(orderId);
         await updateOrderStatus.mutateAsync({
           orderId,
           status: 'out_for_delivery',
+          ...(expectedStatus ? { expectedStatus } : {}),
         });
       }
       toast.success(`Assigned in-house rider ${rider.name} to order #${orderId.slice(-6).toUpperCase()}`);
@@ -337,7 +357,7 @@ export function usePorterLogistics() {
       });
       toast.error('Failed to assign in-house rider');
     }
-  }, [orders, updateOrderStatus, staffName]);
+  }, [orders, updateOrderStatus, staffName, currentStatusOf]);
 
   // Cancel the active dispatch (POST /dispatch/cancel): Porter bookings go
   // through the Porter cancel flow, Borzo/Shadowfax release locally with a
@@ -347,9 +367,11 @@ export function usePorterLogistics() {
       try {
         const res = await partnerFunctionsApi.dispatchCancel({ orderId, staffName });
         if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
+          const expectedStatus = currentStatusOf(orderId);
           await updateOrderStatus.mutateAsync({
             orderId,
             status: 'ready',
+            ...(expectedStatus ? { expectedStatus } : {}),
           });
         }
         setManualLanes((prev) => {
@@ -367,7 +389,7 @@ export function usePorterLogistics() {
         });
       }
     },
-    [updateOrderStatus, staffName],
+    [updateOrderStatus, staffName, currentStatusOf],
   );
 
   // Rebook (delivery_porter.md §4) — POST /dispatch/rebook re-enters the

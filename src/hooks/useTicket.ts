@@ -3,6 +3,8 @@ import { db } from '@/config/firebase';
 import { doc, getDoc, updateDoc, Timestamp, setDoc, collection, arrayUnion } from 'firebase/firestore';
 import type { Ticket, TicketStatus } from '@/types';
 import { normalizeTicketDoc } from '@/utils/ticketContract';
+import { resolveTicketActorRole } from '@/utils/ticketActorRole';
+import { useAuthStore } from '@/stores/authStore';
 
 export function useTicket(ticketId: string) {
   const queryClient = useQueryClient();
@@ -154,13 +156,19 @@ export function useTicket(ticketId: string) {
     mutationFn: async (messageData: {
       text: string;
       authorName: string;
-      authorRole: string;
     }) => {
       // Server-side thread write (POST /tickets/message): sender identity
       // and role bind to the verified caller — the old direct arrayUnion
       // trusted a body-supplied authorRole (spoofable) and skipped
       // notifications. Legacy-collection fallback stays for pre-migration
       // docs the server does not know.
+      //
+      // The fallback MUST NOT trust `messageData.authorRole`: it arrives from
+      // the calling screen's props, so any branch staff could append a
+      // brand_owner-privileged entry to the audit timeline. The role is
+      // re-derived from the session store — the same source the server
+      // authenticates against.
+      const sessionRole = resolveTicketActorRole(useAuthStore.getState().user?.role);
       try {
         const { partnerFunctionsApi } = await import('@/services/partnerFunctionsApi');
         return await partnerFunctionsApi.sendTicketMessage({
@@ -172,7 +180,7 @@ export function useTicket(ticketId: string) {
         const event = {
           action: 'message_added',
           actorName: messageData.authorName,
-          actorRole: messageData.authorRole,
+          actorRole: sessionRole,
           message: messageData.text,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         };

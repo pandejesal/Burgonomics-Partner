@@ -92,6 +92,13 @@ export interface OrderItem {
 export interface Order {
   id: string;
   customerId: string;
+  /**
+   * Auth UID of the customer (delivery orders) or the creating staff operator
+   * (counter/walk-in orders). firestore.rules orders create accepts
+   * `customerId == auth.uid || userId == auth.uid`; counter orders keep the
+   * `cust_walkin` sentinel customerId, so they MUST stamp this instead.
+   */
+  userId?: string;
   customerName: string;
   customerPhone: string;
   branchId: string;

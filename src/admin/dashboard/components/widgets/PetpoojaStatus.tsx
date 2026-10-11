@@ -1,7 +1,18 @@
 import React from "react";
-import { useSyncHealth, useSyncHistory, useSyncMutations } from "../../hooks/useDashboardData";
+import {
+  useSyncHealth,
+  useSyncHistory,
+  useSyncMutations,
+  SYNC_NOT_WIRED_MESSAGE,
+} from "../../hooks/useDashboardData";
 import { toast } from "sonner";
 import { AlertTriangle, RefreshCw, Zap, Play, Activity } from "lucide-react";
+
+// F12: none of the three actions below has a client-callable server route
+// (see useSyncMutations), so they are rendered disabled with the reason on
+// the control itself instead of appearing operable. Flip this once a real
+// endpoint is exposed — the handlers and failure paths are already in place.
+const SYNC_ACTIONS_WIRED: boolean = false;
 
 export const PetpoojaStatus: React.FC = () => {
   const {
@@ -26,10 +37,13 @@ export const PetpoojaStatus: React.FC = () => {
   } = useSyncMutations();
 
   const isConnected = health?.connected === true;
+  // Single source for the three action controls: no route exists AND no
+  // credentials yet, so both must be true before the buttons become usable.
+  const syncDisabled = !SYNC_ACTIONS_WIRED || !isConnected;
 
   const handleManualSync = async () => {
-    if (!isConnected) {
-      toast.info("Petpooja integration is awaiting live merchant POS credentials.");
+    if (syncDisabled) {
+      toast.info(SYNC_NOT_WIRED_MESSAGE);
       return;
     }
     try {
@@ -41,8 +55,8 @@ export const PetpoojaStatus: React.FC = () => {
   };
 
   const handleRefreshCache = async () => {
-    if (!isConnected) {
-      toast.info("Available after Petpooja credentials are wired.");
+    if (syncDisabled) {
+      toast.info(SYNC_NOT_WIRED_MESSAGE);
       return;
     }
     try {
@@ -54,8 +68,8 @@ export const PetpoojaStatus: React.FC = () => {
   };
 
   const handleReplayWebhook = async () => {
-    if (!isConnected) {
-      toast.info("No active webhook gateway sessions to replay.");
+    if (syncDisabled) {
+      toast.info(SYNC_NOT_WIRED_MESSAGE);
       return;
     }
     try {
@@ -253,10 +267,10 @@ export const PetpoojaStatus: React.FC = () => {
         <div className="grid grid-cols-2 gap-3 shrink-0">
           <button
             onClick={handleManualSync}
-            disabled={!isConnected || isTriggeringPetpooja}
-            title={!isConnected ? "Available after Petpooja credentials are wired" : undefined}
+            disabled={syncDisabled || isTriggeringPetpooja}
+            title={syncDisabled ? SYNC_NOT_WIRED_MESSAGE : undefined}
             className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl font-bold text-xs shadow-sm transition-all ${
-              !isConnected
+              syncDisabled
                 ? "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-60"
                 : "bg-primary hover:bg-primary/90 text-white cursor-pointer"
             }`}
@@ -271,10 +285,10 @@ export const PetpoojaStatus: React.FC = () => {
 
           <button
             onClick={handleRefreshCache}
-            disabled={!isConnected || isRefreshingCache}
-            title={!isConnected ? "Available after Petpooja credentials are wired" : undefined}
+            disabled={syncDisabled || isRefreshingCache}
+            title={syncDisabled ? SYNC_NOT_WIRED_MESSAGE : undefined}
             className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl font-bold text-xs border transition-all ${
-              !isConnected
+              syncDisabled
                 ? "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 border-transparent cursor-not-allowed opacity-60"
                 : "bg-orange-50 hover:bg-orange-100 text-accent border-orange-200/50 cursor-pointer"
             }`}
@@ -289,10 +303,10 @@ export const PetpoojaStatus: React.FC = () => {
 
           <button
             onClick={handleReplayWebhook}
-            disabled={!isConnected || isReplayingWebhook}
-            title={!isConnected ? "Available after Petpooja credentials are wired" : undefined}
+            disabled={syncDisabled || isReplayingWebhook}
+            title={syncDisabled ? SYNC_NOT_WIRED_MESSAGE : undefined}
             className={`col-span-2 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border font-bold text-xs transition-all ${
-              !isConnected
+              syncDisabled
                 ? "bg-gray-100/50 dark:bg-gray-800/40 text-gray-400 dark:text-gray-500 border-transparent cursor-not-allowed opacity-60"
                 : "border-gray-100 dark:border-gray-800 hover:border-gray-200 text-gray-600 dark:text-gray-300 bg-gray-50/40 dark:bg-gray-900/20 cursor-pointer"
             }`}
@@ -302,9 +316,9 @@ export const PetpoojaStatus: React.FC = () => {
           </button>
         </div>
 
-        {!isConnected && (
+        {syncDisabled && (
           <p className="text-[10px] text-center text-amber-500/90 font-semibold tracking-wide">
-            Available after Petpooja credentials are wired
+            {SYNC_NOT_WIRED_MESSAGE}
           </p>
         )}
       </div>

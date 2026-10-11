@@ -652,6 +652,22 @@ export const partnerFunctionsApi = {
   },
 
   /**
+   * Revokes a staff member's RBAC claims server-side (POST /auth/revokeRole).
+   * The server asserts brand-admin, clears role/branchIds/cityIds claims to
+   * `customer`, and mirrors the role into users/{uid} — so the old direct
+   * `deleteDoc(users/{uid})` (rules `allow delete: if false`) could never
+   * succeed. The profile document is intentionally kept; access is what is
+   * revoked.
+   */
+  async revokeUserRole(params: { targetUid: string }): Promise<{
+    success: boolean;
+    targetUid: string;
+    role: string;
+  }> {
+    return await apiRequest('/auth/revokeRole', params);
+  },
+
+  /**
    * Sends a customer broadcast server-side (POST /notifications/broadcast,
    * brand-only). Returns MEASURED counts — targeted devices, delivered,
    * failed — recorded from the actual multicast, never estimates.
@@ -797,10 +813,17 @@ export const partnerFunctionsApi = {
    * KDS order-status bump server-side (POST /orders/bumpStatus).
    * Branch-checked + Delivery-compatible object write — never a direct
    * Firestore flip that skips scope enforcement.
+   *
+   * `expectedStatus` is the status the operator's screen was showing when they
+   * tapped — a lost-update precondition. The server route currently strips it
+   * (orderBumpSchema is a non-strict z.object); the transaction-side
+   * enforcement is owned by the backend lane. Sent now so the contract is in
+   * place and no client change is needed when the server starts honouring it.
    */
   async bumpOrderStatus(params: {
     orderId: string;
     status: string;
+    expectedStatus?: string;
     cancellationReason?: string;
     timelineEvent?: { title: string; actor?: string; description?: string };
   }): Promise<{ orderId: string; status: Record<string, any> }> {

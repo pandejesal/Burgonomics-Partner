@@ -222,7 +222,7 @@ export function DashboardPage() {
       {/* 5. Live Recent Orders Feed */}
       <div className="space-y-3">
         <h2 className="text-sm font-black text-white uppercase tracking-wider">
-          Live Orders Stream ({branchOrders.slice(0, 10).length})
+          Recent Orders ({branchOrders.slice(0, 10).length}) — refreshes every 30s
         </h2>
         <RecentOrders orders={branchOrders.slice(0, 10)} />
       </div>

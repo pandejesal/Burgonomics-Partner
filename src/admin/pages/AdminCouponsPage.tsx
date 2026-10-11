@@ -1,11 +1,10 @@
-import React, { useState } from "react";
+import React from "react";
 import { Gift, Plus, ToggleLeft, ToggleRight, Percent, Sparkles } from "lucide-react";
 import { PageHeader } from "../components/Headers";
 import { StatCard } from "../components/Cards";
 import { ResponsiveTable, TableColumn } from "../components/TableSystem";
 import { StatusBadge } from "../components/Badges";
 import { AdminButton } from "../components/Buttons";
-import { ConfirmDialog } from "../components/Utilities";
 
 interface Coupon {
   id: string;
@@ -47,21 +46,16 @@ const INITIAL_COUPONS: Coupon[] = [
   },
 ];
 
-export const AdminCouponsPage: React.FC = () => {
-  const [coupons, setCoupons] = useState<Coupon[]>(INITIAL_COUPONS);
-  const [selectedCoupon, setSelectedCoupon] = useState<Coupon | null>(null);
+// F11: this directory is bundled sample data. Nothing on this screen writes
+// Firestore, and checkout validates codes server-side against the /coupons
+// collection (functions pricing.engine) — so a local toggle would claim to
+// block customer usage it never reaches. Controls stay disabled with the
+// reason stated rather than mutating rows that reset on reload.
+const COUPONS_DISABLED_REASON =
+  "Sample data — this screen does not read or write the Firestore /coupons collection, so toggling here would not affect checkout.";
 
-  const toggleCouponStatus = (id: string) => {
-    setCoupons((prev) =>
-      prev.map((c) => {
-        if (c.id === id) {
-          const nextStatus = c.status === "Active" ? "Inactive" : "Active";
-          return { ...c, status: nextStatus };
-        }
-        return c;
-      }),
-    );
-  };
+export const AdminCouponsPage: React.FC = () => {
+  const coupons = INITIAL_COUPONS;
 
   const activeCount = coupons.filter((c) => c.status === "Active").length;
 
@@ -107,14 +101,15 @@ export const AdminCouponsPage: React.FC = () => {
       ),
     },
     {
-      header: "State Toggles",
+      header: "State (read-only)",
       accessorKey: "operations",
       sortable: false,
       cell: (row) => (
         <button
-          onClick={() => setSelectedCoupon(row)}
-          className="p-1.5 hover:text-accent dark:hover:text-accent-light"
-          title={row.status === "Active" ? "Deactivate Coupon" : "Activate Coupon"}
+          disabled
+          className="p-1.5 cursor-not-allowed opacity-50"
+          title={`${COUPONS_DISABLED_REASON} Coupon ${row.code} is ${row.status} in the sample data.`}
+          aria-disabled="true"
         >
           {row.status === "Active" ? (
             <ToggleRight size={28} className="text-primary" />
@@ -130,13 +125,23 @@ export const AdminCouponsPage: React.FC = () => {
     <div className="space-y-6">
       <PageHeader
         title="Promo Coupons & Offers"
-        description="Release new discount vouchers, configure minimum transaction bounds, track usage rates, or toggle coupon statuses."
+        description="Sample coupon directory — these three rows are bundled fixtures, not the Firestore /coupons collection that checkout validates against."
         breadcrumbs={[{ label: "Coupons" }]}
         actions={
-          <AdminButton variant="secondary" size="sm">
-            <Plus size={14} />
-            <span>Create Promo Coupon</span>
-          </AdminButton>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[9px] font-black uppercase bg-gray-800 text-amber-300 border border-amber-400/40">
+              Sample data
+            </span>
+            <AdminButton
+              variant="secondary"
+              size="sm"
+              disabled
+              title="Creation is not wired: this screen never writes the Firestore /coupons collection, and no client create route exists for it."
+            >
+              <Plus size={14} />
+              <span>Create Promo Coupon</span>
+            </AdminButton>
+          </div>
         }
       />
 
@@ -157,19 +162,24 @@ export const AdminCouponsPage: React.FC = () => {
         exportFileName="promos-manifest"
       />
 
-      {selectedCoupon && (
-        <ConfirmDialog
-          isOpen={true}
-          onClose={() => setSelectedCoupon(null)}
-          onConfirm={() => {
-            toggleCouponStatus(selectedCoupon.id);
-            setSelectedCoupon(null);
-          }}
-          title={`${selectedCoupon.status === "Active" ? "Suspend" : "Activate"} Promo Coupon?`}
-          description={`Confirm toggling validation state for promo coupon ${selectedCoupon.code}. If deactivated, customer checkout verification will block usage.`}
-          confirmLabel="Toggle Coupon"
-        />
-      )}
+      {/* F11: the confirm-dialog toggle flow was removed with the disabled
+          control — it mutated only this component's local array, then told
+          the operator customer checkout would start blocking the code. */}
+      <div className="flex gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-xs font-sans leading-relaxed text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
+        <Percent size={15} className="mt-0.5 shrink-0" />
+        <div>
+          <span className="font-extrabold block">
+            Why creating and toggling are switched off
+          </span>
+          <span className="text-[11px] block mt-0.5">
+            Codes are validated by the server pricing engine against the Firestore{" "}
+            <span className="font-mono font-bold">/coupons</span> collection. This directory is
+            a bundled sample that never reaches that collection, so enabling the controls would
+            only change rows that reset on reload while implying customers were blocked.
+            Managing live coupons needs a server-backed route for this screen.
+          </span>
+        </div>
+      </div>
     </div>
   );
 };

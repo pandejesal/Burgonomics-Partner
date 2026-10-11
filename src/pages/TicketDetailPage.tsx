@@ -234,10 +234,11 @@ export function TicketDetailPage() {
 
   const handleSendReply = async () => {
     if (!replyText.trim()) return;
+    // authorRole is intentionally NOT sent: the legacy fallback derives the
+    // timeline actor role from the session store, never from screen props.
     await addMessage.mutateAsync({
       text: replyText.trim(),
       authorName: user?.name || 'Store Staff',
-      authorRole: user?.role || 'branch_staff',
     });
     setReplyText('');
   };

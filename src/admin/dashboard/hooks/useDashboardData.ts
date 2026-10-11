@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { dashboardService } from "../services/dashboardService";
 import type { AuditLogEntry, QueueStats, SystemHealthResponse } from "../types";
 
@@ -160,30 +160,24 @@ export function useSyncHealth(enabled = true) {
   });
 }
 
+// F12: none of these four actions has a client-callable server route, yet each
+// mutation resolved `{ ok: true }` — so the widget toasted "Menu sync
+// enqueued" / "Catalog cache refreshed" / "Webhook replayed" after doing no
+// I/O at all. They now reject with the reason instead of reporting work that
+// never happened, and PetpoojaStatus renders the buttons disabled with the
+// same wording. Point a mutationFn at a real endpoint when one exists.
+export const SYNC_NOT_WIRED_MESSAGE =
+  "Not wired to a server route yet — this action has no backend endpoint, so nothing was run.";
+
 export function useSyncMutations() {
-  const queryClient = useQueryClient();
+  const notWired = async (_payload?: unknown): Promise<never> => {
+    throw new Error(SYNC_NOT_WIRED_MESSAGE);
+  };
 
-  const triggerMutation = useMutation({
-    mutationFn: async (_payload: { scope: string; storeId?: string }) => ({ ok: true }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "catalog", "sync", "history"] });
-    },
-  });
-
-  const cacheRefreshMutation = useMutation({
-    mutationFn: async (_storeId?: string) => ({ ok: true }),
-  });
-
-  const petpoojaSyncMutation = useMutation({
-    mutationFn: async (_storeId?: string) => ({ ok: true }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "catalog", "sync", "history"] });
-    },
-  });
-
-  const replayWebhookMutation = useMutation({
-    mutationFn: async (_payload: { gateway: string; id: string }) => ({ ok: true }),
-  });
+  const triggerMutation = useMutation({ mutationFn: notWired });
+  const cacheRefreshMutation = useMutation({ mutationFn: notWired });
+  const petpoojaSyncMutation = useMutation({ mutationFn: notWired });
+  const replayWebhookMutation = useMutation({ mutationFn: notWired });
 
   return {
     triggerSync: triggerMutation.mutateAsync,

@@ -14,13 +14,79 @@ import {
   orderDocTimeMs,
 } from '@/utils/orderContract';
 import { FIRESTORE_IN_LIMIT, isGlobalRole, resolveScopedBranchIds } from '@/utils/branchScope';
-import { playKDSChime, syncKDSAlarmState } from '@/utils/kdsAudio';
+import { playKDSChime, stopRepeatingKDSAlarm, syncKDSAlarmState } from '@/utils/kdsAudio';
 import type { Order, OrderStatus } from '@/types';
 
 export interface RecalledOrderHistory {
   order: Order;
   previousStatus: OrderStatus;
   timestamp: number;
+}
+
+/** One queued offline bump. `queuedAt`/`expectedStatus` were added in v2. */
+export interface PendingKdsBump {
+  orderId: string;
+  targetStatus: OrderStatus;
+  /** Epoch ms the operator tapped — replays past the TTL are dropped. */
+  queuedAt?: number;
+  /** Status the KDS card showed when queued — lost-update precondition. */
+  expectedStatus?: OrderStatus;
+}
+
+/**
+ * An offline bump older than this is dropped instead of replayed. A queue
+ * entry from last night must never flip a delivered/cancelled order back to
+ * "preparing" as if it were fresh work.
+ */
+export const KDS_BUMP_TTL_MS = 10 * 60 * 1000;
+
+const PENDING_BUMPS_KEY = 'kds-pending-bumps:v1';
+
+/**
+ * Shape-validates the persisted outbox and drops entries past the TTL.
+ * Entries written by older builds carry no `queuedAt` — those are treated as
+ * expired rather than replayed with unknown age.
+ */
+export function readPendingKdsBumps(
+  raw: string | null,
+  nowMs: number = Date.now()
+): { fresh: PendingKdsBump[]; stale: PendingKdsBump[] } {
+  const fresh: PendingKdsBump[] = [];
+  const stale: PendingKdsBump[] = [];
+  if (!raw) return { fresh, stale };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { fresh, stale };
+  }
+  if (!Array.isArray(parsed)) return { fresh, stale };
+  for (const entry of parsed) {
+    if (
+      !entry ||
+      typeof entry !== 'object' ||
+      typeof (entry as PendingKdsBump).orderId !== 'string' ||
+      typeof (entry as PendingKdsBump).targetStatus !== 'string'
+    ) {
+      continue;
+    }
+    const bump = entry as PendingKdsBump;
+    const queuedAt = typeof bump.queuedAt === 'number' ? bump.queuedAt : null;
+    if (queuedAt === null || nowMs - queuedAt > KDS_BUMP_TTL_MS) {
+      stale.push(bump);
+      continue;
+    }
+    fresh.push(bump);
+  }
+  return { fresh, stale };
+}
+
+export function writePendingKdsBumps(queue: PendingKdsBump[]): void {
+  try {
+    window.localStorage.setItem(PENDING_BUMPS_KEY, JSON.stringify(queue));
+  } catch {
+    /* storage unavailable — ephemeral queue only */
+  }
 }
 
 export function useKDSRealtimeStream() {
@@ -67,6 +133,12 @@ export function useKDSRealtimeStream() {
 
   // Online / offline listeners + outbox drain. Queued bumps replay in
   // order when connectivity returns; entries that still fail stay queued.
+  // drainingRef makes the drain single-flight: its effect deps include a
+  // react-query mutation OBJECT (a new identity on every render), so the
+  // effect can re-run while a previous drain is still awaiting — without
+  // this guard the same queued bump was replayed concurrently twice.
+  const drainingRef = useRef<boolean>(false);
+
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -82,33 +154,56 @@ export function useKDSRealtimeStream() {
 
   useEffect(() => {
     if (!isOnline) return;
-    const queue = readPendingBumps();
-    if (queue.length === 0) return;
+    if (drainingRef.current) return;
+    let raw: string | null = null;
+    try {
+      raw = window.localStorage.getItem(PENDING_BUMPS_KEY);
+    } catch {
+      raw = null;
+    }
+    const { fresh, stale } = readPendingKdsBumps(raw);
+    if (stale.length > 0) {
+      // Fail-loud: a stale replay silently re-bumping a delivered order is
+      // worse than an operator re-tapping. Tell them what was discarded.
+      writePendingKdsBumps(fresh);
+      toast.error(`${stale.length} offline bump(s) expired — discarded`, {
+        description: `Queued bumps older than ${Math.round(KDS_BUMP_TTL_MS / 60000)} minutes are never replayed. Re-bump the order if it still needs to move.`,
+      });
+    }
+    if (fresh.length === 0) return;
+
+    drainingRef.current = true;
     let cancelled = false;
     (async () => {
-      const remaining: typeof queue = [];
-      for (const item of queue) {
+      const remaining: PendingKdsBump[] = [];
+      for (const item of fresh) {
         if (cancelled) {
           remaining.push(item);
           continue;
         }
         try {
           if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
-            await updateOrderStatus.mutateAsync({ orderId: item.orderId, status: item.targetStatus });
+            await updateOrderStatus.mutateAsync({
+              orderId: item.orderId,
+              status: item.targetStatus,
+              ...(item.expectedStatus ? { expectedStatus: item.expectedStatus } : {}),
+            });
           }
         } catch {
           remaining.push(item);
         }
       }
       if (!cancelled) {
-        writePendingBumps(remaining);
-        if (remaining.length < queue.length) {
+        writePendingKdsBumps(remaining);
+        if (remaining.length < fresh.length) {
           toast.success('Queued bumps applied', {
-            description: `${queue.length - remaining.length} offline bump(s) synced.`,
+            description: `${fresh.length - remaining.length} offline bump(s) synced.`,
           });
         }
       }
-    })();
+    })().finally(() => {
+      drainingRef.current = false;
+    });
     return () => {
       cancelled = true;
     };
@@ -201,6 +296,14 @@ export function useKDSRealtimeStream() {
     syncKDSAlarmState(pendingOrders.length);
   }, [pendingOrders.length, activeOrders]);
 
+  // Leaving /kds must silence the 10s repeating alarm. It is module-level
+  // state, so without this unmount cleanup the loop kept chiming on every
+  // other screen (and in the background) until the pending count hit 0.
+  // pending-count-0 stop still happens inside syncKDSAlarmState above.
+  useEffect(() => {
+    return () => stopRepeatingKDSAlarm();
+  }, []);
+
   // Clean up timer on recall-stack expiration (60s) + 1s tick while any
   // recall is live: canRecall is computed during render, so without a
   // ticking clock the Recall button stayed visible past expiry until some
@@ -232,39 +335,10 @@ export function useKDSRealtimeStream() {
   const bumpingRef = useRef<Set<string>>(new Set());
 
   // Offline bump outbox: a bump that fails for connectivity reasons is
-  // queued in localStorage (shape-validated on read) and replayed when the
-  // browser comes back online — the operator no longer has to remember to
-  // re-bump after an airplane-mode tap.
-  const PENDING_BUMPS_KEY = 'kds-pending-bumps:v1';
-  const readPendingBumps = (): Array<{ orderId: string; targetStatus: OrderStatus }> => {
-    try {
-      const raw = window.localStorage.getItem(PENDING_BUMPS_KEY);
-      if (!raw) return [];
-      const parsed: unknown = JSON.parse(raw);
-      if (!Array.isArray(parsed)) {
-        window.localStorage.removeItem(PENDING_BUMPS_KEY);
-        return [];
-      }
-      return parsed.filter(
-        (e): e is { orderId: string; targetStatus: OrderStatus } =>
-          !!e && typeof e === 'object' && typeof (e as any).orderId === 'string'
-      );
-    } catch {
-      try {
-        window.localStorage.removeItem(PENDING_BUMPS_KEY);
-      } catch {
-        /* storage unavailable */
-      }
-      return [];
-    }
-  };
-  const writePendingBumps = (queue: Array<{ orderId: string; targetStatus: OrderStatus }>) => {
-    try {
-      window.localStorage.setItem(PENDING_BUMPS_KEY, JSON.stringify(queue));
-    } catch {
-      /* storage unavailable — ephemeral queue only */
-    }
-  };
+  // queued in localStorage (shape-validated + TTL-filtered on read by
+  // readPendingKdsBumps above) and replayed when the browser comes back
+  // online — the operator no longer has to remember to re-bump after an
+  // airplane-mode tap.
 
   // Bump Bar Action: recall history is recorded ONLY after the mutation
   // succeeds. The old code set it before awaiting — an offline bump looked
@@ -274,9 +348,16 @@ export function useKDSRealtimeStream() {
       if (bumpingRef.current.has(orderId)) return;
       bumpingRef.current.add(orderId);
       setBumpingIds((prev) => ({ ...prev, [orderId]: true }));
+      // Precondition: the status THIS card is showing. If another terminal
+      // already moved the order, the server refuses instead of clobbering.
+      const currentStatus = liveOrders.find((o) => o.id === orderId)?.status;
       try {
         if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
-          await updateOrderStatus.mutateAsync({ orderId, status: targetStatus });
+          await updateOrderStatus.mutateAsync({
+            orderId,
+            status: targetStatus,
+            ...(currentStatus ? { expectedStatus: currentStatus } : {}),
+          });
         }
         const targetOrder = liveOrders.find((o) => o.id === orderId);
         if (targetOrder) {
@@ -292,10 +373,15 @@ export function useKDSRealtimeStream() {
           (typeof navigator !== 'undefined' && !navigator.onLine) ||
           /offline|network|failed to fetch|firestore/i.test(err?.message || '');
         if (offline) {
-          const queue = readPendingBumps();
-          if (!queue.some((q) => q.orderId === orderId)) {
-            queue.push({ orderId, targetStatus });
-            writePendingBumps(queue);
+          const { fresh } = readPendingKdsBumps(window.localStorage.getItem(PENDING_BUMPS_KEY));
+          if (!fresh.some((q) => q.orderId === orderId)) {
+            fresh.push({
+              orderId,
+              targetStatus,
+              queuedAt: Date.now(),
+              ...(currentStatus ? { expectedStatus: currentStatus } : {}),
+            });
+            writePendingKdsBumps(fresh);
           }
           logger.warn('kds.bump_queued_offline', { orderId });
           toast.error('Offline — bump queued', {
@@ -333,8 +419,15 @@ export function useKDSRealtimeStream() {
 
     try {
       const { order, previousStatus } = head;
+      // Precondition: what the card shows right now (the status this recall
+      // is undoing), not the pre-bump status stored on the stack entry.
+      const currentStatus = liveOrders.find((o) => o.id === order.id)?.status;
       if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
-        await updateOrderStatus.mutateAsync({ orderId: order.id, status: previousStatus });
+        await updateOrderStatus.mutateAsync({
+          orderId: order.id,
+          status: previousStatus,
+          ...(currentStatus ? { expectedStatus: currentStatus } : {}),
+        });
       }
       setRecallStack(live.slice(0, -1));
       return true;
@@ -345,7 +438,7 @@ export function useKDSRealtimeStream() {
       });
       return false;
     }
-  }, [recallStack, updateOrderStatus]);
+  }, [recallStack, updateOrderStatus, liveOrders]);
 
   const canRecall = liveRecallStack.length > 0;
 

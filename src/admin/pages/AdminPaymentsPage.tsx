@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
 import {
   CreditCard,
@@ -14,7 +13,6 @@ import {
   FileSpreadsheet,
   Eye,
   ShieldCheck,
-  ChevronRight,
   ShieldAlert,
   Play,
   Pause,
@@ -36,7 +34,6 @@ import { useAdmin } from "../hooks/useAdmin";
 import { toast } from "sonner";
 
 export const AdminPaymentsPage: React.FC = () => {
-  const navigate = useNavigate();
   const { role, isDeveloper } = useAdmin();
 
   // Real-time state subscription
@@ -245,8 +242,14 @@ export const AdminPaymentsPage: React.FC = () => {
     };
   }, [txns, isStoreManager]);
 
-  const handleRowClick = (id: string) => {
-    void navigate(`/admin/payments/${id}`);
+  // F10: the drill-down route (/admin/payments/:id) resolves its record from
+  // the local demo fixture store, never from the live row rendered above — so
+  // it opened a different (fabricated) transaction than the one clicked.
+  // Rows therefore report the limitation instead of navigating.
+  const handleRowClick = () => {
+    toast.info("Row detail is disabled: this screen's detail route renders demo fixtures, not the record above.", {
+      description: "Reconciliation and refunds are handled server-side, not from this board.",
+    });
   };
 
   return (
@@ -257,10 +260,15 @@ export const AdminPaymentsPage: React.FC = () => {
           title="Payment Operations Terminal"
           description={
             isStoreManager
-              ? `Real-time transactions feed, settlement cycles, and gateway details for ${managerStoreName}.`
-              : "Financial Control Room. Inspect capture pipelines, trigger manual verifications, process immediate refunds, and audit ledger reconciliation."
+              ? `Reads the Firestore \`payments\` collection for ${managerStoreName}. Detail drill-down and refunds are demo fixtures — no gateway behind them.`
+              : "Reads the Firestore `payments` collection (server-written). Capture, verification and refund controls on this board are demo fixtures and move no money."
           }
           breadcrumbs={[{ label: "Payments Center" }]}
+          actions={
+            <span className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[9px] font-black uppercase bg-gray-800 text-amber-300 border border-amber-400/40">
+              Demo detail board
+            </span>
+          }
         />
 
         {/* Real-time Indicator Panel */}
@@ -298,6 +306,23 @@ export const AdminPaymentsPage: React.FC = () => {
             <RefreshCw size={12} className="mr-1" />
             <span>Force Sync</span>
           </AdminButton>
+        </div>
+      </div>
+
+      {/* Honesty notice: what this board actually reads vs. what is fixture */}
+      <div className="flex gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
+        <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+        <div className="text-xs font-sans leading-relaxed">
+          <span className="font-extrabold block">
+            Demo detail board — rows do not open a per-transaction record
+          </span>
+          <span className="text-[11px] block mt-0.5">
+            The list above is a live listener on the Firestore{" "}
+            <span className="font-mono font-bold">payments</span> collection, which only a
+            server payment writer can fill. The drill-down route renders local demo fixtures,
+            so it cannot show the row you clicked — it is disabled here. Reconciliation and
+            refunds run server-side (Ticket Resolution autoRefund), not from this screen.
+          </span>
         </div>
       </div>
 
@@ -584,8 +609,9 @@ export const AdminPaymentsPage: React.FC = () => {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
-                        className="hover:bg-gray-50/20 dark:hover:bg-gray-900/10 transition-colors cursor-pointer"
-                        onClick={() => handleRowClick(t.id)}
+                        className="hover:bg-gray-50/20 dark:hover:bg-gray-900/10 transition-colors cursor-not-allowed"
+                        onClick={handleRowClick}
+                        title="Row detail is a demo fixture view — disabled on live rows"
                       >
                         {/* Timestamp */}
                         <td className="py-4 px-4 font-mono text-[10px] text-gray-400 whitespace-nowrap">
@@ -654,11 +680,11 @@ export const AdminPaymentsPage: React.FC = () => {
                           )}
                         </td>
 
-                        {/* View Arrow link */}
+                        {/* No drill-down: the detail route is fixture-backed (F10) */}
                         <td className="py-4 px-4 text-center">
-                          <div className="flex h-7 w-7 items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors mx-auto">
-                            <ChevronRight size={14} />
-                          </div>
+                          <span className="inline-flex items-center rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-amber-700 font-mono dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-400">
+                            Demo detail off
+                          </span>
                         </td>
                       </motion.tr>
                     );
