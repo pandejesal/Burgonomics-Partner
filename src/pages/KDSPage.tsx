@@ -6,6 +6,7 @@ import {
   AcousticChimePlayer,
   KDSAudioUnlockModal,
   KDSOrderCard,
+  KDSQuick86Drawer,
   KOTTimerBadge,
   useKDSRealtimeStream,
 } from '@/features/kds';
@@ -25,13 +26,12 @@ import {
   Bike,
   ShoppingBag,
   UtensilsCrossed,
-  Plus,
   RotateCcw,
   RefreshCw,
-  Sparkles,
   AlertTriangle,
   WifiOff,
   Store,
+  Ban,
 } from 'lucide-react';
 import type { Order, OrderType, OrderStatus } from '@/types';
 
@@ -52,7 +52,6 @@ export function KDSPage() {
     recallLastOrder,
     canRecall,
     lastBumpedOrder,
-    simulateOrder,
     refresh,
     lastRefreshAt,
   } = useKDSRealtimeStream();
@@ -66,6 +65,9 @@ export function KDSPage() {
 
   // Channel filter: 'all' | 'delivery' | 'takeaway' | 'dinein'
   const [channelFilter, setChannelFilter] = useState<OrderType | 'all'>('all');
+
+  // MT-12: 1-tap 86 quick-toggle drawer visibility
+  const [is86DrawerOpen, setIs86DrawerOpen] = useState(false);
 
   // Item bump checklist state: key = `${orderId}_${itemIndex}`.
   // Persisted per order in this device's localStorage so a refresh or a
@@ -168,8 +170,9 @@ export function KDSPage() {
     }
   };
 
+  const CHECKLIST_SEP = '::';
   const handleToggleItemCheck = (orderId: string, itemIdx: number) => {
-    const key = `${orderId}_${itemIdx}`;
+    const key = `${orderId}${CHECKLIST_SEP}${itemIdx}`;
     setCheckedItems((prev) => {
       const next = { ...prev, [key]: !prev[key] };
       try {
@@ -182,13 +185,18 @@ export function KDSPage() {
   };
 
   // Drop checklist entries for orders that left the makeline so the stored
-  // map doesn't grow without bound. Runs on settled data only.
+  // map doesn't grow without bound. Runs on settled data only. Keyed on the
+  // sorted live id-join (NOT length): a swap that keeps the same depth used
+  // to skip pruning and leak stale keys forever. Separator '::' survives
+  // order ids containing '_' (the old lastIndexOf('_') split mis-attributed
+  // them).
+  const liveOrderIdsKey = activeOrders.map((o: Order) => o.id).sort().join('|');
   useEffect(() => {
     if (isLoading || streamError) return;
     const live = new Set(activeOrders.map((o: Order) => o.id));
     setCheckedItems((prev) => {
       const keys = Object.keys(prev).filter((k) => {
-        const orderId = k.slice(0, k.lastIndexOf('_'));
+        const orderId = k.split(CHECKLIST_SEP).slice(0, -1).join(CHECKLIST_SEP);
         return live.has(orderId);
       });
       if (keys.length === Object.keys(prev).length) return prev;
@@ -202,7 +210,7 @@ export function KDSPage() {
       return next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, streamError, activeOrders.length]);
+  }, [isLoading, streamError, liveOrderIdsKey]);
 
   // Filter column orders by selected channel
   const filteredPending = useMemo(() => {
@@ -355,20 +363,6 @@ export function KDSPage() {
             </button>
           )}
 
-          {/* Simulate New KOT (kitchen training & testing) — dev only: it
-              writes fake orders into the live collection in production. */}
-          {import.meta.env.DEV && (
-            <button
-              type="button"
-              onClick={() => simulateOrder && simulateOrder()}
-              className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 text-neutral-300 text-xs font-bold transition-colors cursor-pointer"
-              title="Simulate incoming order"
-            >
-              <Plus className="w-3.5 h-3.5 text-[#FF6600]" />
-              <span>+ Test KOT</span>
-            </button>
-          )}
-
           {/* Acoustic Audio Chime Controller */}
           <AcousticChimePlayer
             isMuted={isMuted}
@@ -376,6 +370,16 @@ export function KDSPage() {
             onToggleMute={toggleMute}
             onUnlockAudio={handleUnlockAudio}
           />
+
+          <button
+            type="button"
+            onClick={() => setIs86DrawerOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-950/40 border border-rose-500/40 text-rose-300 hover:bg-rose-900/50 font-bold text-xs transition-colors cursor-pointer"
+            title="1-Tap 86 Quick Toggle"
+          >
+            <Ban className="w-3.5 h-3.5" />
+            <span>86 / Stock</span>
+          </button>
 
           {/* Fullscreen Toggle */}
           <button
@@ -559,6 +563,8 @@ export function KDSPage() {
           </div>
         </section>
       </main>
+
+      <KDSQuick86Drawer isOpen={is86DrawerOpen} onClose={() => setIs86DrawerOpen(false)} />
     </div>
   );
 }

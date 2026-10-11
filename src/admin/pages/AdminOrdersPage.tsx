@@ -845,7 +845,11 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
               variant: "danger",
               onClick: (selected) => {
                 selected.forEach((o) => {
-                  if (o.orderStatus !== "Completed" && o.orderStatus !== "Cancelled") {
+                  if (
+                    o.orderStatus !== "Completed" &&
+                    o.orderStatus !== "Cancelled" &&
+                    o.orderStatus !== "Needs Review"
+                  ) {
                     handleUpdateStatus(
                       o.id,
                       "Cancelled",
@@ -1371,7 +1375,8 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                 {/* Standard Cancellation safety-valve for non-settled */}
                 {selectedOrder.orderStatus !== "Completed" &&
                   selectedOrder.orderStatus !== "Cancelled" &&
-                  selectedOrder.orderStatus !== "Refunded" && (
+                  selectedOrder.orderStatus !== "Refunded" &&
+                  selectedOrder.orderStatus !== "Needs Review" && (
                     <button
                       onClick={() =>
                         setConfirmAction({ type: "cancel", orderId: selectedOrder.id })

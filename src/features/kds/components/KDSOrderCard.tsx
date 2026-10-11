@@ -11,6 +11,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { KOTTimerBadge } from './KOTTimerBadge';
+import { modifierLabelsFrom } from '@/utils/orderContract';
 import type { Order, OrderStatus } from '@/types';
 
 /** Loop 10 (DPDP): wall-screen phones show last-5 only; tap-to-call keeps full number in href. */
@@ -152,8 +153,11 @@ export function KDSOrderCard({
         {order.items && order.items.length > 0 ? (
           order.items.map((item, idx) => {
             const isChecked = !!checkedItems[`${order.id}::${idx}`];
-            const rawModifiers = (item as any).modifiers || (item as any).customizations || [];
-            const modifiers = Array.isArray(rawModifiers) ? rawModifiers : [];
+            // Add-ons live under `modifiers` (normalized) or `customizations`/
+            // `addons` (raw docs). Every entry is collapsed to a label so an
+            // `{ name, price }` object can never reach JSX and white-screen
+            // the whole kitchen wall mid-rush.
+            const modifiers = modifierLabelsFrom(item);
 
             return (
               <button

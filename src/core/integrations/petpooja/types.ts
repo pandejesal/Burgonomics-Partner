@@ -1,7 +1,7 @@
 import type { Timestamp } from "firebase/firestore";
 import type { PetpoojaSaveOrderPayload } from "./mapper";
 
-export type GatewayImplementation = "mock" | "live";
+export type GatewayImplementation = "live";
 
 export interface GatewayStore {
   id: string;

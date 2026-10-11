@@ -49,41 +49,59 @@ export function useOrders(params: UseOrdersParams = {}) {
         if (!scopeBranchIds.length && !isGlobalRole(user?.role)) return [];
 
         // Bounded reads: the old code downloaded the ENTIRE orders collection
-        // on every mount (5k docs ≈ 10MB + 5k billed reads). Latest-first with
-        // a cap covers Orders/Dashboard/KDS; dateRange narrows server-side
-        // (it was previously accepted in params and then ignored).
-        const rangeStart = (() => {
-          const now = new Date();
-          if (params.dateRange === 'today') {
-            return Timestamp.fromDate(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
-          }
-          if (params.dateRange === 'week') {
-            return Timestamp.fromDate(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000));
-          }
-          if (params.dateRange === 'month') {
-            return Timestamp.fromDate(new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000));
-          }
-          return null;
-        })();
+        // on every mount (5k docs ≈ 10MB + 5k billed reads), and the newer
+        // compound query (`branchId in …` + `createdAt >= …` + `orderBy
+        // createdAt desc`) throws `FirebaseError: The query requires an index`
+        // wherever that composite index is not deployed — and it can never
+        // match customer docs whose `createdAt` is an ISO string instead of a
+        // Firestore Timestamp (cross-type comparisons are not index-served).
+        // So the Firestore read stays single-field, and ordering + dateRange
+        // narrowing happen in memory below, where Timestamp and string dates
+        // compare correctly.
+        const toRawDocs = (snap: {
+          docs: Array<{ id: string; data: () => unknown }>;
+        }): Array<{ id: string; data: Record<string, any> }> =>
+          snap.docs.map((d) => ({
+            id: d.id,
+            data: d.data() as Record<string, any>,
+          }));
 
-        const baseConstraints = [
-          ...(scopeBranchIds.length
-            ? [where('branchId', 'in', scopeBranchIds.slice(0, 10))]
-            : []),
-          ...(rangeStart ? [where('createdAt', '>=', rangeStart)] : []),
-          orderBy('createdAt', 'desc'),
-          limit(100),
-        ];
-        const ordersQuery = query(collection(db, 'orders'), ...baseConstraints);
+        let rawDocs: Array<{ id: string; data: Record<string, any> }> = [];
 
-        const ordersSnap = await getDocs(ordersQuery);
-
-        // Raw docs first: delivery-app docs (nested store/status/totals) and
-        // partner docs share this collection — normalized below.
-        const rawDocs = ordersSnap.docs.map((d) => ({
-          id: d.id,
-          data: d.data() as Record<string, any>,
-        }));
+        if (scopeBranchIds.length > 0) {
+          // `in` + inequality/orderBy on another field is exactly the
+          // composite-index trap. A plain `in` + `limit` is served by the
+          // automatic single-field index alone (same approach as
+          // fetchAliasedStoreOrders).
+          const scopedSnap = await getDocs(
+            query(
+              collection(db, 'orders'),
+              where('branchId', 'in', scopeBranchIds.slice(0, 10)),
+              limit(100)
+            )
+          );
+          rawDocs = toRawDocs(scopedSnap);
+        } else {
+          // Global role: latest-first ordering on a lone orderBy needs only
+          // the automatic single-field index on createdAt.
+          try {
+            const globalSnap = await getDocs(
+              query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(100))
+            );
+            rawDocs = toRawDocs(globalSnap);
+          } catch (err) {
+            // Index/precondition failure (undeployed composite index, or any
+            // other rejection of the sorted read): retry once with a plain
+            // bounded read — the in-memory sort below produces the same
+            // latest-first list without asking Firestore to order anything.
+            console.warn(
+              'createdAt orderBy read failed, falling back to bounded unordered read:',
+              err
+            );
+            const fallbackSnap = await getDocs(query(collection(db, 'orders'), limit(100)));
+            rawDocs = toRawDocs(fallbackSnap);
+          }
+        }
 
         // Branch-scoped views: also pull Delivery docs whose store links to
         // one of the scoped branches (registry). No-op when nothing is linked.
@@ -97,11 +115,15 @@ export function useOrders(params: UseOrdersParams = {}) {
                 rawDocs.push(doc);
               }
             }
-            rawDocs.sort((a, b) => orderDocTimeMs(b.data) - orderDocTimeMs(a.data));
           } catch (err) {
             console.warn('Alias store order fetch failed, using direct results:', err);
           }
         }
+
+        // Server-side ordering is deliberately gone (composite-index +
+        // cross-type createdAt issues) — latest-first is restored here, where
+        // Firestore Timestamps and ISO-string dates both sort correctly.
+        rawDocs.sort((a, b) => orderDocTimeMs(b.data) - orderDocTimeMs(a.data));
 
         let list: Order[] = rawDocs.map((d) => normalizeOrderDoc(d.id, d.data));
 
@@ -257,6 +279,31 @@ export function useOrders(params: UseOrdersParams = {}) {
         // Status Filter
         if (params.status && params.status !== 'all') {
           list = list.filter((o) => o.status === params.status);
+        }
+
+        // Date Range Filter (client-side, never a server inequality): a
+        // `where('createdAt', '>=', …)` would demand a composite index AND
+        // silently drop customer docs whose createdAt/placedAt is an ISO
+        // string (Firestore only range-serves Timestamps). orderDocTimeMs
+        // understands Timestamps, ISO strings and epoch numbers alike.
+        const rangeStartMs = (() => {
+          const now = new Date();
+          if (params.dateRange === 'today') {
+            return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+          }
+          if (params.dateRange === 'week') {
+            return now.getTime() - 7 * 24 * 60 * 60 * 1000;
+          }
+          if (params.dateRange === 'month') {
+            return now.getTime() - 30 * 24 * 60 * 60 * 1000;
+          }
+          return null;
+        })();
+
+        if (rangeStartMs !== null) {
+          list = list.filter(
+            (o) => orderDocTimeMs(o as unknown as Record<string, any>) >= rangeStartMs
+          );
         }
 
         return list;
@@ -420,88 +467,16 @@ export function useOrders(params: UseOrdersParams = {}) {
 
   const updateOrderStatus = useMutation({
     mutationFn: async ({ orderId, status }: { orderId: string; status: OrderStatus }) => {
-      const orderRef = doc(db, 'orders', orderId);
-      // Write Delivery-compatible object form so customer-side tracking
-      // keeps resolving after a kitchen bump; Partner readers normalize.
-      await updateDoc(orderRef, {
-        status: toDeliveryStatusMeta(status),
-        updatedAt: Timestamp.now(),
-      });
+      // Server-side bump (POST /orders/bumpStatus): branch-checked write in
+      // the Delivery-compatible object form. The old direct updateDoc skipped
+      // scope enforcement on every KDS bump.
+      const { partnerFunctionsApi } = await import('@/services/partnerFunctionsApi');
+      await partnerFunctionsApi.bumpOrderStatus({ orderId, status });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
     },
   });
 
-  const simulateOrder = useMutation({
-    mutationFn: async (customParams?: { branchId?: string; branchName?: string; orderType?: 'delivery' | 'takeaway' | 'dinein' }) => {
-      if (!import.meta.env.DEV) throw new Error('Simulated orders are available in development builds only.');
-      const targetBranchId = customParams?.branchId || selectedBranchId || user?.branchIds?.[0] || 'branch_surat_01';
-      const targetBranchName = customParams?.branchName || (targetBranchId === 'branch_surat_01' ? 'Surat Adajan' : 'Ahmedabad SG Highway');
-      const orderType = customParams?.orderType || (['delivery', 'takeaway', 'dinein'] as const)[Math.floor(Math.random() * 3)];
-      
-      const newOrderId = `ord_kds_${Date.now().toString().slice(-4)}`;
-      const sampleNames = ['Kavita Shah', 'Dev Patel', 'Ananya Roy', 'Varun Mehta', 'Ritika Joshi'];
-      const randomName = sampleNames[Math.floor(Math.random() * sampleNames.length)];
-      
-      const sampleItems = [
-        { itemId: 'itm_double_truffle', petpoojaItemId: 'PP-BRG-101', name: 'Double Truffle Smash Burger', quantity: 1, price: 349 },
-        { itemId: 'itm_paneer_makhani', petpoojaItemId: 'PP-BRG-103', name: 'Paneer Makhani Burst Burger', quantity: 2, price: 199 },
-        { itemId: 'itm_peri_peri_fries', petpoojaItemId: 'PP-SDE-301', name: 'Peri-Peri Crinkle Fries', quantity: 1, price: 99 },
-        { itemId: 'itm_mango_jalapeno', petpoojaItemId: 'PP-BRG-106', name: 'Mango Jalapeño Blast Burger', quantity: 1, price: 229 },
-      ];
-      
-      const selectedItems = [
-        sampleItems[Math.floor(Math.random() * 2)],
-        sampleItems[2 + Math.floor(Math.random() * 2)],
-      ];
-
-      const subtotal = selectedItems.reduce((acc, i) => acc + i.price * i.quantity, 0);
-      const tax = Math.round(subtotal * 0.05);
-      const deliveryFee = orderType === 'delivery' ? 35 : 0;
-      const total = subtotal + tax + deliveryFee;
-
-      const orderData: Partial<Order> = {
-        id: newOrderId,
-        customerId: `cust_${Date.now().toString().slice(-3)}`,
-        customerName: randomName,
-        customerPhone: `+91 98${Math.floor(10000000 + Math.random() * 90000000)}`,
-        branchId: targetBranchId,
-        branchName: targetBranchName,
-        city: targetBranchId.includes('surat') ? 'Surat' : 'Ahmedabad',
-        items: selectedItems,
-        subtotal,
-        tax,
-        deliveryFee,
-        total,
-        orderType,
-        // Delivery-compatible object form (see orderContract); readers normalize.
-        status: toDeliveryStatusMeta('pending') as unknown as OrderStatus,
-        paymentMethod: 'upi',
-        paymentStatus: 'completed',
-        petpoojaOrderId: `PP-KDS-${newOrderId}`,
-        petpoojaSyncStatus: 'synced',
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      };
-
-      try {
-        const orderRef = doc(db, 'orders', newOrderId);
-        await updateDoc(orderRef, orderData as any).catch(async () => {
-          // If doc doesn't exist yet in firestore, try setDoc or let mock query handle
-          const { setDoc } = await import('firebase/firestore');
-          await setDoc(orderRef, orderData);
-        });
-      } catch (e) {
-        console.warn('Simulated order generated in memory / firestore:', e);
-      }
-
-      return orderData;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['orders'] });
-    },
-  });
-
-  return { orders, isLoading, error, refetch, dataUpdatedAt, updateOrderStatus, simulateOrder };
+  return { orders, isLoading, error, refetch, dataUpdatedAt, updateOrderStatus };
 }

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { X, Printer, Check, Copy } from 'lucide-react';
+import { X, Printer, Check, Copy, AlertTriangle } from 'lucide-react';
+import { toast } from 'sonner';
 import { formatOrderForKOT, generateASCIIReceipt } from '../services/thermalPrinterService';
 import type { Order } from '@/types';
 
@@ -13,19 +14,62 @@ export function KOTPrintPreview({ order, isOpen, onClose }: KOTPrintPreviewProps
   const [paperWidth, setPaperWidth] = useState<'80mm' | '58mm'>('80mm');
   const [copied, setCopied] = useState(false);
 
+  // A malformed order doc must never white-screen the whole order page —
+  // the preview degrades to an explicit error panel instead of throwing
+  // out of render (print is the LAST thing a rush can afford to lose).
+  let kotData: ReturnType<typeof formatOrderForKOT>;
+  let asciiKOT = '';
+  let formatError: string | null = null;
+  try {
+    kotData = formatOrderForKOT(order);
+    asciiKOT = generateASCIIReceipt(kotData, paperWidth === '80mm' ? 48 : 32);
+  } catch (err) {
+    formatError = err instanceof Error ? err.message : 'Unknown KOT formatting error.';
+    kotData = {
+      orderId: (order as any)?.id ?? 'unknown',
+      shortCode: '#NA',
+      orderType: 'UNKNOWN',
+      branchName: 'Burgonomics Store',
+      createdAtFormatted: '',
+      items: [],
+      subtotal: 0,
+      tax: 0,
+      total: 0,
+    };
+  }
+
   if (!isOpen) return null;
 
-  const kotData = formatOrderForKOT(order);
-  const asciiKOT = generateASCIIReceipt(kotData);
-
   const handlePrint = () => {
-    window.print();
+    try {
+      window.print();
+    } catch {
+      // Missing/blocked printer path — surface it, never crash the page.
+      toast.error('Print dialog failed to open.', {
+        description: 'Check the printer connection (or use Copy ASCII and print from a text editor).',
+      });
+    }
   };
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(asciiKOT);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      const done = navigator.clipboard?.writeText(asciiKOT);
+      if (done && typeof (done as Promise<void>).then === 'function') {
+        (done as Promise<void>)
+          .then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          })
+          .catch(() => {
+            toast.error('Copy failed — select the slip text and copy manually.');
+          });
+        return;
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error('Copy failed — select the slip text and copy manually.');
+    }
   };
 
   return (
@@ -71,6 +115,17 @@ export function KOTPrintPreview({ order, isOpen, onClose }: KOTPrintPreviewProps
               </button>
             </div>
           </div>
+
+          {/* Formatting failure — never a blank modal, always an explanation */}
+          {formatError && (
+            <div className="mx-4 mt-4 p-3 rounded-xl bg-rose-950/40 border border-rose-800/60 flex items-start gap-2 text-rose-300 text-xs font-semibold">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>
+                KOT formatting failed for this order ({formatError}). Copy the ASCII text or retry
+                after refreshing — the printer was NOT sent a broken slip.
+              </span>
+            </div>
+          )}
 
           {/* Thermal Paper Container */}
           <div className="p-6 bg-neutral-950/80 overflow-y-auto max-h-[60vh] flex justify-center">
@@ -140,6 +195,20 @@ export function KOTPrintPreview({ order, isOpen, onClose }: KOTPrintPreviewProps
                   <p className="text-[11px] font-black text-red-700 mt-0.5">
                     {kotData.specialNotes}
                   </p>
+                </div>
+              )}
+
+              {/* Footer: customer contact, delivery address, table */}
+              {(kotData.customerName || kotData.customerPhone) && (
+                <div className="pt-2 text-[10px] font-bold">
+                  <p>
+                    Customer: {kotData.customerName || '—'}
+                    {kotData.customerPhone ? ` · Ph: ${kotData.customerPhone}` : ''}
+                  </p>
+                  {kotData.deliveryAddress && (
+                    <p className="font-normal">Address: {kotData.deliveryAddress}</p>
+                  )}
+                  {kotData.tableNumber && <p>Table: {kotData.tableNumber}</p>}
                 </div>
               )}
 

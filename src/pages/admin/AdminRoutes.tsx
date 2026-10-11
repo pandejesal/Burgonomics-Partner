@@ -16,11 +16,9 @@ import { AdminMenuPage } from "@/admin/pages/AdminMenuPage";
 
 // Heavy recharts pages are code-split so the initial admin bundle stays lean.
 // (Previously every chart page loaded upfront → 1.2MB+ admin-analytics chunk.)
-const AdminMarketingDashboard = lazy(() =>
-  import("@/admin/pages/AdminMarketingDashboard").then((m) => ({
-    default: m.AdminMarketingDashboard,
-  }))
-);
+// NOTE: the marketing dashboard is intentionally absent — /admin/marketing is a
+// retired mock route (see RETIRED_MOCK_ROUTES) and is never imported, so its
+// recharts bundle stays out of the shipped app entirely.
 const AdminCustomerAnalyticsPage = lazy(
   () => import("@/admin/pages/AdminCustomerAnalyticsPage")
 );
@@ -254,18 +252,12 @@ export function AdminRoutes() {
         {/* Marketing / Offers / Campaigns */}
         <Route path="offers" element={<AdminOffersPage />} />
         <Route path="coupons" element={<AdminCouponsPage />} />
-        <Route path="campaigns" element={<AdminCampaignsPage />} />
-        <Route path="campaigns/create" element={<AdminCreateCampaignPage />} />
-        <Route path="templates" element={<AdminTemplatesPage />} />
-        <Route
-          path="marketing"
-          element={
-            <Suspense fallback={<AdminLazyFallback />}>
-              <AdminMarketingDashboard />
-            </Suspense>
-          }
-        />
-        <Route path="automation" element={<AdminAutomationPage />} />
+        {/* Marketing / Campaigns / Automation (Retired mock routes -> redirect to active orders) */}
+        <Route path="campaigns" element={<Navigate to="/admin/orders" replace />} />
+        <Route path="campaigns/create" element={<Navigate to="/admin/orders" replace />} />
+        <Route path="templates" element={<Navigate to="/admin/orders" replace />} />
+        <Route path="marketing" element={<Navigate to="/admin/orders" replace />} />
+        <Route path="automation" element={<Navigate to="/admin/orders" replace />} />
 
         {/* Customers */}
         <Route path="customers" element={<AdminCustomersPage />} />
@@ -278,7 +270,7 @@ export function AdminRoutes() {
             </Suspense>
           }
         />
-        <Route path="customers/loyalty" element={<AdminLoyaltyConfigPage />} />
+        <Route path="customers/loyalty" element={<Navigate to="/admin/orders" replace />} />
         <Route path="customers/segments" element={<AdminSegmentsPage />} />
         <Route path="segments" element={<AdminSegmentsPage />} />
 
@@ -305,7 +297,7 @@ export function AdminRoutes() {
             </Suspense>
           }
         />
-        <Route path="notifications-hub" element={<AdminNotificationsPage />} />
+        <Route path="notifications-hub" element={<Navigate to="/admin/orders" replace />} />
         <Route path="settings-hub" element={<AdminSettingsPage />} />
         <Route path="settings" element={<AdminSettingsPage />} />
         <Route path="profile" element={<AdminProfilePage />} />

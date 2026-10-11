@@ -7,6 +7,10 @@ let audioCtx: AudioContext | null = null;
 let repeatIntervalId: ReturnType<typeof setInterval> | null = null;
 let isAudioUnlocked = false;
 let currentPendingCount = 0;
+let acknowledgedPendingCount: number | null = null;
+
+/** Repeating alarm interval — pending orders chime every 10 seconds. */
+export const KDS_ALARM_REPEAT_MS = 10000;
 
 /**
  * Initialize or get active AudioContext
@@ -68,8 +72,10 @@ export function setKDSAudioMuted(muted: boolean): void {
 }
 
 /**
- * Synthesize a 3-tone QSR Kitchen Bell Chime
- * Notes: E5 (659Hz) -> G#5 (830Hz) -> B5 (987Hz) with warm harmonics
+ * Synthesize a two-tone doorbell chime (A5 -> D6)
+ * Tone 1: 880.00 Hz (A5), ~0.35s, gain 0.30
+ * Tone 2: 1174.66 Hz (D6), starts at +0.18s, ~0.65s, gain 0.35
+ * Uses Web Audio API sine oscillator with exponential decay envelope.
  */
 export function playKDSChime(): void {
   if (isKDSAudioMuted()) return;
@@ -85,16 +91,15 @@ export function playKDSChime(): void {
 
   const now = ctx.currentTime;
   const notes = [
-    { freq: 659.25, time: 0.00, duration: 0.35, gain: 0.28 }, // E5
-    { freq: 830.61, time: 0.12, duration: 0.40, gain: 0.32 }, // G#5
-    { freq: 987.77, time: 0.26, duration: 0.65, gain: 0.38 }, // B5
+    { freq: 880.0, time: 0.0, duration: 0.35, gain: 0.3 }, // A5
+    { freq: 1174.66, time: 0.18, duration: 0.65, gain: 0.35 }, // D6
   ];
 
   notes.forEach(({ freq, time, duration, gain }) => {
     const osc = ctx.createOscillator();
     const gainNode = ctx.createGain();
 
-    // Warm sine + subtle triangle blend
+    // Sine oscillator with exponential decay envelope
     osc.type = 'sine';
     osc.frequency.setValueAtTime(freq, now + time);
 
@@ -112,16 +117,35 @@ export function playKDSChime(): void {
 }
 
 /**
- * Start or stop repeating alarm (every 15s) when pending orders exist — with native haptics for Kitchen urgency
+ * Start or stop repeating alarm (every 10s) when pending orders exist — with native haptics for Kitchen urgency.
+ * A staff acknowledge (see acknowledgeKDSAlarm) silences the loop until the
+ * pending count rises above the acknowledged level (i.e. new orders arrive).
  */
 export function syncKDSAlarmState(pendingCount: number): void {
   // Keep the latest backend truth so the alarm loop follows Firestore, not a
   // standalone front-end clock.
   currentPendingCount = pendingCount;
 
-  if (isKDSAudioMuted() || pendingCount <= 0) {
+  if (pendingCount <= 0) {
+    acknowledgedPendingCount = null;
     stopRepeatingKDSAlarm();
     return;
+  }
+
+  if (isKDSAudioMuted()) {
+    stopRepeatingKDSAlarm();
+    return;
+  }
+
+  // An acknowledged kitchen stays silent until NEW orders push the count
+  // above the acknowledged level.
+  if (acknowledgedPendingCount !== null) {
+    if (pendingCount <= acknowledgedPendingCount) {
+      stopRepeatingKDSAlarm();
+      return;
+    }
+    // New orders arrived — clear the acknowledge and resume alarming.
+    acknowledgedPendingCount = null;
   }
 
   // If not already looping, play immediately and start interval
@@ -137,8 +161,30 @@ export function syncKDSAlarmState(pendingCount: number): void {
       } else {
         stopRepeatingKDSAlarm();
       }
-    }, 15000); // 15 seconds repeat
+    }, KDS_ALARM_REPEAT_MS); // 10 seconds repeat
   }
+}
+
+/**
+ * Staff acknowledge: stop the repeating alarm until the next pending count
+ * increase (i.e. new orders arrive). The count at acknowledge time is
+ * captured; syncKDSAlarmState() resumes only when pendingCount rises above it.
+ */
+export function acknowledgeKDSAlarm(): void {
+  acknowledgedPendingCount = currentPendingCount;
+  stopRepeatingKDSAlarm();
+}
+
+/** True while the 10s repeating alarm loop is armed. */
+export function isKDSAlarmRepeating(): boolean {
+  return repeatIntervalId !== null;
+}
+
+/** Test-only reset of module state (alarm loop + acknowledge latch). */
+export function __resetKDSAudioStateForTests(): void {
+  stopRepeatingKDSAlarm();
+  currentPendingCount = 0;
+  acknowledgedPendingCount = null;
 }
 
 async function triggerKDSHaptic(): Promise<void> {

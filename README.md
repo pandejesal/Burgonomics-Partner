@@ -23,7 +23,7 @@ The **Burgonomics Partner App** is the central operational command centre for Bu
 ```
 burgonomics-partner/
 ├── android/                    # Capacitor Android native project
-│   └── app/src/main/java/com/glassdoorsstudio/burgonomics/partner/
+│   └── app/src/main/java/com/burgonomics/partner/
 ├── ios/                        # Capacitor iOS native project (Xcode workspace)
 ├── src/
 │   ├── admin/                  # 44 Admin Portal views & dashboards
@@ -141,7 +141,7 @@ npm run build
 ## 7. 📱 Native Mobile & App Store Release
 
 See [`RELEASE_AND_INTEGRATION_GUIDE.md`](file:///c:/Users/DELL/Desktop/Burgonomics/RELEASE_AND_INTEGRATION_GUIDE.md) and [`STORE_SUBMISSION_GUIDE.md`](file:///c:/Users/DELL/Desktop/Burgonomics/STORE_SUBMISSION_GUIDE.md) for full publication instructions:
-- **Package / Bundle ID**: `com.glassdoorsstudio.burgonomics.partner`
+- **Package / Bundle ID**: `com.burgonomics.partner`
 - **Android Release AAB**: `npm run build:mobile && npx cap sync android && cd android && ./gradlew bundleRelease`
 - **iOS Xcode Archive**: Run `./mac-build.sh` on macOS and distribute via TestFlight / App Store Connect.
 

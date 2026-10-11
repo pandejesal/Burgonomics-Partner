@@ -9,43 +9,64 @@ import {
   ArrowRight,
   RotateCcw,
 } from 'lucide-react';
-import type { OrderStatus } from '@/types';
+import type { OrderStatus, OrderType } from '@/types';
 
 interface OrderStatusStepperProps {
   currentStatus: OrderStatus | string;
+  orderType?: OrderType;
   onUpdateStatus: (nextStatus: OrderStatus) => Promise<void> | void;
   isSubmitting?: boolean;
   className?: string;
 }
 
-const STEPS: Array<{ key: OrderStatus; label: string; icon: any }> = [
-  { key: 'pending', label: 'Placed', icon: Clock },
-  { key: 'preparing', label: 'In Kitchen', icon: ChefHat },
-  { key: 'ready', label: 'Ready', icon: Package },
-  { key: 'out_for_delivery', label: 'Dispatched', icon: Bike },
-  { key: 'delivered', label: 'Delivered', icon: CheckCircle2 },
-];
+const getSteps = (orderType?: OrderType): Array<{ key: OrderStatus; label: string; icon: any }> => {
+  if (orderType === 'dinein') {
+    return [
+      { key: 'pending', label: 'Placed', icon: Clock },
+      { key: 'preparing', label: 'In Kitchen', icon: ChefHat },
+      { key: 'ready', label: 'Ready to Serve', icon: Package },
+      { key: 'delivered', label: 'Served', icon: CheckCircle2 },
+    ];
+  }
+  if (orderType === 'takeaway') {
+    return [
+      { key: 'pending', label: 'Placed', icon: Clock },
+      { key: 'preparing', label: 'In Kitchen', icon: ChefHat },
+      { key: 'ready', label: 'Ready for Pickup', icon: Package },
+      { key: 'delivered', label: 'Picked Up', icon: CheckCircle2 },
+    ];
+  }
+  return [
+    { key: 'pending', label: 'Placed', icon: Clock },
+    { key: 'preparing', label: 'In Kitchen', icon: ChefHat },
+    { key: 'ready', label: 'Ready', icon: Package },
+    { key: 'out_for_delivery', label: 'Dispatched', icon: Bike },
+    { key: 'delivered', label: 'Delivered', icon: CheckCircle2 },
+  ];
+};
 
 export function OrderStatusStepper({
   currentStatus,
+  orderType,
   onUpdateStatus,
   isSubmitting = false,
   className = '',
 }: OrderStatusStepperProps) {
+  const steps = getSteps(orderType);
   const normalizedStatus = (currentStatus as string).toLowerCase();
   const isCancelled = normalizedStatus === 'cancelled' || normalizedStatus === 'failed';
 
-  const currentIndex = STEPS.findIndex((s) => s.key === normalizedStatus);
+  const currentIndex = steps.findIndex((s) => s.key === normalizedStatus);
   const effectiveIndex = currentIndex === -1 ? 0 : currentIndex;
 
   const getNextStatus = (): OrderStatus | null => {
-    if (isCancelled || effectiveIndex >= STEPS.length - 1) return null;
-    return STEPS[effectiveIndex + 1].key;
+    if (isCancelled || effectiveIndex >= steps.length - 1) return null;
+    return steps[effectiveIndex + 1].key;
   };
 
   const getPreviousStatus = (): OrderStatus | null => {
     if (isCancelled || effectiveIndex <= 0) return null;
-    return STEPS[effectiveIndex - 1].key;
+    return steps[effectiveIndex - 1].key;
   };
 
   const nextStatus = getNextStatus();
@@ -66,8 +87,8 @@ export function OrderStatusStepper({
       </div>
 
       {/* Visual Stepper */}
-      <div className="grid grid-cols-5 gap-2 relative">
-        {STEPS.map((step, idx) => {
+      <div className={`grid gap-2 relative ${steps.length === 4 ? 'grid-cols-4' : 'grid-cols-5'}`}>
+        {steps.map((step, idx) => {
           const isCompleted = !isCancelled && idx <= effectiveIndex;
           const isCurrent = !isCancelled && idx === effectiveIndex;
           const Icon = step.icon;
@@ -128,7 +149,7 @@ export function OrderStatusStepper({
               onClick={() => onUpdateStatus(nextStatus)}
               className="px-4 py-2 rounded-xl bg-[#0E4825] hover:bg-[#135d30] text-emerald-300 font-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
             >
-              <span>Advance to {STEPS[effectiveIndex + 1].label}</span>
+              <span>Advance to {steps[effectiveIndex + 1].label}</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           )}

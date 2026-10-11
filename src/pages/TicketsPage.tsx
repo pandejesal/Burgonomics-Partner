@@ -33,7 +33,7 @@ export function TicketsPage() {
   const [showRaiseModal, setShowRaiseModal] = useState(false);
   const [resolvingTicket, setResolvingTicket] = useState<Ticket | null>(null);
 
-  const { tickets, isLoading, warnings, createTicket, updateTicket } = useTickets({
+  const { tickets, isLoading, warnings, createTicket } = useTickets({
     tier: activeTierTab === 'resolved' ? 'resolved' : 'all',
   });
 
@@ -67,14 +67,14 @@ export function TicketsPage() {
         ? 'L2_REGIONAL'
         : 'L3_EXECUTIVE';
 
-    // Loop 55/120: escalation writes can fail loud (branch scope, offline)
-    // — report the outcome instead of silent nothing.
+    // Server-side escalation (POST /tickets/escalate): branch-scoped,
+    // snapshotted, notified. The old direct Firestore tier flip skipped all
+    // three. Report the outcome instead of silent nothing.
     try {
-      await updateTicket.mutateAsync({
+      await partnerFunctionsApi.escalateTicket({
         ticketId: ticket.id,
-        status: 'in_progress',
-        assignedToTier: nextTier,
-        resolution: `Manual escalation to ${nextLevel} by ${user?.name || 'Staff'}.`,
+        targetTier: nextTier,
+        reason: `Manual escalation to ${nextLevel} by ${user?.name || 'Staff'}.`,
       });
       toast.success(`Escalated to ${nextLevel}.`);
     } catch (err) {

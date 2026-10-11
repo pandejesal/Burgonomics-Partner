@@ -7,6 +7,7 @@ import {
   OrderStatusStepper,
   OrderCancelRefundModal,
   OrderStatusBadge,
+  PetpoojaTestRunnerModal,
 } from '@/features/orders';
 import {
   getPorterDeliveryQuote,
@@ -26,6 +27,7 @@ import {
   RefreshCw,
   XCircle,
   Clock,
+  FlaskConical,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { OrderStatus } from '@/types';
@@ -47,6 +49,7 @@ export function OrderDetailPage() {
   const [copiedId, setCopiedId] = useState(false);
   const [showKOTModal, setShowKOTModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
+  const [showTestRunner, setShowTestRunner] = useState(false);
   // Loop 12/120: delivery handover requires the customer OTP — the stepper
   // must not flip delivery orders straight to DELIVERED (the OTP proof system
   // with lockout is otherwise bypassable by any staffer).
@@ -250,10 +253,33 @@ export function OrderDetailPage() {
 
   const addressText =
     order.deliveryAddress?.full ||
+    [
+      (order.deliveryAddress as any)?.line1,
+      (order.deliveryAddress as any)?.line2,
+      (order.deliveryAddress as any)?.landmark,
+      (order.deliveryAddress as any)?.city,
+      (order.deliveryAddress as any)?.pincode,
+    ]
+      .filter(Boolean)
+      .join(', ') ||
     (order.deliveryAddress as any)?.street ||
     (order.deliveryAddress as any)?.address ||
     order.deliveryAddress?.label ||
     'Store Pickup';
+
+  // MT-23: explicit route origin — a desktop/POS terminal has no GPS fix, so
+  // `maps/dir/?api=1&destination=…` alone opens with no starting point. When
+  // the order carries branch/store coords we plot the kitchen→customer route.
+  // Absent/malformed coords fall back to Google's own origin prompt.
+  const rawOrder = order as any;
+  const branchLat = rawOrder.branchCoordinates?.lat ?? rawOrder.store?.lat ?? pickupLat;
+  const branchLng = rawOrder.branchCoordinates?.lng ?? rawOrder.store?.lng ?? pickupLng;
+  const hasBranchOrigin =
+    typeof branchLat === 'number' &&
+    typeof branchLng === 'number' &&
+    Number.isFinite(branchLat) &&
+    Number.isFinite(branchLng);
+  const mapsOriginParam = hasBranchOrigin ? `&origin=${branchLat},${branchLng}` : '';
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-16">
@@ -314,6 +340,16 @@ export function OrderDetailPage() {
             <span>{order.petpoojaOrderId ? 'Re-sync POS' : 'Sync Petpooja'}</span>
           </button>
 
+          {/* Petpooja Test Runner */}
+          <button
+            type="button"
+            onClick={() => setShowTestRunner(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-neutral-950 border border-neutral-700 hover:bg-neutral-800 text-neutral-300 hover:text-white font-bold text-xs transition-colors cursor-pointer"
+          >
+            <FlaskConical className="w-3.5 h-3.5" />
+            <span>Petpooja Test Lab</span>
+          </button>
+
           {/* Cancel Order */}
           {order.status !== 'cancelled' && order.status !== 'delivered' && (
             <button
@@ -331,6 +367,7 @@ export function OrderDetailPage() {
       {/* Order Status Stepper */}
       <OrderStatusStepper
         currentStatus={order.status}
+        orderType={order.orderType}
         onUpdateStatus={handleStatusChange}
         isSubmitting={isUpdatingStatus}
       />
@@ -487,9 +524,9 @@ export function OrderDetailPage() {
                   </div>
                 </div>
 
-                {order.deliveryAddress.lat && order.deliveryAddress.lng && (
+                {order.deliveryAddress?.lat && order.deliveryAddress?.lng && (
                   <a
-                    href={`https://www.google.com/maps/dir/?api=1&destination=${order.deliveryAddress.lat},${order.deliveryAddress.lng}`}
+                    href={`https://www.google.com/maps/dir/?api=1${mapsOriginParam}&destination=${order.deliveryAddress.lat},${order.deliveryAddress.lng}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 text-[11px] font-bold text-[#FF6600] hover:underline"
@@ -557,6 +594,9 @@ export function OrderDetailPage() {
         onClose={() => setShowCancelModal(false)}
         onConfirmCancel={handleCancelAndRefund}
       />
+
+      {/* Petpooja onboarding test runner */}
+      <PetpoojaTestRunnerModal isOpen={showTestRunner} onClose={() => setShowTestRunner(false)} />
 
       {/* Handover OTP — the only path to DELIVERED for delivery orders */}
       {showOtpModal && (

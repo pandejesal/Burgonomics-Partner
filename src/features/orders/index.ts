@@ -5,4 +5,5 @@ export * from './components/OrderTableList';
 export * from './components/KOTPrintPreview';
 export * from './components/OrderStatusStepper';
 export * from './components/OrderCancelRefundModal';
+export * from './components/PetpoojaTestRunnerModal';
 export * from './services/thermalPrinterService';

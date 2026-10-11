@@ -41,7 +41,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (user) {
-      initPushNotifications(user);
+      initPushNotifications(user).catch((err) => {
+        console.error('[AuthContext] initPushNotifications failed:', err);
+      });
     }
   }, [user]);
 

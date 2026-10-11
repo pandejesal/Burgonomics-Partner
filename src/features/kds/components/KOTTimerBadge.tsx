@@ -83,18 +83,11 @@ export function KOTTimerBadge({ createdAt, className = '', onSlaBreach }: KOTTim
   };
 
   const startedAt = getMillis(createdAt);
-  if (startedAt === null) {
-    return (
-      <div
-        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-neutral-900 border border-neutral-700 text-neutral-400 font-mono font-bold text-xs sm:text-sm tracking-wider select-none ${className}`}
-        title="Order time unknown"
-      >
-        <Clock className="w-3.5 h-3.5 shrink-0" />
-        <span>—</span>
-      </div>
-    );
-  }
-  const elapsedSeconds = Math.max(0, Math.floor((now - startedAt) / 1000));
+  // Hoisted above the unknown-time early return below so the hook count is
+  // stable across renders. An unknown timestamp yields tier green (0s), so
+  // the breach effect below simply never fires — same as before.
+  const elapsedSeconds =
+    startedAt === null ? 0 : Math.max(0, Math.floor((now - startedAt) / 1000));
   const { tier, formatted } = calculateKOTElaTier(elapsedSeconds);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -106,6 +99,18 @@ export function KOTTimerBadge({ createdAt, className = '', onSlaBreach }: KOTTim
       onSlaBreach();
     }
   }, [tier, onSlaBreach]);
+
+  if (startedAt === null) {
+    return (
+      <div
+        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-neutral-900 border border-neutral-700 text-neutral-400 font-mono font-bold text-xs sm:text-sm tracking-wider select-none ${className}`}
+        title="Order time unknown"
+      >
+        <Clock className="w-3.5 h-3.5 shrink-0" />
+        <span>—</span>
+      </div>
+    );
+  }
 
   if (tier === 'red') {
     return (

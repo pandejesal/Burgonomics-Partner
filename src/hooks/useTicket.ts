@@ -131,65 +131,22 @@ export function useTicket(ticketId: string) {
   });
 
   const updateTicket = useMutation({
-    mutationFn: async ({
-      status,
-      resolution,
-      assignedToTier,
-      resolutionAction,
-      refundAmount,
-    }: {
+    mutationFn: async (_unused: {
       status: TicketStatus;
       resolution?: string;
       assignedToTier?: string;
       resolutionAction?: string;
       refundAmount?: number;
     }) => {
-      let targetCollection = 'support_tickets';
-      let docRef = doc(db, targetCollection, ticketId);
-      let docSnap = await getDoc(docRef);
-
-      if (!docSnap.exists()) {
-        targetCollection = 'tickets';
-        docRef = doc(db, targetCollection, ticketId);
-      }
-
-      const updateData: Record<string, any> = {
-        status,
-        resolution,
-        updatedAt: Timestamp.now(),
-      };
-
-      if (assignedToTier) {
-        updateData['assignedTo.tier'] = assignedToTier;
-      }
-
-      if (resolutionAction) {
-        updateData.resolutionAction = resolutionAction;
-      }
-
-      if (refundAmount) {
-        updateData.refundAmount = refundAmount;
-      }
-
-      await updateDoc(docRef, updateData);
-
-      // If escalated to developer team, create error snapshot.
-      // If this write also fails the error still propagates naturally.
-      if (assignedToTier === 'developer_team') {
-        const snapshotId = `err_${Date.now()}_diag`;
-        await setDoc(doc(collection(db, 'dev_error_snapshots'), snapshotId), {
-          id: snapshotId,
-          source: 'tickets',
-          severity: 'high',
-          message: `Escalated ticket ${ticketId}: ${resolution || 'Operator escalated incident'}`,
-          ticketId,
-          createdAt: Timestamp.now(),
-        });
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['ticket', ticketId] });
-      queryClient.invalidateQueries({ queryKey: ['tickets'] });
+      // Retired: all status/resolution/escalation writes go through the
+      // server ticket routes (resolveTicket / resolveTicketNote /
+      // escalateTicket), which enforce staff role, branch scope, and audit
+      // trails. The old direct Firestore write skipped all three (and its
+      // dev_error_snapshots side-write leaked free-text PII). Kept as a
+      // loud stub so any missed caller fails visibly instead of silently.
+      throw new Error(
+        "Ticket updates must go through the server ticket routes — this direct-write path was retired."
+      );
     },
   });
 

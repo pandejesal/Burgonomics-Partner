@@ -124,11 +124,33 @@ class CustomerDataStorage {
   private loadFromStorage() {
     // No seed data ships in the bundle: the CRM starts empty and loads only
     // records persisted by admin actions (or stays empty in non-browser envs).
+    // Corrupt localStorage entries must never throw at import time — we drop
+    // the bad value and continue with an empty array.
     if (typeof window !== "undefined") {
       const storedCustomers = localStorage.getItem("burg_crm_customers");
       const storedSegments = localStorage.getItem("burg_crm_segments");
-      this.customers = storedCustomers ? JSON.parse(storedCustomers) : [];
-      this.segments = storedSegments ? JSON.parse(storedSegments) : [];
+
+      if (storedCustomers) {
+        try {
+          this.customers = JSON.parse(storedCustomers);
+        } catch {
+          console.warn('[customersData] Corrupt localStorage "burg_crm_customers" — discarding');
+          this.customers = [];
+        }
+      } else {
+        this.customers = [];
+      }
+
+      if (storedSegments) {
+        try {
+          this.segments = JSON.parse(storedSegments);
+        } catch {
+          console.warn('[customersData] Corrupt localStorage "burg_crm_segments" — discarding');
+          this.segments = [];
+        }
+      } else {
+        this.segments = [];
+      }
     } else {
       this.customers = [];
       this.segments = [];

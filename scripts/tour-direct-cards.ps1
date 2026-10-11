@@ -16,8 +16,8 @@ Write-Host "=========================================================="
 
 # 1. Start App
 Write-Host "`n[1] Starting App..."
-& $adb -s $device shell am force-stop com.glassdoorsstudio.burgonomics.partner
-& $adb -s $device shell am start -n com.glassdoorsstudio.burgonomics.partner/.MainActivity
+& $adb -s $device shell am force-stop com.burgonomics.partner
+& $adb -s $device shell am start -n com.burgonomics.partner/.MainActivity
 Start-Sleep -Seconds 3
 
 # 2. Open Chat Hub directly (Bottom-Left card in Command Center: X=290, Y=2100)

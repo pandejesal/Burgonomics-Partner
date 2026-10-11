@@ -128,16 +128,87 @@ function str(v: unknown, fallback = ''): string {
   return typeof v === 'string' ? v : fallback;
 }
 
+/**
+ * Coerce one raw modifier/add-on/customization entry to a printable label.
+ * Source docs disagree on shape (plain string, `{ name }`, `{ label }`,
+ * Petpooja `{ addon_name }`, `{ name, price }`), and a non-string is what
+ * used to reach JSX and white-screen the KDS card — so objects collapse to
+ * their label and anything unlabelled is dropped, never rendered raw.
+ */
+export function modifierLabel(v: unknown): string | null {
+  if (typeof v === 'string') {
+    const t = v.trim();
+    return t.length > 0 ? t : null;
+  }
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  for (const key of [
+    'name',
+    'label',
+    'title',
+    'displayName',
+    // Customer-app cart lines carry the option under `optionName` when the
+    // group is the only other field — dropping it would hide the add-on.
+    'optionName',
+    'option_name',
+    'modifierName',
+    'addonName',
+    'addon_name',
+  ]) {
+    const candidate = o[key];
+    if (typeof candidate === 'string' && candidate.trim().length > 0) return candidate.trim();
+  }
+  return null;
+}
+
+/** Keys both apps store add-on lines under, in merge order. */
+const MODIFIER_KEYS = [
+  'modifiers',
+  'addons',
+  'addonItems',
+  'addonitem',
+  'selectedModifiers',
+  'customizations',
+] as const;
+
+/**
+ * Modifier labels for one order line, merged (and de-duplicated) across
+ * every key spelling either app writes. Empty when the line has none.
+ */
+export function modifierLabelsFrom(item: unknown): string[] {
+  if (!item || typeof item !== 'object') return [];
+  const src = item as Record<string, unknown>;
+  const seen = new Set<string>();
+  for (const key of MODIFIER_KEYS) {
+    const raw = src[key];
+    if (!Array.isArray(raw)) continue;
+    for (const entry of raw) {
+      const label = modifierLabel(entry);
+      if (label) seen.add(label);
+    }
+  }
+  return [...seen];
+}
+
+function normalizeModifiers(it: Record<string, any>): string[] | undefined {
+  const labels = modifierLabelsFrom(it);
+  return labels.length > 0 ? labels : undefined;
+}
+
 function normalizeItems(raw: unknown): OrderItem[] {
   if (!Array.isArray(raw)) return [];
-  return raw.map((it: any, idx: number) => ({
-    itemId: str(it?.itemId ?? it?.productId, `item_${idx}`),
-    petpoojaItemId: str(it?.petpoojaItemId ?? it?.meta?.petpoojaItemId),
-    name: str(it?.name, 'Item'),
-    quantity: num(it?.quantity, 1),
-    price: num(it?.price ?? it?.unitPrice, 0),
-    specialInstructions: it?.specialInstructions ?? it?.notes,
-  }));
+  return raw.map((it: any, idx: number) => {
+    const modifiers = normalizeModifiers(it);
+    return {
+      itemId: str(it?.itemId ?? it?.productId, `item_${idx}`),
+      petpoojaItemId: str(it?.petpoojaItemId ?? it?.meta?.petpoojaItemId),
+      name: str(it?.name, 'Item'),
+      quantity: num(it?.quantity, 1),
+      price: num(it?.price ?? it?.unitPrice, 0),
+      specialInstructions: it?.specialInstructions ?? it?.notes,
+      ...(modifiers ? { modifiers } : {}),
+    };
+  });
 }
 
 /**
@@ -199,6 +270,36 @@ export function normalizeOrderDoc(id: string, data: Record<string, any>): Order 
   const items = normalizeItems(data.items);
   if (!Array.isArray(data.items)) reasons.push('malformed items (not a list)');
 
+  // MT-31: address normalization. Delivery saves it at `data.address`, the
+  // Partner shape at `data.deliveryAddress`; partial snapshots may carry only
+  // `line1/city/pincode` with no `full` string. Build `full` from parts so
+  // every directions affordance gets a readable destination, and coerce
+  // lat/lng from either key spelling.
+  const rawDelivery = (data.deliveryAddress || data.address || null) as Record<string, any> | null;
+  const formattedFull =
+    str(rawDelivery?.full) ||
+    [
+      rawDelivery?.line1,
+      rawDelivery?.line2,
+      rawDelivery?.landmark,
+      rawDelivery?.city,
+      rawDelivery?.pincode,
+    ]
+      .filter(Boolean)
+      .join(', ') ||
+    str(rawDelivery?.street) ||
+    str(rawDelivery?.address) ||
+    str(rawDelivery?.label) ||
+    '';
+  const deliveryAddress = rawDelivery
+    ? {
+        ...rawDelivery,
+        full: formattedFull,
+        lat: num(rawDelivery.lat ?? rawDelivery.latitude),
+        lng: num(rawDelivery.lng ?? rawDelivery.longitude),
+      }
+    : null;
+
   return {
     id,
     customerId: str(data.customerId ?? data.userId),
@@ -213,7 +314,18 @@ export function normalizeOrderDoc(id: string, data: Record<string, any>): Order 
     deliveryFee: num(data.deliveryFee ?? totals.deliveryFee),
     total: num(data.total ?? totals.grandTotal),
     orderType: (data.orderType ?? data.fulfillment ?? 'delivery') as Order['orderType'],
-    deliveryAddress: data.deliveryAddress,
+    // Delivery (customer app) saves the address at `data.address`, never at
+    // `data.deliveryAddress` — without this fallback order.deliveryAddress is
+    // undefined and every directions affordance (OrderDetailPage,
+    // PorterDispatchCard, dispatch quotes) silently drops out. MT-31 then
+    // normalizes `full` from parts and coerces lat/lng key spellings.
+    deliveryAddress: deliveryAddress as any,
+    store: data.store ? { ...data.store } : undefined,
+    branchCoordinates:
+      data.branchCoordinates ??
+      (typeof store.lat === 'number' && typeof store.lng === 'number'
+        ? { lat: store.lat, lng: store.lng }
+        : undefined),
     tableNumber: data.tableNumber,
     status,
     ...(reasons.length > 0 ? { quarantineReason: reasons.join('; ') } : {}),

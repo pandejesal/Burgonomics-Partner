@@ -118,6 +118,16 @@ export const AdminNotificationsPage: React.FC = () => {
     }
   };
 
+  // Stat cards count real state only: drafts exclude fixtures and dispatches,
+  // and the delivery average is computed from server-measured send rows
+  // (targeted/successCount as returned at send time) — never from fixtures.
+  const sentLogs = logs.filter((l) => l.status === "sent" && (l.targeted ?? 0) > 0);
+  const sentTargeted = sentLogs.reduce((s, l) => s + (l.targeted ?? 0), 0);
+  const avgDeliveryPct =
+    sentTargeted > 0
+      ? Math.round((sentLogs.reduce((s, l) => s + l.successCount, 0) / sentTargeted) * 100)
+      : null;
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -133,8 +143,18 @@ export const AdminNotificationsPage: React.FC = () => {
           icon={Users}
           subtext="No live token count wired"
         />
-        <StatCard title="Avg Delivery Rate" value="—" icon={CheckCircle} subtext="No dispatches yet" />
-        <StatCard title="Campaign Drafts" value={logs.length} icon={Megaphone} />
+        <StatCard
+          title="Avg Delivery Rate"
+          value={avgDeliveryPct === null ? "—" : `${avgDeliveryPct}%`}
+          icon={CheckCircle}
+          subtext={avgDeliveryPct === null ? "No dispatches yet" : "From server-measured sends"}
+        />
+        <StatCard
+          title="Local Campaign Drafts"
+          value={logs.filter((l) => l.status === "draft").length}
+          icon={Megaphone}
+          subtext="Saved on this device — never dispatched"
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

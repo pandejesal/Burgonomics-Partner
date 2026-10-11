@@ -12,7 +12,6 @@ import {
   ArrowRight,
   WifiOff,
 } from 'lucide-react';
-import { Logo } from '@/components/ui/Logo';
 
 // Single generic message for ALL login failures — credential mismatch,
 // unknown account, and missing operator role all read identically, so the
@@ -90,7 +89,14 @@ export function LoginPage() {
       <div className="w-full max-w-md space-y-6">
         {/* Brand Header */}
         <div className="text-center space-y-3">
-          <Logo size={64} showText={true} className="mx-auto" />
+          <img
+            src="/burgonomics-logo.png"
+            alt="Burgonomics mascot"
+            width={88}
+            height={88}
+            draggable={false}
+            className="mx-auto h-20 w-20 object-contain"
+          />
           <div>
             <h1 className="text-2xl font-black text-white tracking-wide">Burgonomics Partner</h1>
             <p className="text-xs text-zinc-400 mt-1">

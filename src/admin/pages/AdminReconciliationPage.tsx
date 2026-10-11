@@ -257,7 +257,7 @@ export const AdminReconciliationPage: React.FC = () => {
             {resolvedCount}
           </span>
           <span className="block text-[10px] text-gray-400 font-mono mt-1">
-            Audited and marked closed today
+            Resolved rows in the live discrepancy queue
           </span>
         </AdminCard>
 

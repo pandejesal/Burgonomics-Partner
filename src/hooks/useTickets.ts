@@ -322,37 +322,18 @@ export function useTickets(params: UseTicketsParams = {}) {
   });
 
   const updateTicket = useMutation({
-    mutationFn: async ({
-      ticketId,
-      status,
-      resolution,
-      assignedToTier,
-    }: {
+    mutationFn: async (_unused: {
       ticketId: string;
       status: TicketStatus;
       resolution?: string;
       assignedToTier?: 'branch' | 'brand_support' | 'developer_team';
     }) => {
-      let docRef = doc(db, 'support_tickets', ticketId);
-      const updateData: Record<string, any> = {
-        status,
-        resolution,
-        updatedAt: Timestamp.now(),
-      };
-
-      if (assignedToTier) {
-        updateData['assignedTo.tier'] = assignedToTier;
-      }
-
-      try {
-        await updateDoc(docRef, updateData);
-      } catch {
-        docRef = doc(db, 'tickets', ticketId);
-        await updateDoc(docRef, updateData);
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tickets'] });
+      // Retired: status/resolution/escalation writes go through the server
+      // ticket routes (resolveTicket / resolveTicketNote / escalateTicket).
+      // Kept as a loud stub so any missed caller fails visibly.
+      throw new Error(
+        "Ticket updates must go through the server ticket routes — this direct-write path was retired."
+      );
     },
   });
 

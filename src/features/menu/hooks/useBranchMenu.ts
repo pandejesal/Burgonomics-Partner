@@ -16,8 +16,12 @@ import {
 import { useAppStore } from '@/stores/appStore';
 import { useAuth } from '@/hooks/useAuth';
 import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
+import { toast } from 'sonner';
 import type { EightSixDuration } from '../components/Instant86ingModal';
 import type { MenuItem } from '@/types';
+
+/** POS push outcome — 'skipped' (no POS identity) is NOT a failure. */
+type StockPushStatus = 'synced' | 'skipped' | 'failed';
 
 /**
  * All mutations target the canonical `products` collection (one menu source
@@ -29,7 +33,7 @@ async function pushStock(
   items: MenuItem[] | undefined,
   itemId: string,
   inStock: boolean
-): Promise<boolean> {
+): Promise<StockPushStatus> {
   const menuItem = items?.find((i) => i.id === itemId);
   // Loop 6: combos carry fabricated local ids (createComboMeal) unknown to
   // Petpooja — pushing one as an item id could 86 an unrelated POS item on
@@ -37,21 +41,21 @@ async function pushStock(
   // component-level POS 86ing is a product call.
   if (menuItem?.isCombo) {
     console.warn(`[useBranchMenu] Combo ${itemId} has no POS identity — POS push skipped (app-only 86)`);
-    return false;
+    return 'skipped';
   }
   const petpoojaItemId = menuItem?.petpoojaItemId;
   if (!petpoojaItemId) {
     // Never push a Firestore doc id to the POS as an item id — the KOT side
     // would 86 the wrong item (or nothing) with a success response.
     console.warn(`[useBranchMenu] No petpoojaItemId for ${itemId} — POS push skipped`);
-    return false;
+    return 'skipped';
   }
   try {
-    await partnerFunctionsApi.syncItemStock(branchId, petpoojaItemId, inStock);
-    return true;
+    await partnerFunctionsApi.toggle86Item({ branchId, itemId: petpoojaItemId, inStock });
+    return 'synced';
   } catch (err) {
     console.warn('[useBranchMenu] Petpooja stock push failed (Firestore state kept):', err);
-    return false;
+    return 'failed';
   }
 }
 
@@ -89,10 +93,49 @@ export function useBranchMenu() {
       await updateDoc(itemRef, payload).catch(async () => {
         await setDoc(itemRef, { ...payload, branchId }, { merge: true });
       });
-      await pushStock(branchId, baseMenu.items, itemId, activeState);
+      // Server confirmation first, then POS propagation (best-effort): the
+      // returned status drives the honest POS-sync toast in onSuccess.
+      const posStatus = await pushStock(branchId, baseMenu.items, itemId, activeState);
+      return { itemId, available: activeState, posStatus };
     },
-    onSuccess: () => {
+    // Optimistic 1-tap: the KDS drawer flips instantly, and the snapshot
+    // (or the onError rollback below) is the server confirmation — the UI
+    // never claims a state Firestore refused to take.
+    onMutate: async ({ itemId, available, isAvailable }) => {
+      const activeState = available !== undefined ? available : isAvailable ?? true;
+      await queryClient.cancelQueries({ queryKey: ['menuItems', branchId] });
+      const previous = queryClient.getQueryData<MenuItem[]>(['menuItems', branchId]);
+      if (previous) {
+        queryClient.setQueryData<MenuItem[]>(
+          ['menuItems', branchId],
+          previous.map((i) =>
+            i.id === itemId
+              ? { ...i, inStock: activeState, isAvailable: activeState, available: activeState }
+              : i
+          )
+        );
+      }
+      return { previous, itemId };
+    },
+    onError: (err, _vars, ctx) => {
+      if (ctx?.previous) {
+        queryClient.setQueryData<MenuItem[]>(['menuItems', branchId], ctx.previous);
+      }
+      // Non-blocking: the drawer stays open, the item reverts, staff retries.
+      toast.error('Could not update item stock', {
+        description: err instanceof Error ? err.message : 'Firestore write failed — item reverted.',
+      });
+    },
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['menuItems', branchId] });
+      // Non-blocking POS warning: Firestore (the app truth) already took the
+      // change — only the physical Petpooja POS is stale. 'skipped' (combos
+      // /unlinked items) is by design and stays silent.
+      if (result?.posStatus === 'failed') {
+        toast.warning('Item updated in app — Petpooja POS sync failed.', {
+          description: 'The POS may still show the old stock state. Toggle again to re-push.',
+        });
+      }
     },
   });
 
@@ -132,7 +175,7 @@ export function useBranchMenu() {
       });
       // Loop 6: report POS propagation honestly — the page toast must not
       // claim "& POS" when the best-effort push failed or skipped.
-      return { posSynced: await pushStock(branchId, baseMenu.items, itemId, false) };
+      return { posSynced: (await pushStock(branchId, baseMenu.items, itemId, false)) === 'synced' };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['menuItems', branchId] });
