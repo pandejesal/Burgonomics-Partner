@@ -483,11 +483,11 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
           title="New Incoming Alerts"
           value={stats.fresh}
           icon={Bell}
-          trend={{
-            value: stats.fresh > 0 ? 100 : 0,
-            label: stats.fresh > 0 ? "Urgent attention" : "All clear",
-            isPositive: stats.fresh === 0,
-          }}
+          subtext={
+            stats.fresh > 0
+              ? "Requires attention now"
+              : "No new orders awaiting action"
+          }
           accent={stats.fresh > 0}
           className={stats.fresh > 0 ? "ring-2 ring-red-500 animate-pulse" : ""}
         />

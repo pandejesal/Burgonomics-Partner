@@ -7,12 +7,40 @@ import {
 } from "../../hooks/useDashboardData";
 import { toast } from "sonner";
 import { AlertTriangle, RefreshCw, Zap, Play, Activity } from "lucide-react";
+import type { MenuSyncLog } from "../../types";
 
 // F12: none of the three actions below has a client-callable server route
 // (see useSyncMutations), so they are rendered disabled with the reason on
 // the control itself instead of appearing operable. Flip this once a real
 // endpoint is exposed — the handlers and failure paths are already in place.
 const SYNC_ACTIONS_WIRED: boolean = false;
+
+/**
+ * F25: the sync log exposes no retry counter, so a retry figure can never be
+ * measured from it. Render unknown ("—") rather than the fabricated "0" — or
+ * the invented "1 / 3" the old code derived from a RUNNING status.
+ */
+export function formatRetryCount(_history?: MenuSyncLog[]): string {
+  return "—";
+}
+
+/**
+ * F25: distinguish the honest states for "Last Pipeline Alert":
+ *   history never read        → "—"
+ *   read, no failures         → "No alerts recorded"
+ *   a failed sync             → its recorded message, or
+ *                               "Sync failed — no error details recorded"
+ * "None" is banned here: it claimed a clean pipeline even when nothing had ever
+ * been read. A FAILED log is itself evidence of an alert (MenuSyncLog lets
+ * `errorMessage` be null), so a failure with no details must never read clean.
+ */
+export function formatLastAlert(history?: MenuSyncLog[]): string {
+  const failed = history?.find((h) => h.status === "FAILED");
+  if (failed) {
+    return failed.errorMessage?.trim() || "Sync failed — no error details recorded";
+  }
+  return history && history.length > 0 ? "No alerts recorded" : "—";
+}
 
 export const PetpoojaStatus: React.FC = () => {
   const {
@@ -39,7 +67,13 @@ export const PetpoojaStatus: React.FC = () => {
   const isConnected = health?.connected === true;
   // Single source for the three action controls: no route exists AND no
   // credentials yet, so both must be true before the buttons become usable.
-  const syncDisabled = !SYNC_ACTIONS_WIRED || !isConnected;
+  // The reason is rendered visibly under the controls, not just as a tooltip.
+  const syncActionReason = !SYNC_ACTIONS_WIRED
+    ? SYNC_NOT_WIRED_MESSAGE
+    : !isConnected
+      ? "Petpooja gateway is not connected."
+      : undefined;
+  const syncDisabled = syncActionReason !== undefined;
 
   const handleManualSync = async () => {
     if (syncDisabled) {
@@ -156,8 +190,11 @@ export const PetpoojaStatus: React.FC = () => {
     syncDuration = `${(duration / 1000).toFixed(1)}s`;
   }
 
-  const lastError = latestFailedSync?.errorMessage || "None";
-  const retryCount = latestSync?.status === "RUNNING" ? "1 / 3" : "0";
+  const lastError = formatLastAlert(history);
+  // A recorded FAILED sync is itself the alert — even when its errorMessage is
+  // null (MenuSyncLog permits that), so derive this from the log's existence.
+  const hasAlert = latestFailedSync !== undefined;
+  const retryCount = formatRetryCount(history);
 
   return (
     <div className="rounded-[20px] border border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] p-6 shadow-[0_4px_20px_rgba(0,0,0,0.02)] h-full flex flex-col justify-between">
@@ -165,10 +202,12 @@ export const PetpoojaStatus: React.FC = () => {
         <div className="flex items-center justify-between pb-4 border-b border-gray-50 dark:border-gray-800/50 mb-5">
           <div>
             <h4 className="text-sm font-black text-gray-900 dark:text-white font-sans uppercase">
-              Petpooja POS Live Gateway
+              Petpooja POS Gateway
             </h4>
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-0.5">
-              Direct telemetry stream from the Petpooja Restaurant ERP middleware
+              {isConnected
+                ? "Live telemetry from the Petpooja gateway proxy"
+                : "Standby — no live Petpooja gateway telemetry is being read"}
             </p>
           </div>
           <Zap size={16} className="text-accent dark:text-accent-light shrink-0" />
@@ -254,7 +293,7 @@ export const PetpoojaStatus: React.FC = () => {
           <div className="flex items-start justify-between py-1">
             <span className="text-gray-400 font-semibold shrink-0">Last Pipeline Alert</span>
             <span
-              className={`font-bold text-right truncate pl-4 max-w-[240px] ${lastError !== "None" ? "text-red-500" : "text-gray-500 dark:text-gray-400"}`}
+              className={`font-bold text-right truncate pl-4 max-w-[240px] ${hasAlert ? "text-red-500" : "text-gray-500 dark:text-gray-400"}`}
             >
               {lastError}
             </span>
@@ -268,7 +307,7 @@ export const PetpoojaStatus: React.FC = () => {
           <button
             onClick={handleManualSync}
             disabled={syncDisabled || isTriggeringPetpooja}
-            title={syncDisabled ? SYNC_NOT_WIRED_MESSAGE : undefined}
+            title={syncActionReason}
             className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl font-bold text-xs shadow-sm transition-all ${
               syncDisabled
                 ? "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-60"
@@ -286,7 +325,7 @@ export const PetpoojaStatus: React.FC = () => {
           <button
             onClick={handleRefreshCache}
             disabled={syncDisabled || isRefreshingCache}
-            title={syncDisabled ? SYNC_NOT_WIRED_MESSAGE : undefined}
+            title={syncActionReason}
             className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl font-bold text-xs border transition-all ${
               syncDisabled
                 ? "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 border-transparent cursor-not-allowed opacity-60"
@@ -304,7 +343,7 @@ export const PetpoojaStatus: React.FC = () => {
           <button
             onClick={handleReplayWebhook}
             disabled={syncDisabled || isReplayingWebhook}
-            title={syncDisabled ? SYNC_NOT_WIRED_MESSAGE : undefined}
+            title={syncActionReason}
             className={`col-span-2 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border font-bold text-xs transition-all ${
               syncDisabled
                 ? "bg-gray-100/50 dark:bg-gray-800/40 text-gray-400 dark:text-gray-500 border-transparent cursor-not-allowed opacity-60"
@@ -316,9 +355,9 @@ export const PetpoojaStatus: React.FC = () => {
           </button>
         </div>
 
-        {syncDisabled && (
+        {syncActionReason && (
           <p className="text-[10px] text-center text-amber-500/90 font-semibold tracking-wide">
-            {SYNC_NOT_WIRED_MESSAGE}
+            All three actions above are unavailable: {syncActionReason}
           </p>
         )}
       </div>
