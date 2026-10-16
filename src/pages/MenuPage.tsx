@@ -158,7 +158,7 @@ export function MenuPage() {
     <div className="space-y-6 select-none text-white">
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 px-4 py-3 bg-[#0E4825] border border-[#4ADE80] text-white rounded-xl shadow-2xl flex items-center gap-2.5 animate-in slide-in-from-bottom duration-200">
+        <div className="fixed bottom-24 right-6 z-[1000] px-4 py-3 bg-[#0E4825] border border-[#4ADE80] text-white rounded-xl shadow-2xl flex items-center gap-2.5 animate-in slide-in-from-bottom duration-200">
           <CheckCircle2 className="w-4 h-4 text-[#4ADE80]" />
           <span className="text-xs font-bold">{toastMessage}</span>
         </div>

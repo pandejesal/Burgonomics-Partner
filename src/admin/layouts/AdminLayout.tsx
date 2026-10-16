@@ -421,7 +421,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
         </header>
 
         {/* Workspace Content */}
-        <main className="flex-1 overflow-y-auto bg-[#F8F8F8] dark:bg-[#121212] p-6 md:p-8">
+        <main className="flex-1 overflow-y-auto bg-[#F8F8F8] dark:bg-[#121212] p-6 md:p-8 pb-24 md:pb-24 lg:pb-0">
           {children ?? <Outlet />}
         </main>
       </div>

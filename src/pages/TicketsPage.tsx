@@ -218,7 +218,7 @@ export function TicketsPage() {
         <button
           type="button"
           onClick={() => setShowRaiseModal(true)}
-          className="flex items-center gap-2 px-4 py-2.5 bg-[#FF6600] hover:bg-[#e05a00] text-white rounded-xl font-bold text-xs transition-colors shadow-md cursor-pointer"
+          className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-[#FF6600] hover:bg-[#e05a00] text-white rounded-xl font-bold text-xs transition-colors shadow-md cursor-pointer"
         >
           <Plus className="w-4 h-4" />
           <span>Raise Internal Ticket</span>

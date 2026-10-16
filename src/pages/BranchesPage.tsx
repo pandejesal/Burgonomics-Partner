@@ -140,7 +140,7 @@ export function BranchesPage() {
               setBranchInitialData(null);
               setShowAddBranchModal(true);
             }}
-            className="flex items-center gap-2 px-4 py-2.5 bg-[#0E4825] hover:bg-[#155e32] text-white rounded-xl font-bold text-xs transition-colors shadow-md border border-[#4ADE80]/30 cursor-pointer"
+            className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-[#0E4825] hover:bg-[#155e32] text-white rounded-xl font-bold text-xs transition-colors shadow-md border border-[#4ADE80]/30 cursor-pointer"
           >
             <Plus className="w-4 h-4 text-[#4ADE80]" />
             <span>Add New Branch</span>
