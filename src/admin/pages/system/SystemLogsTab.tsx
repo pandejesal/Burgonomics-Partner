@@ -1,15 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import {
-  Terminal,
-  Search,
-  Download,
-  Play,
-  Pause,
-  Trash2,
-  UserCheck,
-  RefreshCw,
-} from "lucide-react";
-import { useAdmin } from "../../hooks/useAdmin";
+import React, { useState, useEffect, useRef } from "react";
+import { Terminal, Search, Download, Play, Pause, Trash2, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 
 interface SystemLog {
@@ -58,25 +48,14 @@ const INITIAL_LOGS: SystemLog[] = [
   },
 ];
 
-interface AuditRecord {
-  id: string;
-  actorId: string | null;
-  actorRole: string | null;
-  action: string;
-  resourceType: string;
-  resourceId: string | null;
-  ip: string | null;
-  createdAt: string;
-}
-
 export const SystemLogsTab: React.FC = () => {
-  const { accessToken } = useAdmin();
   // Loop: the seed + 4s streaming interval fabricate log lines (wrong
   // business facts included — Delhi/Gurgaon stores, fake refunds) with
-  // ERROR/CRITICAL levels staff could chase. DEV-only; prod shows the
-  // (real, possibly empty) audit trail + a real download of visible logs.
+  // ERROR/CRITICAL levels staff could chase. DEV-only: both the seed and the
+  // interval are gated on import.meta.env.DEV, and the rendered notice at the
+  // top of the tab (and the DEV-only streaming control) declares the
+  // simulation so no fabricated line is ever read as a server event.
   const [logs, setLogs] = useState<SystemLog[]>(import.meta.env.DEV ? INITIAL_LOGS : []);
-  const [audits, setAudits] = useState<AuditRecord[]>([]);
   const [isStreaming, setIsStreaming] = useState(true);
   const [logLevelFilter, setLogLevelFilter] = useState<
     "ALL" | "INFO" | "WARN" | "ERROR" | "CRITICAL"
@@ -85,8 +64,6 @@ export const SystemLogsTab: React.FC = () => {
     "ALL" | "AUTH" | "STORE" | "PAYMENT" | "QUEUE" | "WEBHOOK" | "PETPOOJA"
   >("ALL");
   const [searchLogs, setSearchLogs] = useState("");
-  const [searchAudits, setSearchAudits] = useState("");
-  const [isLoadingAudits, setIsLoadingAudits] = useState(false);
   const logScrollRef = useRef<HTMLDivElement>(null);
 
   // Stream logs simulator for background container output (benign visual HMR)
@@ -156,35 +133,12 @@ export const SystemLogsTab: React.FC = () => {
     return () => clearInterval(interval);
   }, [isStreaming]);
 
-  // Fetch real audit logs from administrative backend
-  const fetchAudits = useCallback(async () => {
-    if (!accessToken) return;
-    setIsLoadingAudits(true);
-    try {
-      let url = "/api/v1/admin/audit?page=1&pageSize=40";
-      if (searchAudits.trim()) {
-        url += `&q=${encodeURIComponent(searchAudits.trim())}`;
-      }
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setAudits(data.items || []);
-      } else {
-        toast.error("Audit trail unreachable — backend endpoint not connected.");
-      }
-    } catch (err) {
-      console.error("Failed to fetch administrative audits", err);
-      toast.error("Audit trail unreachable — backend endpoint not connected.");
-    } finally {
-      setIsLoadingAudits(false);
-    }
-  }, [accessToken, searchAudits]);
-
-  useEffect(() => {
-    fetchAudits();
-  }, [fetchAudits]);
+  // #30: the audit trail used to be fetched from `/api/v1/admin/audit` behind
+  // `if (!accessToken) return;`. `useAdmin().accessToken` is permanently null
+  // (useAdmin.tsx:64 — single sign-in migration) and no audit route exists on
+  // the API, so the fetch and export were dead code that could never fire.
+  // Both are removed; the panel below says so instead of reporting a false
+  // "no records" result from a query that never ran.
 
   // Scroll to bottom on stream
   useEffect(() => {
@@ -208,30 +162,6 @@ export const SystemLogsTab: React.FC = () => {
       toast.success("Log view downloaded.");
     } catch {
       toast.error("Could not download logs.");
-    }
-  };
-
-  const handleExportAudits = async () => {
-    if (!accessToken) return;
-    try {
-      const response = await fetch("/api/v1/admin/audit/export?format=CSV", {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `burgonomics-audit-export-${Date.now()}.csv`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-      } else {
-        toast.error("Audit export failed — backend endpoint not connected.");
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error("Audit export failed — backend endpoint not connected.");
     }
   };
 
@@ -261,6 +191,12 @@ export const SystemLogsTab: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {import.meta.env.DEV && (
+        <div className="p-3 rounded-xl bg-amber-950/15 border border-amber-900/40 text-amber-400 font-mono text-[10px] leading-relaxed">
+          DEV simulation — fabricated log lines and severity labels; not server events
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Streaming Logs Panel */}
         <div className="lg:col-span-2 p-6 rounded-[24px] bg-[#0c130e] border border-gray-800 shadow-xl flex flex-col justify-between h-[480px]">
@@ -269,10 +205,10 @@ export const SystemLogsTab: React.FC = () => {
               <Terminal size={18} className="text-emerald-400 animate-pulse" />
               <div>
                 <h3 className="text-sm font-black tracking-wider text-white font-mono uppercase">
-                  DATADOG CORE LOG ENGINE
+                  CONSOLE LOG BUFFER
                 </h3>
                 <p className="text-[10px] text-gray-500 font-mono mt-0.5">
-                  Real-time stdout stream from server processes
+                  Local buffer only — no server log stream is wired to this console
                 </p>
               </div>
             </div>
@@ -289,14 +225,23 @@ export const SystemLogsTab: React.FC = () => {
                 />
               </div>
 
-              <button
-                onClick={() => setIsStreaming(!isStreaming)}
-                className={`p-1.5 rounded bg-black border border-gray-900 hover:text-white transition-colors cursor-pointer text-[10px] font-bold ${
-                  isStreaming ? "text-emerald-400" : "text-gray-500"
-                }`}
-              >
-                {isStreaming ? <Pause size={12} /> : <Play size={12} />}
-              </button>
+              {import.meta.env.DEV && (
+                <button
+                  type="button"
+                  onClick={() => setIsStreaming(!isStreaming)}
+                  aria-label={
+                    isStreaming
+                      ? "Pause the simulated log stream"
+                      : "Resume the simulated log stream"
+                  }
+                  title="Simulated stream (dev only) — no server log stream exists"
+                  className={`p-1.5 rounded bg-black border border-gray-900 hover:text-white transition-colors cursor-pointer text-[10px] font-bold ${
+                    isStreaming ? "text-emerald-400" : "text-gray-500"
+                  }`}
+                >
+                  {isStreaming ? <Pause size={12} /> : <Play size={12} />}
+                </button>
+              )}
               <button
                 onClick={handleDownloadLogs}
                 className="p-1.5 rounded bg-primary/20 border border-emerald-950 text-emerald-400 hover:bg-primary/40 transition-all cursor-pointer"
@@ -335,89 +280,51 @@ export const SystemLogsTab: React.FC = () => {
             ref={logScrollRef}
             className="flex-1 overflow-y-auto bg-black border border-gray-950/60 rounded-xl p-4 mt-4 font-mono text-[10px] text-gray-300 leading-normal space-y-1.5 shadow-inner custom-scrollbar select-all"
           >
-            {filteredLogs.map((log, index) => (
-              <div
-                key={index}
-                className="flex items-start gap-2 border-b border-gray-950 pb-1 last:border-0 hover:bg-white/5 p-0.5 rounded transition-colors"
-              >
-                <span className="text-gray-600 shrink-0 select-none">[{log.timestamp}]</span>
-                <span className={`font-black shrink-0 select-none ${getLevelColor(log.level)}`}>
-                  {log.level.padEnd(5)}
-                </span>
-                <span className="text-blue-400 font-extrabold shrink-0 select-none">
-                  [{log.subsystem}]
-                </span>
-                <span className="text-gray-300 break-all select-all">{log.message}</span>
+            {filteredLogs.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center gap-2 text-center select-none">
+                <Terminal size={24} className="text-gray-700" />
+                <p className="text-xs text-gray-500 font-mono leading-relaxed">
+                  {logs.length === 0
+                    ? "No log lines in the local buffer — no server log stream is wired to this console."
+                    : "No log lines match the current filters."}
+                </p>
               </div>
-            ))}
+            ) : (
+              filteredLogs.map((log, index) => (
+                <div
+                  key={index}
+                  className="flex items-start gap-2 border-b border-gray-950 pb-1 last:border-0 hover:bg-white/5 p-0.5 rounded transition-colors"
+                >
+                  <span className="text-gray-600 shrink-0 select-none">[{log.timestamp}]</span>
+                  <span className={`font-black shrink-0 select-none ${getLevelColor(log.level)}`}>
+                    {log.level.padEnd(5)}
+                  </span>
+                  <span className="text-blue-400 font-extrabold shrink-0 select-none">
+                    [{log.subsystem}]
+                  </span>
+                  <span className="text-gray-300 break-all select-all">{log.message}</span>
+                </div>
+              ))
+            )}
           </div>
         </div>
 
         {/* Audit Trail Panel */}
-        <div className="p-6 rounded-[24px] bg-[#0c130e] border border-gray-800 shadow-xl flex flex-col justify-between h-[480px]">
-          <div className="flex flex-col justify-between flex-1">
-            <div className="border-b border-gray-800 pb-3 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <UserCheck size={16} className="text-emerald-400" />
-                <span className="font-mono text-xs font-black text-white uppercase tracking-widest">
-                  Administrative Audit Trail
-                </span>
-              </div>
+        <div className="p-6 rounded-[24px] bg-[#0c130e] border border-gray-800 shadow-xl flex flex-col h-[480px]">
+          <div className="border-b border-gray-800 pb-3 flex items-center gap-2">
+            <UserCheck size={16} className="text-emerald-400" />
+            <span className="font-mono text-xs font-black text-white uppercase tracking-widest">
+              Administrative Audit Trail
+            </span>
+          </div>
 
-              <div className="flex items-center gap-1.5 font-mono">
-                <input
-                  type="text"
-                  placeholder="Filter audits..."
-                  value={searchAudits}
-                  onChange={(e) => setSearchAudits(e.target.value)}
-                  className="bg-black border border-gray-900 rounded p-1 text-[9px] text-white outline-none w-[90px]"
-                />
-                <button
-                  onClick={handleExportAudits}
-                  title="Export to CSV"
-                  className="p-1 rounded bg-black border border-gray-900 text-gray-400 hover:text-white"
-                >
-                  <Download size={10} />
-                </button>
-                <button
-                  onClick={fetchAudits}
-                  className="p-1 rounded bg-black border border-gray-900 text-gray-400 hover:text-white"
-                >
-                  <RefreshCw size={10} className={isLoadingAudits ? "animate-spin" : ""} />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto mt-4 space-y-3 font-mono text-[10px] custom-scrollbar">
-              {audits.length === 0 ? (
-                <div className="py-12 text-center text-gray-500 italic">
-                  No audit records found.
-                </div>
-              ) : (
-                audits.map((a) => (
-                  <div
-                    key={a.id}
-                    className="p-3 bg-black/40 border border-gray-900 rounded-xl space-y-1.5 hover:border-gray-800 transition-all select-all"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-white font-black truncate max-w-[130px]">
-                        Actor: {a.actorId || "System"}
-                      </span>
-                      <span className="text-emerald-400 font-bold">
-                        {new Date(a.createdAt).toLocaleTimeString()}
-                      </span>
-                    </div>
-                    <span className="block px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] font-black uppercase w-fit tracking-wider">
-                      {a.action}
-                    </span>
-                    <p className="text-gray-400 italic">Resource: {a.resourceType}</p>
-                    <code className="block text-[8px] text-gray-600 bg-black/80 p-1 rounded-md border border-gray-950/20">
-                      IP: {a.ip || "127.0.0.1"} • ROLE: {a.actorRole || "N/A"}
-                    </code>
-                  </div>
-                ))
-              )}
-            </div>
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-4">
+            <UserCheck size={24} className="text-gray-700" />
+            <p className="text-xs text-gray-500 font-mono leading-relaxed">
+              Audit records are not available — no audit endpoint is wired to
+              this console, so no records are read from or written to a server
+              here.
+            </p>
           </div>
         </div>
       </div>
