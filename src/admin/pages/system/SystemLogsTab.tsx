@@ -60,9 +60,6 @@ export const SystemLogsTab: React.FC = () => {
   const [logLevelFilter, setLogLevelFilter] = useState<
     "ALL" | "INFO" | "WARN" | "ERROR" | "CRITICAL"
   >("ALL");
-  const [subsystemFilter, setSubsystemFilter] = useState<
-    "ALL" | "AUTH" | "STORE" | "PAYMENT" | "QUEUE" | "WEBHOOK" | "PETPOOJA"
-  >("ALL");
   const [searchLogs, setSearchLogs] = useState("");
   const logScrollRef = useRef<HTMLDivElement>(null);
 
@@ -171,9 +168,8 @@ export const SystemLogsTab: React.FC = () => {
 
   const filteredLogs = logs.filter((log) => {
     const matchesLevel = logLevelFilter === "ALL" || log.level === logLevelFilter;
-    const matchesSubsystem = subsystemFilter === "ALL" || log.subsystem === subsystemFilter;
     const matchesSearch = log.message.toLowerCase().includes(searchLogs.toLowerCase());
-    return matchesLevel && matchesSubsystem && matchesSearch;
+    return matchesLevel && matchesSearch;
   });
 
   const getLevelColor = (level: string) => {
@@ -202,7 +198,7 @@ export const SystemLogsTab: React.FC = () => {
         <div className="lg:col-span-2 p-6 rounded-[24px] bg-[#0c130e] border border-gray-800 shadow-xl flex flex-col justify-between h-[480px]">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-800 pb-4 gap-4">
             <div className="flex items-center gap-2.5">
-              <Terminal size={18} className="text-emerald-400 animate-pulse" />
+              <Terminal size={18} className="text-emerald-400" />
               <div>
                 <h3 className="text-sm font-black tracking-wider text-white font-mono uppercase">
                   CONSOLE LOG BUFFER
@@ -219,6 +215,7 @@ export const SystemLogsTab: React.FC = () => {
                 <input
                   type="text"
                   placeholder="Filter string..."
+                  aria-label="Filter log text"
                   value={searchLogs}
                   onChange={(e) => setSearchLogs(e.target.value)}
                   className="bg-transparent border-0 outline-none text-white font-mono placeholder-gray-700 w-[90px]"
@@ -244,12 +241,14 @@ export const SystemLogsTab: React.FC = () => {
               )}
               <button
                 onClick={handleDownloadLogs}
+                aria-label="Download local log buffer"
                 className="p-1.5 rounded bg-primary/20 border border-emerald-950 text-emerald-400 hover:bg-primary/40 transition-all cursor-pointer"
               >
                 <Download size={12} />
               </button>
               <button
                 onClick={handleClearLogs}
+                aria-label="Clear local log buffer"
                 className="p-1.5 rounded bg-red-950/20 border border-red-900/40 text-red-400 hover:bg-red-950/40 transition-all cursor-pointer"
               >
                 <Trash2 size={12} />
@@ -260,11 +259,12 @@ export const SystemLogsTab: React.FC = () => {
           {/* Filters Bar */}
           <div className="flex items-center gap-2 border-b border-gray-900 pb-2.5 mt-2.5 overflow-x-auto no-scrollbar font-mono text-[9px] font-bold text-gray-500">
             <span className="shrink-0 uppercase">Level:</span>
-            {["ALL", "INFO", "WARN", "ERROR", "CRITICAL"].map((lvl) => (
+            {(["ALL", "INFO", "WARN", "ERROR", "CRITICAL"] as const).map((lvl) => (
               <button
                 key={lvl}
-                onClick={() => setLogLevelFilter(lvl as any)}
-                className={`px-2 py-0.5 rounded transition-all cursor-pointer uppercase ${
+                onClick={() => setLogLevelFilter(lvl)}
+                aria-pressed={logLevelFilter === lvl}
+                className={`min-h-[44px] min-w-[44px] shrink-0 px-2 py-0.5 rounded transition-all cursor-pointer uppercase ${
                   logLevelFilter === lvl
                     ? "bg-primary text-white border border-emerald-800"
                     : "hover:text-white"

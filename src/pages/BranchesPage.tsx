@@ -29,6 +29,9 @@ import {
 import type { Branch } from '@/types';
 import type { FranchiseLead } from '@/hooks/useFranchiseLeads';
 
+const isActiveBranch = (branch: Branch): boolean =>
+  branch.status === 'active' || (branch.active && !branch.status);
+
 export function BranchesPage() {
   const { user } = useAuthStore();
   const {
@@ -67,7 +70,7 @@ export function BranchesPage() {
   };
 
   const filteredBranches = branches.filter((b) => {
-    if (activeTab === 'active') return b.status === 'active' || (b.active && !b.status);
+    if (activeTab === 'active') return isActiveBranch(b);
     if (activeTab === 'upcoming') return b.status === 'coming_soon';
     return true;
   });
@@ -152,7 +155,7 @@ export function BranchesPage() {
       <div className="flex items-center space-x-2 border-b border-[#1E3A24] pb-3 overflow-x-auto">
         <button
           onClick={() => setActiveTab('all')}
-          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+          className={`min-h-[44px] px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
             activeTab === 'all'
               ? 'bg-[#0E4825] text-white shadow-sm border border-[#4ADE80]/30'
               : 'bg-[#112415] text-zinc-400 hover:text-white border border-[#1E3A24]'
@@ -162,17 +165,17 @@ export function BranchesPage() {
         </button>
         <button
           onClick={() => setActiveTab('active')}
-          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+          className={`min-h-[44px] px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
             activeTab === 'active'
               ? 'bg-[#0E4825] text-white shadow-sm border border-[#4ADE80]/30'
               : 'bg-[#112415] text-zinc-400 hover:text-white border border-[#1E3A24]'
           }`}
         >
-          Active Live Outlets ({branches.filter((b) => b.status !== 'coming_soon').length})
+          Active Live Outlets ({branches.filter(isActiveBranch).length})
         </button>
         <button
           onClick={() => setActiveTab('upcoming')}
-          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center space-x-1.5 ${
+          className={`min-h-[44px] px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center space-x-1.5 ${
             activeTab === 'upcoming'
               ? 'bg-[#0E4825] text-white shadow-sm border border-[#4ADE80]/30'
               : 'bg-[#112415] text-zinc-400 hover:text-white border border-[#1E3A24]'
@@ -183,7 +186,7 @@ export function BranchesPage() {
         </button>
         <button
           onClick={() => setActiveTab('franchise_leads')}
-          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center space-x-1.5 ${
+          className={`min-h-[44px] px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center space-x-1.5 ${
             activeTab === 'franchise_leads'
               ? 'bg-[#0E4825] text-white shadow-sm border border-[#4ADE80]/30'
               : 'bg-[#112415] text-zinc-400 hover:text-white border border-[#1E3A24]'
