@@ -116,7 +116,7 @@ export function MenuPage() {
   const handleConfirm86 = async (itemId: string, duration: EightSixDuration, reason: string) => {
     let res: { posSynced: boolean } | undefined;
     try {
-      res = await markItem86.mutateAsync({ itemId, duration, reason });
+      res = await markItem86.mutateAsync({ itemId, duration, reason, notifyError: false });
     } catch (err) {
       console.error('86-ing failed:', err);
       showToast('Could not update stock — no changes were made.', 'error');

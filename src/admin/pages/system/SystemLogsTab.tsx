@@ -146,17 +146,18 @@ export const SystemLogsTab: React.FC = () => {
 
   const handleDownloadLogs = () => {
     // Loop: was a bare alert() claiming a download that never happened.
-    // Download the actually-visible log lines as text (possibly empty).
+    // Download the FULL local log buffer as text (possibly empty). This is the
+    // whole buffer, not the filtered view — the button is labelled to match.
     try {
       const lines = logs.map((l) => `${l.timestamp} [${l.level}] (${l.subsystem}) ${l.message}`);
-      const file = new Blob([lines.join("\n") || "No log lines in view."], { type: "text/plain" });
+      const file = new Blob([lines.join("\n") || "No log lines in the local buffer."], { type: "text/plain" });
       const element = document.createElement("a");
       element.href = URL.createObjectURL(file);
       element.download = `burgonomics-system-logs-${Date.now()}.txt`;
       document.body.appendChild(element);
       element.click();
       element.remove();
-      toast.success("Log view downloaded.");
+      toast.success("Log buffer downloaded.");
     } catch {
       toast.error("Could not download logs.");
     }

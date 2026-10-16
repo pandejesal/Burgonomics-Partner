@@ -210,13 +210,41 @@ describe('menu feedback', () => {
     }
   });
 
-  it('announces rejected 86 writes as errors', async () => {
-    harness.mark86.mockRejectedValue(new Error('offline'));
+  it('announces a rejected real 86 write with exactly ONE error, not two', async () => {
+    // The old case set actualHook=false (mocked mutateAsync), so the hook's
+    // onError could never fire — it could not see the duplicate. Drive the
+    // REAL hook: a rejected write reaches BOTH the hook onError and the page
+    // catch. MenuPage passes notifyError:false, so the hook must stay silent
+    // and the severity-aware role="alert" is the sole error surface. Removing
+    // that gate makes the hook toast too, so the count below goes 1 -> 2.
+    harness.actualHook = true;
+    harness.updateDoc.mockRejectedValueOnce(new Error('permission denied'));
+
     const modal = findElement(page(), element => element.type === Instant86ingModal);
     await (modal!.props.onConfirm86 as (id: string, duration: string, reason: string) => Promise<void>)('burger', 'indefinite', 'Unavailable');
+
     const html = renderToStaticMarkup(page());
-    expect(html).toContain('role="alert"');
+    expect(harness.updateDoc).toHaveBeenCalledOnce();
+    expect(harness.errorToast).not.toHaveBeenCalled();
+    expect((html.match(/role="alert"/g) ?? []).length + harness.errorToast.mock.calls.length).toBe(1);
     expect(html).toContain('Could not update stock — no changes were made.');
+    expect(html).toContain('border-error');
+    expect(html).toContain('text-error');
     expect(html).not.toContain('border-success');
+    expect(html).not.toContain('permission denied');
+  });
+
+  it('still notifies when a real 86 caller does not opt out', async () => {
+    harness.actualHook = true;
+    harness.updateDoc.mockRejectedValueOnce(new Error('permission denied'));
+
+    await expect(
+      useBranchMenu().markItem86.mutateAsync({ itemId: item.id, duration: 'indefinite', reason: 'Unavailable' })
+    ).rejects.toThrow('permission denied');
+
+    expect(harness.errorToast).toHaveBeenCalledExactlyOnceWith(
+      'Could not 86 this item — it was NOT marked out of stock.',
+      { description: 'permission denied' }
+    );
   });
 });

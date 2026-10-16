@@ -154,6 +154,7 @@ export function useBranchMenu() {
       itemId: string;
       duration: EightSixDuration;
       reason: string;
+      notifyError?: boolean;
     }) => {
       if (!branchId) throw new Error('No branch selected');
       let disabledUntil: Date | null = null;
@@ -187,10 +188,15 @@ export function useBranchMenu() {
     // silently while the drawer stayed open. There is no optimistic flip
     // here (state comes from the invalidated snapshot), so nothing to roll
     // back — just say the 86 was not saved.
-    onError: (err) => {
-      toast.error('Could not 86 this item — it was NOT marked out of stock.', {
-        description: err instanceof Error ? err.message : 'Firestore write failed.',
-      });
+    onError: (err, vars) => {
+      // Same opt-out as the toggle path: a page that renders its own
+      // severity-aware role="alert" passes notifyError:false so one rejected
+      // write yields ONE error surface, not two. Default callers keep the toast.
+      if (vars.notifyError !== false) {
+        toast.error('Could not 86 this item — it was NOT marked out of stock.', {
+          description: err instanceof Error ? err.message : 'Firestore write failed.',
+        });
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['menuItems', branchId] });
