@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useState, useMemo, useEffect } from "react";
+import React, { Suspense, lazy, useState, useMemo, useEffect, useRef } from "react";
 import {
   Store as StoreIcon,
   MapPin,
@@ -11,7 +11,9 @@ import {
   Users,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   XCircle,
+  X,
   Plus,
   Search,
   Sparkles,
@@ -41,7 +43,10 @@ import { PageHeader } from "../components/Headers";
 const StoreAnalyticsCharts = lazy(() => import("./StoreAnalyticsCharts"));
 import { StatCard } from "../components/Cards";
 import { StatusBadge, HealthBadge } from "../components/Badges";
-import { ConfirmDialog } from "../components/Utilities";
+// Revision 1: ConfirmDialog is intentionally NOT imported here — its submit
+// handler fires onClose() without awaiting onConfirm(), which would close the
+// open/close dialog before a failed write resolved. This page uses a local
+// confirm flow instead (see "CONFIRM TOGGLE STORE MODAL").
 import {
   RichStore,
   StaffMember,
@@ -274,6 +279,11 @@ export const STAFF_EMPTY_STATE =
 export const DOCUMENTS_EMPTY_STATE =
   "No compliance documents uploaded for this outlet yet.";
 
+// #28: no CDN provider is wired to this console, so the cache-purge control is
+// rendered disabled with this explicit reason — never a fake success toast.
+export const CDN_PURGE_UNAVAILABLE_REASON =
+  "No CDN provider is wired to this console — cache purge is unavailable.";
+
 // Finding 12: store-directory RBAC derives from the real session roles
 // (brand_owner / developer / regional_manager), not the retired portal role
 // names, which matched no live session. Fail-closed: an empty role name
@@ -299,32 +309,63 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
   const [stores, setStores] = useState<RichStore[]>([]);
   const [isLoadingStores, setIsLoadingStores] = useState(true);
 
+  // Revision 1 (#29 blocker 2): the last directory state the service actually
+  // CONFIRMED. The UI paints optimistically ahead of this, but rollback always
+  // restores THIS snapshot — never the current render, which may itself hold an
+  // unconfirmed optimistic write. Advanced only on a successful persist, so a
+  // failure after a success rolls back to that success, not to load-time state.
+  const confirmedStoresRef = useRef<RichStore[]>([]);
+  // Synchronous in-flight guard, checked BEFORE any optimistic paint: two
+  // callers can never interleave optimistic writes and rollbacks.
+  const saveInFlightRef = useRef(false);
+
   useEffect(() => {
     async function loadStores() {
       setIsLoadingStores(true);
       const res = await adminStoresService.listStores();
-      if (res.success && res.data.length > 0) {
-        setStores(res.data);
-      } else {
-        setStores([]);
-      }
+      const loaded = res.success && res.data.length > 0 ? res.data : [];
+      setStores(loaded);
+      // Seed the confirmed snapshot with what actually loaded.
+      confirmedStoresRef.current = loaded;
       setIsLoadingStores(false);
     }
     void loadStores();
   }, []);
 
   const saveStores = async (updated: RichStore[]): Promise<boolean> => {
-    setStores(updated);
-    // In a real app we'd update specific stores, but for this prototype we'll bulk update
-    // or we can just update the ones that changed. Let's do bulk for now since it mirrors the localstorage behavior
-    // Loop 6/120: return the real persist outcome so money/honesty-critical
-    // callers can report truthfully; fire-and-forget callers ignore it as before.
-    const res = await adminStoresService.bulkUpsert(updated);
-    if (!res.success) {
-      toast.error("Store directory save failed.", { description: res.error.message });
+    // Reject overlapping submissions synchronously — before the optimistic
+    // paint — so a second caller cannot capture this unconfirmed state. Returns
+    // false and never claims success.
+    if (saveInFlightRef.current) {
+      toast.info("A store directory save is already in progress — try again.");
       return false;
     }
-    return true;
+    saveInFlightRef.current = true;
+    // Optimistic paint, but never a lie: on failure we restore the last
+    // CONFIRMED snapshot (not the current render). NOTE: the service's
+    // multi-document bulkUpsert is NOT atomic, so a partial backend write is
+    // possible — this rollback is local UI truth-recovery only and does not
+    // undo anything the backend already committed.
+    setStores(updated);
+    try {
+      // In a real app we'd update specific stores, but for this prototype we'll bulk update
+      // or we can just update the ones that changed. Let's do bulk for now since it mirrors the localstorage behavior
+      // Loop 6/120: return the real persist outcome so money/honesty-critical
+      // callers can report truthfully; fire-and-forget callers ignore it.
+      const res = await adminStoresService.bulkUpsert(updated);
+      if (!res.success) {
+        // Restore the confirmed snapshot, not the optimistic render.
+        setStores(confirmedStoresRef.current);
+        toast.error("Store directory save failed.", { description: res.error.message });
+        return false;
+      }
+      // Advance the confirmed snapshot only on real success.
+      confirmedStoresRef.current = updated;
+      return true;
+    } finally {
+      // Release the guard on every exit path.
+      saveInFlightRef.current = false;
+    }
   };
 
   // Single sign-in: role comes from the unified partner session.
@@ -351,6 +392,11 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
 
   // Modals / Overlays
   const [confirmToggleStore, setConfirmToggleStore] = useState<RichStore | null>(null);
+  // Pending state for the page-local confirm flow (Revision 1 / #29 blocker 1):
+  // keeps the dialog visible and blocks repeat submission until the write
+  // resolves. The shared ConfirmDialog could not do this (it fires onClose()
+  // without awaiting onConfirm()), so this one flow uses its own dialog.
+  const [isTogglingStore, setIsTogglingStore] = useState(false);
   const [viewDoc, setViewDoc] = useState<StoreDocument | null>(null);
   const [showAddStaffModal, setShowAddStaffModal] = useState(false);
 
@@ -504,10 +550,19 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
     }
   };
 
-  const handleConfirmToggleStoreState = () => {
+  // #29: the open/close flip awaited nothing — a failed persist still toasted
+  // success. Revision 1 (blocker 1): this handler is only ever invoked by the
+  // page-local dialog below, which does NOT close itself on submit. The dialog
+  // stays open while pending and on failure (retry surface); success is claimed
+  // only when the directory actually saved.
+  const handleConfirmToggleStoreState = async () => {
     if (!confirmToggleStore) return;
+    // Block repeat submissions while a write is pending (the dialog also
+    // disables its buttons, this guards races).
+    if (isTogglingStore) return;
+    const { id, name, isOpen } = confirmToggleStore;
     const updated = stores.map((s) => {
-      if (s.id === confirmToggleStore.id) {
+      if (s.id === id) {
         const nextOpen = !s.isOpen;
         // P0-3: flipping open/closed used to also stamp webhookStatus
         // active/failed, a circuit-breaker state and a fresh lastSyncTime —
@@ -521,37 +576,41 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
       }
       return s;
     });
-    void saveStores(updated);
-    toast.success(
-      `Store "${confirmToggleStore.name}" is now ${!confirmToggleStore.isOpen ? "OPEN" : "CLOSED"}`,
-    );
-    setConfirmToggleStore(null);
+    setIsTogglingStore(true);
+    try {
+      // Close ONLY on a confirmed persist; on failure the dialog stays open
+      // with the saveStores error for retry.
+      if (!(await saveStores(updated))) return;
+      toast.success(`Store "${name}" is now ${!isOpen ? "OPEN" : "CLOSED"}`);
+      setConfirmToggleStore(null);
+    } finally {
+      // Always release, every exit path.
+      setIsTogglingStore(false);
+    }
   };
 
-  const handleToggleBusyState = (storeId: string) => {
+  const handleToggleBusyState = async (storeId: string) => {
     if (isReadOnly) {
       toast.error(
         "Access denied — store directory management is limited to brand owners and developers.",
       );
       return;
     }
-    const updated = stores.map((s) => {
-      if (s.id === storeId) {
-        if (!s.isOpen) {
-          toast.warning("Cannot toggle busy state on a closed store.");
-          return s;
-        }
-        return { ...s, isBusy: !s.isBusy };
-      }
-      return s;
-    });
-    void saveStores(updated);
-    const target = updated.find((s) => s.id === storeId);
-    if (target) {
-      toast.success(
-        `Store status updated: ${target.isBusy ? "BUSY (Queue Overloaded)" : "NORMAL"}`,
-      );
+    const target = stores.find((s) => s.id === storeId);
+    if (!target) return;
+    if (!target.isOpen) {
+      toast.warning("Cannot toggle busy state on a closed store.");
+      return;
     }
+    const updated = stores.map((s) =>
+      s.id === storeId ? { ...s, isBusy: !s.isBusy } : s,
+    );
+    // #29: await the persist before claiming the status changed.
+    if (!(await saveStores(updated))) return;
+    const next = updated.find((s) => s.id === storeId);
+    toast.success(
+      `Store status updated: ${next?.isBusy ? "BUSY (Queue Overloaded)" : "NORMAL"}`,
+    );
   };
 
   // Run synchronization for single store — Loop 57/120: this was a 1200ms
@@ -579,6 +638,12 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
       if (ok) {
         toast.success(
           `Petpooja menu synced for ${target?.name ?? storeId}: ${result.itemCount} items, ${result.categoriesCount} categories.`,
+        );
+      } else {
+        // Review nit: the menu API call succeeded but the directory metadata
+        // did not persist — report the partial outcome, not an unqualified win.
+        toast.warning(
+          `Petpooja menu synced for ${target?.name ?? storeId} (${result.itemCount} items), but the local directory metadata could not be saved.`,
         );
       }
     } catch (err: unknown) {
@@ -615,21 +680,29 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
         );
       }
     }
+    let metadataSaved = true;
     if (syncedIds.size > 0) {
-      await saveStores(
+      // saveStores returns false on failure/rejection. The remote menu syncs
+      // above may still have succeeded, so the summary below distinguishes a
+      // confirmed remote sync from a failed local metadata persistence.
+      metadataSaved = await saveStores(
         markStoresSynced(stores, syncedIds, new Date().toISOString()),
       );
     }
     setIsSyncingAll(false);
     toast.dismiss();
-    if (failed.length === 0) {
+    if (failed.length === 0 && metadataSaved) {
       toast.success(`Petpooja menus synced for ${syncedIds.size} stores.`);
+    } else if (failed.length === 0) {
+      toast.warning(
+        `Petpooja menus synced for ${syncedIds.size} stores, but the local directory metadata could not be saved.`,
+      );
     } else {
       console.error("Petpooja batch sync failures:", failed);
       toast.error(
         `${syncedIds.size} synced, ${failed.length} failed — ${failed[0]}${
           failed.length > 1 ? ` (+${failed.length - 1} more, see console)` : ""
-        }`,
+        }${metadataSaved ? "" : " (directory metadata not saved)"}`,
       );
     }
   };
@@ -702,7 +775,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
   };
 
   // Staff management
-  const handleAddStaffMember = (e: React.FormEvent) => {
+  const handleAddStaffMember = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newStaffName || !newStaffPhone) {
       toast.error("Please fill in name and phone.");
@@ -732,7 +805,9 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
       return s;
     });
 
-    void saveStores(updated);
+    // #29: only claim the assignment once the roster actually persisted
+    // (saveStores rolls back and errors on failure; the modal stays open).
+    if (!(await saveStores(updated))) return;
     setShowAddStaffModal(false);
     setNewStaffName("");
     setNewStaffPhone("");
@@ -740,7 +815,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
     toast.success(`Staff member "${newStaffName}" assigned to kitchen roster.`);
   };
 
-  const handleRemoveStaffMember = (staffId: string) => {
+  const handleRemoveStaffMember = async (staffId: string) => {
     if (!activeStore) return;
     const updated = stores.map((s) => {
       if (s.id === activeStore.id) {
@@ -751,7 +826,8 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
       }
       return s;
     });
-    void saveStores(updated);
+    // #29: only claim the removal once the roster actually persisted.
+    if (!(await saveStores(updated))) return;
     toast.success("Staff member unassigned from store roster.");
   };
 
@@ -2001,15 +2077,18 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                             type="text"
                             value={editingPetpoojaId}
                             onChange={(e) => setEditingPetpoojaId(e.target.value)}
-                            onBlur={() => {
+                            onBlur={async () => {
                               if (editingPetpoojaId !== activeStore.petpoojaRestId) {
                                 const updated = stores.map((s) => {
                                   if (s.id === activeStore.id)
                                     return { ...s, petpoojaRestId: editingPetpoojaId };
                                   return s;
                                 });
-                                void saveStores(updated);
-                                toast.success("Petpooja Rest ID updated!");
+                                // #29 family: only claim the update once the
+                                // directory actually persisted.
+                                if (await saveStores(updated)) {
+                                  toast.success("Petpooja Rest ID updated!");
+                                }
                               }
                             }}
                             disabled={isReadOnly}
@@ -2097,15 +2176,22 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                         <span>Run Full Sync</span>
                       </button>
                       <button
-                        onClick={() => {
-                          toast.success("CDN edge caches cleared and rebuilt successfully.");
-                        }}
-                        disabled={isReadOnly}
-                        className="flex-1 rounded-xl border border-gray-200 bg-white py-2 text-xs font-black text-gray-700 hover:bg-gray-50 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-300"
+                        type="button"
+                        // #28: the old handler toasted a fabricated
+                        // "caches cleared and rebuilt" success with zero
+                        // backend contact. No CDN provider is wired, so the
+                        // control is honestly disabled with the reason on it.
+                        disabled
+                        aria-disabled="true"
+                        title={CDN_PURGE_UNAVAILABLE_REASON}
+                        className="flex-1 rounded-xl border border-gray-200 bg-white py-2 text-xs font-black text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-300"
                       >
                         Purge CDN Cache
                       </button>
                     </div>
+                    <p className="mt-2 text-[10px] font-bold text-gray-600 dark:text-gray-400">
+                      {CDN_PURGE_UNAVAILABLE_REASON}
+                    </p>
                   </div>
 
                   {/* QUEUE MONITOR PANEL (DEVELOPER ONLY) */}
@@ -2315,16 +2401,71 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
         )}
       </AnimatePresence>
 
-      {/* CONFIRM TOGGLE STORE MODAL */}
+      {/* CONFIRM TOGGLE STORE MODAL — page-local (Revision 1 / #29 blocker 1).
+          The shared ConfirmDialog calls onConfirm() then onClose() without
+          awaiting, so it would close before a failed write resolved. This
+          dialog resolves the write itself: it stays visible and blocks repeat
+          submission while pending, closes only after saveStores returns true,
+          and remains open with the error on failure (retry). Cancellation
+          (Cancel / X / overlay) is explicit and disabled while pending. The
+          page's other destructive flow (compliance document viewer) is a
+          read-only metadata modal, not a confirm-with-write, so it is not
+          affected by this defect. */}
       {confirmToggleStore && (
-        <ConfirmDialog
-          isOpen={true}
-          onClose={() => setConfirmToggleStore(null)}
-          onConfirm={handleConfirmToggleStoreState}
-          title={`${confirmToggleStore.isOpen ? "CLOSE" : "OPEN"} Burgonomics Outlet POS?`}
-          description={`Are you sure you want to toggle POS operating state of ${confirmToggleStore.name}? Customers ordering from ${confirmToggleStore.name} will see updated availability right away.`}
-          confirmLabel="Confirm Toggle State"
-        />
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+          <div
+            className="fixed inset-0 bg-black/45 backdrop-blur-[2px]"
+            onClick={isTogglingStore ? undefined : () => setConfirmToggleStore(null)}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="relative z-50 w-full max-w-md overflow-hidden rounded-[24px] border border-gray-100 bg-white p-6 shadow-2xl dark:border-gray-800 dark:bg-[#1A1A1A]"
+          >
+            <div className="mb-4 flex items-start justify-between">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10 text-accent dark:text-accent-light">
+                <AlertTriangle size={20} />
+              </div>
+              <button
+                type="button"
+                onClick={() => setConfirmToggleStore(null)}
+                disabled={isTogglingStore}
+                aria-label="Cancel"
+                className="flex h-8 w-8 items-center justify-center rounded-xl bg-gray-50 text-gray-500 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <h3 className="font-sans text-base font-black tracking-tight text-gray-900 dark:text-white">
+              {confirmToggleStore.isOpen ? "CLOSE" : "OPEN"} Burgonomics Outlet POS?
+            </h3>
+            <p className="mt-1 text-xs font-semibold leading-relaxed text-gray-500">
+              Are you sure you want to toggle POS operating state of{" "}
+              {confirmToggleStore.name}? Customers ordering from{" "}
+              {confirmToggleStore.name} will see updated availability right away.
+            </p>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmToggleStore(null)}
+                disabled={isTogglingStore}
+                className="rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-800 dark:bg-transparent dark:text-gray-300 dark:hover:bg-gray-900"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmToggleStoreState}
+                disabled={isTogglingStore}
+                className="rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-white shadow-sm transition-colors hover:bg-[#0B3A1D] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isTogglingStore ? "Saving…" : "Confirm Toggle State"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Compliance document metadata viewer (no file stored) */}

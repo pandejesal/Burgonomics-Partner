@@ -13,6 +13,7 @@ import {
   displayQueueWorkerStatus,
   STAFF_EMPTY_STATE,
   DOCUMENTS_EMPTY_STATE,
+  CDN_PURGE_UNAVAILABLE_REASON,
   storeDirectoryAccess,
   type NewStoreInput,
 } from "./AdminStoresPage";
@@ -211,6 +212,18 @@ describe("P0-3: honest placeholders for a freshly created store", () => {
     );
     expect(staffMarkup).toContain(STAFF_EMPTY_STATE);
     expect(staffMarkup).not.toContain(FABRICATION_MARKERS[4]);
+  });
+});
+
+// #28: with no CDN provider wired, the purge control must be honestly
+// unavailable with an explicit reason — never a fake success toast.
+describe("#28: CDN purge control is honestly unavailable", () => {
+  it("exposes the unavailable reason shown on the disabled control", () => {
+    expect(CDN_PURGE_UNAVAILABLE_REASON).toContain("No CDN provider is wired");
+    // It must state unavailability, not claim the caches were purged.
+    expect(CDN_PURGE_UNAVAILABLE_REASON.toLowerCase()).toContain("unavailable");
+    expect(CDN_PURGE_UNAVAILABLE_REASON.toLowerCase()).not.toContain("cleared");
+    expect(CDN_PURGE_UNAVAILABLE_REASON.toLowerCase()).not.toContain("success");
   });
 });
 
