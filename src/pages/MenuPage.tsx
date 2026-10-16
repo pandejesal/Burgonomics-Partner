@@ -16,11 +16,14 @@ import {
   Sparkles,
   ShieldCheck,
   AlertTriangle,
+  CircleAlert,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { useSyncHealth } from '@/admin/dashboard/hooks/useDashboardData';
 import { petpoojaBadgeMeta, type PetpoojaBadgeStatus } from '@/components/ui/PetpoojaStatusBadge';
 import type { MenuItem } from '@/types';
+
+type MenuFeedback = { message: string; severity: 'success' | 'warning' | 'error' };
 
 export function MenuPage() {
   const { user } = useAuthStore();
@@ -44,7 +47,7 @@ export function MenuPage() {
   const [syncSuccess, setSyncSuccess] = useState(false);
   const [eightSixTargetItem, setEightSixTargetItem] = useState<MenuItem | null>(null);
   const [showComboDrawer, setShowComboDrawer] = useState(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<MenuFeedback | null>(null);
 
   // Header chip binds to real state: dashboard sync-health probe (defaults
   // to standby/not-connected) unless this session's manual sync proved
@@ -66,9 +69,9 @@ export function MenuPage() {
     user?.role === 'developer' ||
     user?.role === 'branch_owner';
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 4000);
+  const showToast = (message: string, severity: MenuFeedback['severity'] = 'success') => {
+    setFeedback({ message, severity });
+    setTimeout(() => setFeedback(null), 4000);
   };
 
   const handleManualSync = async () => {
@@ -81,7 +84,7 @@ export function MenuPage() {
     } catch (err) {
       setSyncOutcome('failed');
       console.error('Petpooja sync failed:', err);
-      showToast('Menu sync failed — catalog unchanged. Check connection and retry.');
+      showToast('Menu sync failed — catalog unchanged. Check connection and retry.', 'error');
     }
   };
 
@@ -93,12 +96,20 @@ export function MenuPage() {
       return;
     }
     // Re-enable item immediately — toast only after the write lands.
+    setFeedback(null);
     try {
-      await toggleAvailability.mutateAsync({ itemId: item.id, isAvailable: true });
-      showToast(`${item.name} is now back IN STOCK on customer app & POS`);
+      const { posStatus } = await toggleAvailability.mutateAsync({ itemId: item.id, isAvailable: true, notifyError: false });
+      // The hook already announces app success / POS failure via Sonner.
+      if (posStatus === 'failed') return;
+      showToast(
+        posStatus === 'synced'
+          ? `${item.name} is now back IN STOCK on customer app & POS`
+          : `${item.name} is now back IN STOCK on customer app only — POS sync skipped.`,
+        posStatus === 'synced' ? 'success' : 'warning'
+      );
     } catch (err) {
       console.error('Re-enable failed:', err);
-      showToast(`Could not re-enable ${item.name} — no changes were made.`);
+      showToast(`Could not re-enable ${item.name} — no changes were made.`, 'error');
     }
   };
 
@@ -108,7 +119,7 @@ export function MenuPage() {
       res = await markItem86.mutateAsync({ itemId, duration, reason });
     } catch (err) {
       console.error('86-ing failed:', err);
-      showToast('Could not update stock — no changes were made.');
+      showToast('Could not update stock — no changes were made.', 'error');
       return;
     }
     // Loop 6: success toast ONLY on success — the old fall-through toasted
@@ -118,7 +129,8 @@ export function MenuPage() {
     showToast(
       res?.posSynced
         ? `${item?.name || 'Item'} marked 86ed (${duration.replace('_', ' ')}) — customer app & POS`
-        : `${item?.name || 'Item'} marked 86ed on customer app — POS sync pending, retry from menu if it lingers`
+        : `${item?.name || 'Item'} marked 86ed on customer app — POS sync pending, retry from menu if it lingers`,
+      res?.posSynced ? 'success' : 'warning'
     );
   };
 
@@ -157,10 +169,17 @@ export function MenuPage() {
   return (
     <div className="space-y-6 select-none text-white">
       {/* Toast Notification */}
-      {toastMessage && (
-        <div className="fixed bottom-24 right-6 z-[1000] px-4 py-3 bg-[#0E4825] border border-[#4ADE80] text-white rounded-xl shadow-2xl flex items-center gap-2.5 animate-in slide-in-from-bottom duration-200">
-          <CheckCircle2 className="w-4 h-4 text-[#4ADE80]" />
-          <span className="text-xs font-bold">{toastMessage}</span>
+      {feedback && (
+        <div
+          role={feedback.severity === 'error' ? 'alert' : 'status'}
+          className={`fixed bottom-24 right-6 z-[1000] px-4 py-3 bg-surface border text-white rounded-xl shadow-2xl flex items-center gap-2.5 animate-in slide-in-from-bottom duration-200 ${
+            feedback.severity === 'error' ? 'border-error' : feedback.severity === 'warning' ? 'border-warning' : 'border-success'
+          }`}
+        >
+          {feedback.severity === 'error' ? <CircleAlert aria-hidden="true" className="w-4 h-4 text-error" />
+            : feedback.severity === 'warning' ? <AlertTriangle aria-hidden="true" className="w-4 h-4 text-warning" />
+            : <CheckCircle2 aria-hidden="true" className="w-4 h-4 text-success" />}
+          <span className="text-xs font-bold">{feedback.message}</span>
         </div>
       )}
 

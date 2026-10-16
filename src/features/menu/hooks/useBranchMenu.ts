@@ -78,6 +78,7 @@ export function useBranchMenu() {
       itemId: string;
       available?: boolean;
       isAvailable?: boolean;
+      notifyError?: boolean;
     }) => {
       const activeState = available !== undefined ? available : isAvailable ?? true;
       if (!branchId) throw new Error('No branch selected');
@@ -120,14 +121,16 @@ export function useBranchMenu() {
       }
       return { previous, itemId };
     },
-    onError: (err, _vars, ctx) => {
+    onError: (err, vars, ctx) => {
       if (ctx?.previous) {
         queryClient.setQueryData<MenuItem[]>(['menuItems', branchId], ctx.previous);
       }
       // Non-blocking: the drawer stays open, the item reverts, staff retries.
-      toast.error('Could not update item stock', {
-        description: err instanceof Error ? err.message : 'Firestore write failed — item reverted.',
-      });
+      if (vars.notifyError !== false) {
+        toast.error('Could not update item stock', {
+          description: err instanceof Error ? err.message : 'Firestore write failed — item reverted.',
+        });
+      }
     },
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['menuItems', branchId] });
