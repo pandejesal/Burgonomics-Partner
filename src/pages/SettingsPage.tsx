@@ -33,6 +33,7 @@ export function SettingsPage() {
   const { user, signOut } = useAuthStore();
   const { branches, isLoading: branchesLoading } = useBranches();
   const [showDevDiagnostics, setShowDevDiagnostics] = useState(false);
+  const canViewDiagnostics = user?.role === 'developer' || user?.role === 'brand_owner';
 
   const myBranch = branches.find((b) => user?.branchIds?.includes(b.id)) ?? null;
 
@@ -111,23 +112,23 @@ export function SettingsPage() {
       <div className="p-4 rounded-2xl bg-neutral-950 border border-neutral-850 flex items-center justify-between text-xs text-neutral-400">
         <div className="flex items-center gap-2">
           <Smartphone className="w-4 h-4 text-[#FF6600]" />
-          <span>Burgonomics Partner POS • v2.4.0 (Petpooja Bridge Active)</span>
+          <span>Burgonomics Partner POS • v2.4.0</span>
         </div>
 
-        <button
+        {canViewDiagnostics && <button
           type="button"
           onClick={() => setShowDevDiagnostics(true)}
           className="text-neutral-400 hover:text-white font-bold text-[11px] underline cursor-pointer"
         >
           Dev Diagnostics
-        </button>
+        </button>}
       </div>
 
       {/* Dev Diagnostics Modal */}
-      <DevDiagnosticsModal
+      {canViewDiagnostics && <DevDiagnosticsModal
         isOpen={showDevDiagnostics}
         onClose={() => setShowDevDiagnostics(false)}
-      />
+      />}
     </div>
   );
 }

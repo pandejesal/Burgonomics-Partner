@@ -1,6 +1,6 @@
 import React from 'react';
 import type { BranchStats } from '@/hooks/useAnalytics';
-import { DollarSign, ShieldCheck, Building, Store, ArrowUpRight, CheckCircle2 } from 'lucide-react';
+import { DollarSign, Store } from 'lucide-react';
 
 interface RoyaltyLedgerProps {
   branches: BranchStats[];
@@ -33,7 +33,7 @@ export function RoyaltyLedger({
               </span>
             </div>
             <p className="text-xs text-zinc-400 mt-0.5">
-              Automated payment splits at transaction capture — 5% Brand fee retained, 95% Net to Branch Linked Accounts
+              Calculated allocations — 5% Brand fee, 95% Branch share; transfers are not measured here
             </p>
           </div>
         </div>
@@ -73,11 +73,12 @@ export function RoyaltyLedger({
 
                 <td className="py-3.5">
                   <div className="flex items-center gap-1.5 font-mono text-zinc-300">
-                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
                     <span>{b.linkedAccountId}</span>
                   </div>
-                  <span className="inline-block text-[9px] font-bold text-emerald-400 uppercase">
-                    ✓ KYC Verified
+                  <span className="inline-block text-[9px] font-bold text-text-secondary uppercase">
+                    {b.linkedAccountId && b.linkedAccountId !== 'unlinked'
+                      ? `Account status: ${b.linkedStatus}`
+                      : 'Account unlinked'}
                   </span>
                 </td>
 
@@ -99,9 +100,10 @@ export function RoyaltyLedger({
                 </td>
 
                 <td className="py-3.5 pr-2 text-center">
-                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800/60">
-                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                    <span>Route Settled</span>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold text-text-secondary border border-border">
+                    {b.linkedAccountId && b.linkedAccountId !== 'unlinked'
+                      ? b.linkedStatus === 'pending' ? 'Link pending' : 'Settlement not measured'
+                      : 'Unlinked — no Route split'}
                   </span>
                 </td>
               </tr>
@@ -110,14 +112,14 @@ export function RoyaltyLedger({
           <tfoot>
             <tr className="border-t-2 border-border font-bold text-xs text-white">
               <td className="pt-3.5 pl-2">Network Totals</td>
-              <td className="pt-3.5 text-zinc-400 font-normal">{branches.length} Outlets Linked</td>
+               <td className="pt-3.5 text-zinc-400 font-normal">{branches.filter((b) => b.linkedAccountId && b.linkedAccountId !== 'unlinked').length} Outlets Linked</td>
               <td className="pt-3.5 text-right font-mono text-accent-light">₹{totalRevenue.toLocaleString()}</td>
               <td className="pt-3.5 text-right font-mono text-purple-400">₹{brandRoyalty.toLocaleString()}</td>
               <td className="pt-3.5 text-right font-mono text-emerald-400">₹{netBranchPayout.toLocaleString()}</td>
               <td className="pt-3.5 text-right font-mono text-zinc-300">
                 {branches.reduce((s, b) => s + b.orders, 0)} orders
               </td>
-              <td className="pt-3.5 pr-2 text-center text-emerald-400 text-[10px]">100% Reconciled</td>
+               <td className="pt-3.5 pr-2 text-center text-text-secondary text-[10px]">Settlement not measured</td>
             </tr>
           </tfoot>
         </table>
@@ -127,9 +129,9 @@ export function RoyaltyLedger({
       <div className="p-3 bg-bg rounded-xl border border-border flex items-center justify-between text-[11px] text-zinc-400">
         <span className="flex items-center gap-1.5">
           <Store className="w-3.5 h-3.5 text-accent-light" />
-          <span>Razorpay Route escrows and auto-splits payouts daily at T+1 cutoff with 0 manual transfer overhead.</span>
+           <span>Calculated royalty allocations are not confirmation of transfers or settlement.</span>
         </span>
-        <span className="font-mono text-emerald-400 font-bold">Route v2 API Active</span>
+         <span className="font-mono text-text-secondary font-bold">Route status unknown</span>
       </div>
     </div>
   );
