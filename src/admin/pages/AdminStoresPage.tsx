@@ -531,9 +531,13 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
   }, [filteredStores]);
 
   // Copy helpers
-  const handleCopyText = (text: string, label: string) => {
-    navigator.clipboard.writeText(text);
-    toast.success(`${label} copied to clipboard!`);
+  const handleCopyText = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`${label} copied to clipboard!`);
+    } catch {
+      toast.error(`Could not copy ${label} to clipboard. Please try again.`);
+    }
   };
 
   // Multi-action store operation handlers

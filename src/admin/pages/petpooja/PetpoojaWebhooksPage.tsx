@@ -61,11 +61,15 @@ export function PetpoojaWebhooksPage() {
     };
   }, [isPlaying, selectedWh]);
 
-  const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId("copied");
-    toast.success("Payload copied to clipboard.");
-    setTimeout(() => setCopiedId(null), 2000);
+  const handleCopy = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId("copied");
+      toast.success("Payload copied to clipboard.");
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      toast.error("Could not copy payload to clipboard. Please try again.");
+    }
   };
 
   // Search filter for webhook list
