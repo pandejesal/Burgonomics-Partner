@@ -100,7 +100,7 @@ export const AdminReconciliationPage: React.FC = () => {
   const isStoreManager = role === "Store Manager";
 
   // RBAC checks
-  const canPerformReconciliation = role === "Developer" || role === "Finance";
+  const canPerformReconciliation = role === "brand_owner" || role === "developer";
 
   // Filter discrepancies
   const filteredDiscrepancies = useMemo(() => {
@@ -434,12 +434,16 @@ export const AdminReconciliationPage: React.FC = () => {
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() => handleRecheckDiscrepancy(d.id)}
+                              disabled={!canPerformReconciliation}
+                              title={!canPerformReconciliation ? "Requires brand owner or developer role" : undefined}
                               className="px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 text-[10px] font-extrabold uppercase transition-all cursor-pointer font-sans"
                             >
                               Sync Recheck
                             </button>
                             <button
                               onClick={() => handleResolveDiscrepancy(d.id)}
+                              disabled={!canPerformReconciliation}
+                              title={!canPerformReconciliation ? "Requires brand owner or developer role" : undefined}
                               className="px-3 py-1.5 rounded-lg bg-primary text-white hover:bg-[#0B3A1D] text-[10px] font-extrabold uppercase transition-all cursor-pointer shadow-sm font-sans"
                             >
                               Force Settle

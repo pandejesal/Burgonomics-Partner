@@ -92,7 +92,7 @@ export class DashboardService {
    * ids belonging to the caller's assigned branches otherwise. An empty
    * set means no access — callers filter to nothing, never to everything.
    */
-  protected async scopedOrderIds(): Promise<Set<string> | null> {
+  protected async scopedOrderIds(strict = false): Promise<Set<string> | null> {
     try {
       const user = useAuthStore.getState().user;
       if (isGlobalRole(user?.role)) return null;
@@ -100,6 +100,7 @@ export class DashboardService {
         (b): b is string => typeof b === "string" && !!b
       );
       if (assigned.length === 0) return new Set<string>();
+      if (strict && assigned.length > FIRESTORE_IN_LIMIT) throw new Error("Branch scope exceeds query limit");
       const snap = await getDocs(
         query(
           collection(db, "orders"),
@@ -107,6 +108,7 @@ export class DashboardService {
           limit(1000)
         )
       );
+      if (strict && snap.size >= 1000) throw new Error("Branch order scope is incomplete");
       const ids = new Set<string>();
       snap.forEach((d) => ids.add(d.id));
       return ids;
@@ -114,6 +116,7 @@ export class DashboardService {
       logger.warn("dashboardService.scope_resolve_failed", {
         message: err instanceof Error ? err.message : String(err),
       });
+      if (strict) throw err;
       return new Set<string>();
     }
   }
@@ -372,7 +375,7 @@ export class DashboardService {
               : 0;
 
       const status = normalizeOrderStatus(order);
-      if (status !== "Cancelled" && status !== "Refunded") {
+      if (!["cancelled", "refunded"].includes(status.toLowerCase())) {
         totalRevenuePaise += totalPaise;
       }
 
@@ -665,6 +668,7 @@ export class DashboardService {
     count: number;
     totalPaise: number;
     refundedPaise: number;
+    reconciliationStatus: "clear" | "needs_review" | "unavailable";
     discrepancies: Array<{ paymentId: string; reason: string }>;
   }> {
     const [payments, refunds] = await Promise.all([this.fetchPayments(), this.fetchRefunds()]);
@@ -685,11 +689,43 @@ export class DashboardService {
 
     const refundedPaise = refundsInRange.reduce((acc, r) => acc + r.amountPaise, 0);
 
+    const discrepancies: Array<{ paymentId: string; reason: string }> = [];
+    let reconciliationStatus: "clear" | "needs_review" | "unavailable" = "unavailable";
+    try {
+      const [snap, allowed] = await Promise.all([
+        getDocs(query(
+          collection(db, "payment_discrepancies"),
+          where("status", "==", "needs_review"),
+          where("createdAt", ">=", new Date(fromMillis)),
+          where("createdAt", "<=", new Date(toMillisVal)),
+          limit(201),
+        )),
+        this.scopedOrderIds(true),
+      ]);
+      snap.forEach((doc) => {
+        const data = doc.data();
+        const createdMillis = toMillis(data.createdAt);
+        if (data.status !== "needs_review" || !createdMillis || createdMillis < fromMillis || createdMillis > toMillisVal) return;
+        if (allowed && !allowed.has(data.orderId)) return;
+        discrepancies.push({
+          paymentId: typeof data.razorpayPaymentId === "string" ? data.razorpayPaymentId : doc.id,
+          reason: typeof data.reason === "string" ? data.reason : "Failure reason unavailable",
+        });
+      });
+      // A capped read is not proof that the scoped queue is empty.
+      if (snap.size < 201) reconciliationStatus = discrepancies.length ? "needs_review" : "clear";
+    } catch (err) {
+      logger.warn("dashboardService.reconciliation_unavailable", {
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     return {
       count: paymentsInRange.length,
       totalPaise,
       refundedPaise,
-      discrepancies: [],
+      reconciliationStatus,
+      discrepancies,
     };
   }
 

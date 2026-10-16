@@ -82,6 +82,7 @@ export const PaymentOverview: React.FC<{ dateRange: { from: string; to: string }
   const dupCount = duplicates?.length ?? 0;
   const discrepancies = reconcile?.discrepancies || [];
   const hasDiscrepancies = discrepancies.length > 0;
+  const isReconciliationUnavailable = !reconcile || reconcile.reconciliationStatus === "unavailable";
 
   return (
     <div className="rounded-[20px] border border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] p-6 shadow-[0_4px_20px_rgba(0,0,0,0.02)] h-full flex flex-col justify-between">
@@ -123,7 +124,7 @@ export const PaymentOverview: React.FC<{ dateRange: { from: string; to: string }
         <div className="grid grid-cols-2 gap-4 mb-5">
           <div className="p-3.5 rounded-2xl border border-gray-50 dark:border-gray-900 bg-gray-50/20 dark:bg-gray-900/10">
             <span className="block text-[8px] font-black text-gray-400 uppercase tracking-wider">
-              Reconciled Cash
+              Recorded Payments Less Refunds
             </span>
             <span className="block text-base font-black font-mono text-primary dark:text-emerald-400 mt-1">
               ₹
@@ -155,9 +156,9 @@ export const PaymentOverview: React.FC<{ dateRange: { from: string; to: string }
               Ledger Discrepancy Audits
             </span>
             <span
-              className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${hasDiscrepancies ? "bg-red-50 text-red-600 dark:bg-red-950/20" : "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/20"}`}
+              className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${hasDiscrepancies || isReconciliationUnavailable ? "bg-red-50 text-red-600 dark:bg-red-950/20" : "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/20"}`}
             >
-              {hasDiscrepancies ? `${discrepancies.length} alerts` : "ledger green"}
+              {isReconciliationUnavailable ? "Reconciliation unavailable" : hasDiscrepancies ? `${discrepancies.length} alerts` : "No open discrepancies"}
             </span>
           </div>
 
@@ -177,8 +178,8 @@ export const PaymentOverview: React.FC<{ dateRange: { from: string; to: string }
             </div>
           ) : (
             <div className="py-2 flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase">
-              <ShieldCheck size={14} className="text-emerald-500" />
-              <span>All payment logs balance with actual captured bank totals.</span>
+              {isReconciliationUnavailable ? <AlertTriangle size={14} /> : <ShieldCheck size={14} className="text-emerald-500" />}
+              <span>{isReconciliationUnavailable ? "The discrepancy queue could not be fully read. Retry to check." : "No open discrepancies in this date range and access scope. Bank settlement is not verified."}</span>
             </div>
           )}
         </div>
