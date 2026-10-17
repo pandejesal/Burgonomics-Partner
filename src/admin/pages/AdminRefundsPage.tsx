@@ -457,13 +457,14 @@ export const AdminRefundsPage: React.FC = () => {
                       <AlertCircle size={14} className="shrink-0 mt-0.5" />
                       <div>
                         <span className="font-bold block text-[10px]">
-                          Gateway Failure Code: insufficient_merchant_balance
+                          Gateway status: {r.gatewayStatus || "Failure reason unavailable — inspect the gateway record"}
                         </span>
-                        <span className="text-[9px] block mt-0.5 leading-normal">
-                          The payout API failed. Razorpay balance pool contains insufficient
-                          capital. Please refill your merchant wallet escrow, then re-trigger
-                          release.
-                        </span>
+                        {r.gatewayStatus === "insufficient_merchant_balance" && (
+                          <span className="text-[9px] block mt-0.5 leading-normal">
+                            The gateway reported insufficient merchant balance. Please refill
+                            your merchant balance before retrying release.
+                          </span>
+                        )}
                       </div>
                     </div>
                   )}
