@@ -6,8 +6,9 @@
  * seed mock dataset, now a DEV-only test fixture),
  * while the Partner app scopes by branch id (`branch_surat_01`… from the
  * `branches` collection). The two catalogs were seeded independently with
- * different Petpooja ID schemes (`rest_*` vs `PP_*`), so no automatic join
- * key exists today. Without a link, per-branch views silently exclude real
+ * different Petpooja ID schemes (`rest_*` vs `PP_*`), so the table below is the
+ * ONLY join key — and it held nothing at all until the DEMO outlet was linked
+ * on 2026-10-17. Without a link, per-branch views silently exclude real
  * customer orders (only "All Outlets" shows them, via normalizeOrderDoc).
  *
  * How to add a link (ops procedure):
@@ -35,7 +36,20 @@ export interface StoreBranchLink {
 }
 
 const LINKS: StoreBranchLink[] = [
-  // No verified links yet — catalogs were seeded independently.
+  // The DEMO outlet (Petpooja restaurant 5439, menu sharing code 31z58ciw0h) is
+  // the only linked pair — and it is a genuine one: confirmed against Petpooja's
+  // dashboard on 2026-10-17, whose own Order List for that outlet shows the
+  // orders this integration pushed. It exists so the whole flow can be
+  // exercised end to end before any real outlet is cut over.
+  {
+    deliveryStoreId: "demo",
+    branchId: "demo",
+    verified: true,
+    note: "Confirmed: outlet 5439 'Burgonomics DEMO [135148]', restID 31z58ciw0h, 2026-10-17",
+  },
+  // Every other outlet is still unmapped. Do NOT add an entry until the Petpooja
+  // IDs are confirmed against the dashboard, per the procedure above — a wrong
+  // link attributes one outlet's orders to another and corrupts branch revenue.
   // Example of a future entry:
   // { deliveryStoreId: 'str_012', branchId: 'branch_surat_01', verified: true,
   //   note: 'Confirmed: rest_pal_road == PP_SURAT_01 in Petpooja, 2026-09-04' },
