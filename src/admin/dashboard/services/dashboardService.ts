@@ -51,7 +51,11 @@ function normalizeOrderStatus(order: any): string {
   if (typeof order?.status?.code === "string") return order.status.code;
   if (typeof order?.status === "string") return order.status;
   if (typeof order?.orderStatus === "string") return order.orderStatus;
-  return "Completed";
+  // M1: an order carrying no supported status field is NOT evidence of a
+  // completed order. Label it "Unknown" so the breakdown surfaces the count
+  // for review instead of fabricating a "Completed" that never happened.
+  // (Recognised strings are returned unchanged — only absent shapes fall here.)
+  return "Unknown";
 }
 
 /**
@@ -340,6 +344,8 @@ export class DashboardService {
     revenue: RevenueSummary;
     topProducts: TopProduct[];
     statusBreakdown: OrderStatusBreakdown[];
+    /** M3: orders with no usable timestamp — reported, never folded into a window. */
+    undatedOrderCount: number;
   }> {
     const fromMillis = toMillis(params.from);
     const toMillisVal = toMillis(params.to) || Date.now();
@@ -350,10 +356,14 @@ export class DashboardService {
       this.fetchRefunds(),
     ]);
 
-    // Filter orders in date range
+    // M3: an invalid/missing timestamp cannot be placed in a bounded window.
+    // It used to return `true` from the filter, so the same order inflated
+    // every unrelated reporting period. Exclude it from time-bound totals and
+    // surface a separate undated count instead.
+    const undatedOrderCount = allOrders.filter((o) => !toMillis(o.placedAt || o.createdAt)).length;
     const ordersInRange = allOrders.filter((o) => {
       const orderMillis = toMillis(o.placedAt || o.createdAt);
-      if (!orderMillis) return true; // Include if timestamp missing to avoid empty cards
+      if (!orderMillis) return false;
       return orderMillis >= fromMillis && orderMillis <= toMillisVal;
     });
 
@@ -442,6 +452,7 @@ export class DashboardService {
       revenue,
       topProducts,
       statusBreakdown,
+      undatedOrderCount,
     };
   }
 
@@ -639,20 +650,47 @@ export class DashboardService {
 
   /**
    * 8. Duplicate Payments Detection
+   *
+   * M2: every discrepancy used to become a "duplicate" with an invented count
+   * of two. A duplicate requires actual evidence — the server's recognised
+   * second-capture reason, an unresolved status, the requested time window,
+   * and at least one recorded payment identity. Amount/currency/order
+   * mismatches and uncaptured checkouts are NOT duplicates, and a count is
+   * never manufactured when the identity evidence is absent.
    */
-  async getDuplicatePayments(_windowMinutes = 60): Promise<DuplicatePayment[]> {
+  async getDuplicatePayments(windowMinutes = 60): Promise<DuplicatePayment[]> {
     try {
       const snap = await getDocs(query(collection(db, "payment_discrepancies"), limit(200)));
       const allowed = await this.scopedOrderIds();
-      const duplicates: DuplicatePayment[] = [];
+      const now = Date.now();
+      const windowMs = windowMinutes > 0 ? windowMinutes * 60 * 1000 : 0;
+      const duplicates = new Map<string, DuplicatePayment>();
       snap.forEach((doc) => {
         const d = doc.data();
-        if (d.orderId) {
-          if (allowed && !allowed.has(d.orderId)) return;
-          duplicates.push({ orderId: d.orderId, count: d.count || 2 });
+        // Recognised duplicate reason only: the payments verifier parks
+        // SECOND_CAPTURE_MISMATCH for a second distinct captured payment.
+        if (d.reason !== "SECOND_CAPTURE_MISMATCH") return;
+        // Resolved rows are no longer an open duplicate alert.
+        if (d.status !== "needs_review") return;
+        if (!d.orderId) return;
+        if (allowed && !allowed.has(d.orderId)) return;
+        // Requested window — an untimed row cannot be placed in it.
+        const createdMillis = toMillis(d.createdAt);
+        if (windowMs > 0 && (!createdMillis || now - createdMillis > windowMs)) return;
+        // Count is derived from actual payment identities (the second capture
+        // plus the recorded first capture). No identity, no count.
+        const identities = new Set(
+          [d.razorpayPaymentId, d.recordedPaymentId].filter(
+            (id): id is string => typeof id === "string" && !!id,
+          ),
+        );
+        if (identities.size === 0) return;
+        const existing = duplicates.get(d.orderId);
+        if (!existing || identities.size > existing.count) {
+          duplicates.set(d.orderId, { orderId: d.orderId, count: identities.size });
         }
       });
-      return duplicates;
+      return Array.from(duplicates.values());
     } catch (_err) {
       return [];
     }

@@ -387,10 +387,14 @@ class MarketingDataStorage {
   createOffer(offer: Omit<MarketingOffer, "id">) {
     const newOffer: MarketingOffer = {
       ...offer,
+      // M6: this only mutates local storage — no coupon/checkout writer runs,
+      // so the row must never claim to be live. Force the non-active label and
+      // say so in the toast; the caller's requested status is not honoured.
+      status: "Inactive",
       id: `OFF-${Date.now().toString().slice(-3)}`,
     };
     this.offers.unshift(newOffer);
-    toast.success(`Promotional Offer "${offer.name}" activated.`);
+    toast.info(`Offer draft "${offer.name}" saved on this device — not active at checkout.`);
     this.notify();
     return newOffer;
   }
@@ -399,7 +403,13 @@ class MarketingDataStorage {
     const offer = this.offers.find((o) => o.id === id);
     if (offer) {
       offer.status = status;
-      toast.success(`Offer state adjusted to ${status}.`);
+      // M6: same local-only truth for later state changes — no checkout writer
+      // exists, so "Active" here means active in this device's list only.
+      toast.info(
+        status === "Active"
+          ? `Offer "${offer.name}" marked active in the local list — not active at checkout.`
+          : `Offer "${offer.name}" marked inactive in the local list.`,
+      );
       this.notify();
       return true;
     }

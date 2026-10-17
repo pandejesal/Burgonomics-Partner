@@ -33,15 +33,34 @@ import { toast } from "sonner";
 // payments verifier) onto the page's display contract. Server reasons map
 // onto the closest review type; anything unrecognized lands in
 // VERIFICATION_FAILURE rather than inventing precision.
-export function mapServerDiscrepancy(id: string, d: any): DiscrepancyDetails {
-  const reason = String(d?.reason || "VERIFICATION_FAILURE");
-  const type: DiscrepancyDetails["type"] =
-    reason.includes("AMOUNT") ? "AMOUNT_MISMATCH"
-    : reason.includes("CAPTUR") ? "FAILED_CAPTURE"
+//
+// M9: exact known-reason mappings come FIRST. The old substring chain tested
+// "CAPTUR" before duplicates, so the producer's SECOND_CAPTURE_MISMATCH —
+// a second DISTINCT captured payment — was rendered as FAILED_CAPTURE.
+const DISCREPANCY_TYPE_BY_REASON: Record<string, DiscrepancyDetails["type"]> = {
+  SECOND_CAPTURE_MISMATCH: "DUPLICATE_PAYMENT",
+  AMOUNT_MISMATCH: "AMOUNT_MISMATCH",
+  PAYMENT_NOT_CAPTURED: "FAILED_CAPTURE",
+  ORDER_MISMATCH: "VERIFICATION_FAILURE",
+  CURRENCY_MISMATCH: "VERIFICATION_FAILURE",
+};
+
+export function mapDiscrepancyType(reason: string): DiscrepancyDetails["type"] {
+  const exact = DISCREPANCY_TYPE_BY_REASON[reason];
+  if (exact) return exact;
+  // Fallback for unlisted/legacy reasons only: closest substring match, with
+  // the duplicate branch checked before the capture branch.
+  return reason.includes("AMOUNT") ? "AMOUNT_MISMATCH"
     : reason.includes("DUPLICATE") ? "DUPLICATE_PAYMENT"
+    : reason.includes("CAPTUR") ? "FAILED_CAPTURE"
     : reason.includes("MISSING") ? "MISSING_PAYMENT"
     : reason.includes("SETTLE") ? "SETTLEMENT_ISSUE"
     : "VERIFICATION_FAILURE";
+}
+
+export function mapServerDiscrepancy(id: string, d: any): DiscrepancyDetails {
+  const reason = String(d?.reason || "VERIFICATION_FAILURE");
+  const type: DiscrepancyDetails["type"] = mapDiscrepancyType(reason);
   return {
     id,
     orderId: String(d?.orderId || ""),
@@ -56,6 +75,50 @@ export function mapServerDiscrepancy(id: string, d: any): DiscrepancyDetails {
   };
 }
 
+export type DiscrepancyListView = "loading" | "error" | "filtered-empty" | "queue-empty" | "list";
+
+// M8: an empty FILTERED view is not proof the ledger is coherent, and the
+// query is bounded to 100 rows, so even a genuinely empty queue is not a
+// system-wide reconciliation result. Each state says only what it knows.
+export const DISCREPANCY_LIST_MESSAGES: Record<
+  Exclude<DiscrepancyListView, "list">,
+  string
+> = {
+  loading: "Loading the live discrepancy queue…",
+  error:
+    "Discrepancy queue unavailable — the live listener failed, so ledger coherence cannot be asserted.",
+  "filtered-empty":
+    "No discrepancies match the current search or type filter. Unresolved rows outside this filter are not shown.",
+  "queue-empty":
+    "No discrepancies in the loaded queue snapshot. This is a bounded read (up to 100 rows), not a system-wide reconciliation proof.",
+};
+
+export function resolveDiscrepancyListView(input: {
+  isLoading: boolean;
+  hasError: boolean;
+  total: number;
+  filteredCount: number;
+}): DiscrepancyListView {
+  if (input.hasError) return "error";
+  // A refresh of an already-loaded queue must not hide its actionable rows, so
+  // "loading" only covers a first read where nothing has been measured yet.
+  if (input.isLoading && input.total === 0) return "loading";
+  if (input.total === 0) return "queue-empty";
+  if (input.filteredCount === 0) return "filtered-empty";
+  return "list";
+}
+
+/** Null unless a live, non-empty queue was actually measured. */
+export function computeCoherencePct(input: {
+  isLoading: boolean;
+  hasError: boolean;
+  total: number;
+  resolvedCount: number;
+}): number | null {
+  if (input.isLoading || input.hasError || input.total === 0) return null;
+  return Math.round((input.resolvedCount / input.total) * 10000) / 100;
+}
+
 export const AdminReconciliationPage: React.FC = () => {
   const { role } = useAdmin();
 
@@ -64,6 +127,10 @@ export const AdminReconciliationPage: React.FC = () => {
   // (Duplicates below stay a labeled local demo queue: no live source.)
   const [discrepancies, setDiscrepancies] = useState<DiscrepancyDetails[]>([]);
   const [duplicates, setDuplicates] = useState<DuplicateAttempt[]>(paymentStorage.getDuplicates());
+  // M8: track whether the queue has actually been read and whether the live
+  // listener failed, so neither state can masquerade as ledger coherence.
+  const [isLoadingDiscrepancies, setIsLoadingDiscrepancies] = useState(true);
+  const [discrepancyLoadError, setDiscrepancyLoadError] = useState(false);
 
   useEffect(() => {
     const unsubscribe = adminPaymentsService.listenLiveDiscrepancies(
@@ -76,9 +143,13 @@ export const AdminReconciliationPage: React.FC = () => {
             mapServerDiscrepancy(String(r.id || r.orderId || `row-${i}`), r)
           )
         );
+        setDiscrepancyLoadError(false);
+        setIsLoadingDiscrepancies(false);
       },
       (err) => {
         console.error("Live discrepancy listener error:", err);
+        setDiscrepancyLoadError(true);
+        setIsLoadingDiscrepancies(false);
         toast.error("Failed to connect to the live discrepancy queue.");
       },
       100
@@ -125,12 +196,23 @@ export const AdminReconciliationPage: React.FC = () => {
   }, [discrepancies, searchQuery, selectedType]);
 
   // Live-data coherence: derived from the discrepancy registry, never a
-  // hardcoded figure. 100% means zero open discrepancies.
+  // hardcoded figure. 100% means zero open discrepancies — but only from a
+  // live, non-empty read. Loading, a failed listener and an empty queue are
+  // "not measured", never 100% (M8).
   const resolvedCount = discrepancies.filter((d) => d.status === "RESOLVED").length;
-  const coherencePct =
-    discrepancies.length === 0
-      ? 100
-      : Math.round((resolvedCount / discrepancies.length) * 10000) / 100;
+  const coherencePct = computeCoherencePct({
+    isLoading: isLoadingDiscrepancies,
+    hasError: discrepancyLoadError,
+    total: discrepancies.length,
+    resolvedCount,
+  });
+
+  const listView = resolveDiscrepancyListView({
+    isLoading: isLoadingDiscrepancies,
+    hasError: discrepancyLoadError,
+    total: discrepancies.length,
+    filteredCount: filteredDiscrepancies.length,
+  });
 
   // Actions — Loop 25/120: resolutions record server-side via POST
   // /discrepancies/resolve. The old local-only clears faked ops review while
@@ -266,10 +348,12 @@ export const AdminReconciliationPage: React.FC = () => {
             LEDGER COHERENCE
           </span>
           <span className="block text-2xl font-black font-mono tracking-tight text-white mt-1">
-            {coherencePct.toFixed(2)}%
+            {coherencePct === null ? "—" : `${coherencePct.toFixed(2)}%`}
           </span>
           <span className="block text-[10px] text-green-200 font-mono mt-1">
-            Computed from the live discrepancy registry
+            {coherencePct === null
+              ? "Not measured — live queue unavailable, loading or empty"
+              : "Computed from the live discrepancy registry"}
           </span>
         </AdminCard>
       </div>
@@ -316,9 +400,9 @@ export const AdminReconciliationPage: React.FC = () => {
             title="Gateway vs Database Discrepancy Ledger"
             subtitle={`Analyzing ${filteredDiscrepancies.length} discrepancy warnings across system threads · Resolutions record server-side; re-checks run automatically on every payment event`}
           >
-            {filteredDiscrepancies.length === 0 ? (
+            {listView !== "list" ? (
               <div className="py-8 text-center text-gray-400 font-mono">
-                No discrepancies found matching the current criteria. Ledger is fully coherent.
+                {DISCREPANCY_LIST_MESSAGES[listView]}
               </div>
             ) : (
               <div className="space-y-4 font-sans text-xs">

@@ -22,9 +22,33 @@ import {
 import { toast } from "sonner";
 
 
+export type HealthRefreshState = "loading" | "ready" | "unavailable";
+
+/**
+ * M15: the refresh must report the ACTUAL outcome. The old handler toasted
+ * "Health check refresh complete" BEFORE the request ran, so a disabled
+ * gateway or a failed request still announced success. The success notice now
+ * fires only after `loadHealth` resolves; a rejection reports unavailability.
+ */
+export async function runHealthRefresh(
+  loadHealth: () => Promise<void>,
+  notify: { success: (message: string) => void; error: (message: string) => void },
+): Promise<boolean> {
+  try {
+    await loadHealth();
+    notify.success("Health check refreshed — gateway responded.");
+    return true;
+  } catch {
+    notify.error("Health check unavailable — the gateway did not respond.");
+    return false;
+  }
+}
+
 export function PetpoojaHealthPage() {
   const [circuitBreakers, setCircuitBreakers] = useState<CircuitBreakerOverride[]>([]);
   const [services, setServices] = useState<GatewayHealthService[]>([]);
+  // M15: nothing is healthy/idle until a real read returns.
+  const [healthState, setHealthState] = useState<HealthRefreshState>("loading");
   const [cacheMetrics, setCacheMetrics] = useState({
     memory: "0 KB",
     keys: 0,
@@ -39,28 +63,31 @@ export function PetpoojaHealthPage() {
     targetState: "closed" | "open";
   } | null>(null);
 
-  const loadHealth = () => {
+  const loadHealth = async (): Promise<void> => {
     // P0-2: defer the Proxy access — called from the mount effect below, so a
     // synchronous throw would escape React and kill the router. On failure the
-    // last known (or initial idle) state stays; nothing is fabricated.
-    void Promise.resolve()
-      .then(() => petpoojaGateway.getHealth())
-      .then((h) => {
-        setCircuitBreakers(h.circuitBreakers);
-        setServices(h.services);
-        setCacheMetrics({
-          memory: h.cacheMetrics.sizeFormatted,
-          keys: h.cacheMetrics.keyCount,
-          hits: 0,
-          misses: 0,
-          status: h.cacheMetrics.status,
-        });
-      })
-      .catch(() => undefined);
+    // state becomes "unavailable"; nothing is fabricated.
+    setHealthState("loading");
+    try {
+      const h = await Promise.resolve().then(() => petpoojaGateway.getHealth());
+      setCircuitBreakers(h.circuitBreakers);
+      setServices(h.services);
+      setCacheMetrics({
+        memory: h.cacheMetrics.sizeFormatted,
+        keys: h.cacheMetrics.keyCount,
+        hits: 0,
+        misses: 0,
+        status: h.cacheMetrics.status,
+      });
+      setHealthState("ready");
+    } catch (err) {
+      setHealthState("unavailable");
+      throw err;
+    }
   };
 
   useEffect(() => {
-    loadHealth();
+    void loadHealth().catch(() => undefined);
   }, []);
 
   const handleManualTripToggle = (
@@ -96,7 +123,8 @@ export function PetpoojaHealthPage() {
     toast.success(
       `Circuit breaker manually updated. Status for ${storeId} is now ${targetState.toUpperCase()}`,
     );
-    setConfirmBreaker(null);
+    // The dialog closes itself only after this resolves (see ConfirmDialog);
+    // on failure it stays open and shows the error instead of a false success.
   };
 
   const handleFlushCache = async () => {
@@ -111,10 +139,9 @@ export function PetpoojaHealthPage() {
     toast.success(res.message);
   };
 
-  const handleTestHandshake = () => {
+  const handleTestHandshake = async () => {
     toast.info("Testing gateway health endpoints...");
-    loadHealth();
-    toast.success("Health check refresh complete.");
+    await runHealthRefresh(loadHealth, toast);
   };
 
   return (
@@ -133,6 +160,20 @@ export function PetpoojaHealthPage() {
           }
         >
           <div className="space-y-4">
+            {healthState !== "ready" && (
+              <div
+                role="status"
+                className={`p-3 rounded-xl text-[10px] font-bold ${
+                  healthState === "loading"
+                    ? "bg-amber-50 text-amber-700 dark:bg-amber-950/20 dark:text-amber-400"
+                    : "bg-red-50 text-red-600 dark:bg-red-950/20 dark:text-red-400"
+                }`}
+              >
+                {healthState === "loading"
+                  ? "Gateway health not yet measured — loading."
+                  : "Gateway health unavailable — no handshakes were measured. Nothing below is a live measurement."}
+              </div>
+            )}
             {services.map((h, idx) => (
               <div
                 key={idx}
@@ -193,7 +234,7 @@ export function PetpoojaHealthPage() {
                   Memory Size
                 </span>
                 <span className="text-lg font-black font-mono text-gray-900 dark:text-white mt-1 block">
-                  {cacheMetrics.memory}
+                  {healthState === "ready" ? cacheMetrics.memory : "—"}
                 </span>
               </div>
 
@@ -202,7 +243,7 @@ export function PetpoojaHealthPage() {
                   Active Key Pairs
                 </span>
                 <span className="text-lg font-black font-mono text-gray-900 dark:text-white mt-1 block">
-                  {cacheMetrics.keys}
+                  {healthState === "ready" ? cacheMetrics.keys : "—"}
                 </span>
               </div>
             </div>
@@ -225,7 +266,7 @@ export function PetpoojaHealthPage() {
               </div>
 
               <div className="flex justify-between text-[10px] font-extrabold font-mono text-gray-400 uppercase">
-                <span>Cache State: {cacheMetrics.status}</span>
+                <span>Cache State: {healthState === "ready" ? cacheMetrics.status : "Not measured"}</span>
                 <span>Standby mode</span>
               </div>
             </div>
@@ -324,10 +365,7 @@ export function PetpoojaHealthPage() {
         <ConfirmDialog
           isOpen={true}
           onClose={() => setConfirmFlush(false)}
-          onConfirm={() => {
-            void handleFlushCache();
-            setConfirmFlush(false);
-          }}
+          onConfirm={handleFlushCache}
           title="Flush Gateway Cache Store?"
           description="Force purging local cache removes cached catalog structures and temporary memory records."
           confirmLabel="Flush Cache"
@@ -339,9 +377,7 @@ export function PetpoojaHealthPage() {
         <ConfirmDialog
           isOpen={true}
           onClose={() => setConfirmBreaker(null)}
-          onConfirm={() => {
-            void executeBreakerToggle();
-          }}
+          onConfirm={executeBreakerToggle}
           title={
             confirmBreaker.targetState === "open"
               ? "Emergency Trip Circuit Breaker?"

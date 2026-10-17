@@ -44,11 +44,59 @@ import { INITIAL_RICH_ORDERS, RichOrder, getThermalReceiptText } from "./ordersD
 import { adminOrdersService } from "../services/adminOrdersService";
 import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
 import { useAdmin } from "@/admin/hooks/useAdmin";
+import { useStores } from "@/admin/dashboard/hooks/useDashboardData";
 import { logger } from "@/core/logging/logger";
 
 interface AdminOrdersPageProps {
   defaultTab?: "live" | "history";
   defaultOrderId?: string;
+}
+
+export interface StoreFilterOption {
+  id: string;
+  name: string;
+}
+
+/**
+ * M4: store filter options must come from the authorized store directory, not
+ * a hardcoded outlet list. The old fixed ids meant a newly created/live outlet
+ * could never be selected, while picking an unrelated bundled id produced an
+ * empty view (filtering compares against the real `o.store.id`).
+ * Live-order stores are merged in as a fallback so a directory read that is
+ * still loading (or empty) cannot hide an outlet that has orders.
+ */
+export function buildStoreOptions(
+  directory: Array<{ id?: string; name?: string }>,
+  orders: Array<{ store?: { id?: string; name?: string } }>,
+): StoreFilterOption[] {
+  const byId = new Map<string, StoreFilterOption>();
+  const add = (id?: string, name?: string) => {
+    if (!id || byId.has(id)) return;
+    byId.set(id, { id, name: name || id });
+  };
+  directory.forEach((store) => add(store?.id, store?.name));
+  orders.forEach((order) => add(order?.store?.id, order?.store?.name));
+  return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * M5: `navigator.clipboard.writeText` is async and can reject (denied
+ * permission, insecure context, absent API). Await it and only announce
+ * success once it resolves; otherwise report an honest failure instead of
+ * logging a copy that never happened.
+ */
+export async function copyTextWithFeedback(
+  text: string,
+  write: (value: string) => Promise<void> = (value) => navigator.clipboard.writeText(value),
+): Promise<boolean> {
+  try {
+    await write(text);
+    toast.success("Ticket text copied to clipboard.");
+    return true;
+  } catch {
+    toast.error("Could not copy ticket text — copy it manually.");
+    return false;
+  }
 }
 
 // Sound Synthesizer Engine using Web Audio API to bypass asset file dependencies.
@@ -117,6 +165,10 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
   const { admin } = useAdmin();
   const selectedRole =
     (admin?.role?.name as "Developer" | "Operations" | "Store Manager" | "Finance") || "Developer";
+
+  // M4: real authorized store directory (brand-readable admin_stores), never a
+  // hardcoded outlet list.
+  const { data: storeDirectory = [] } = useStores();
 
   // Real apps might store the assigned store in the user profile/claims
   // Loop 49/120: no hardcoded fallback store — an unassigned manager used
@@ -285,6 +337,13 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
       toast.error("Status update failed — order unchanged", { description: message });
     }
   };
+
+  // M4: options are built from the real store directory (plus any outlet
+  // already present in loaded orders) — never the old hardcoded id list.
+  const storeOptions = useMemo(
+    () => buildStoreOptions(storeDirectory, orders),
+    [storeDirectory, orders],
+  );
 
   // Filter implementation
   const filteredOrders = useMemo(() => {
@@ -622,10 +681,11 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
             className="w-full px-4 py-3 text-xs font-bold rounded-2xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] text-gray-700 dark:text-gray-300 focus:outline-none"
           >
             <option value="all">ALL STORES OUTLETS</option>
-            <option value="st_cp_delhi">Connaught Place, Delhi</option>
-            <option value="st_andheri_mumbai">Andheri West, Mumbai</option>
-            <option value="st_koramangala_blr">Koramangala, Bangalore</option>
-            <option value="st_sec62_noida">Sector 62, Noida</option>
+            {storeOptions.map((store) => (
+              <option key={store.id} value={store.id}>
+                {store.name}
+              </option>
+            ))}
           </select>
         </div>
 
@@ -1621,10 +1681,9 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
               </button>
               <button
                 onClick={() => {
-                  navigator.clipboard.writeText(
+                  void copyTextWithFeedback(
                     getThermalReceiptText(printReceiptData.order, printReceiptData.type),
                   );
-                  console.log("[OMS] Ticket text copied to administrative clipboard");
                 }}
                 className="py-3 px-4 border border-gray-200 text-gray-500 hover:bg-gray-50 font-black text-xs uppercase rounded-2xl transition-all"
               >
