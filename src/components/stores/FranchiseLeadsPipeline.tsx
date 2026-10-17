@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useFranchiseLeads, type FranchiseLead } from '@/hooks/useFranchiseLeads';
+import { toast } from 'sonner';
 import {
   Users,
   Building,
@@ -35,6 +36,21 @@ export function FranchiseLeadsPipeline({ onConvertToBranch }: FranchiseLeadsPipe
       (lead.preferredLocation && lead.preferredLocation.toLowerCase().includes(searchQuery.toLowerCase()));
     return matchesStatus && matchesSearch;
   });
+
+  // Pipeline capital is only knowable as a LOWER BOUND: applicants state a
+  // band ('25L-50L'), never an exact figure. The old tile printed a constant
+  // "₹2.25 Cr+" regardless of the data. Bands with no stated value are not
+  // counted at all.
+  const BUDGET_FLOOR_INR: Record<FranchiseLead['investmentBudget'], number> = {
+    '25L-50L': 2_500_000,
+    '50L-1Cr': 5_000_000,
+    '1Cr+': 10_000_000,
+  };
+  const reportedInvestments = leads
+    .map((lead) => BUDGET_FLOOR_INR[lead.investmentBudget])
+    .filter((value): value is number => typeof value === 'number');
+  const reportedInvestmentCount = reportedInvestments.length;
+  const investmentFloorInr = reportedInvestments.reduce((sum, value) => sum + value, 0);
 
   const getStatusBadge = (status: FranchiseLead['status']) => {
     switch (status) {
@@ -92,9 +108,17 @@ export function FranchiseLeadsPipeline({ onConvertToBranch }: FranchiseLeadsPipe
             <DollarSign className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="font-mono font-black text-2xl text-emerald-400 mt-2">
-            ₹2.25 Cr+
+            {reportedInvestmentCount > 0
+              ? `≥ ₹${(investmentFloorInr / 10_000_000).toFixed(2)} Cr`
+              : 'Not reported'}
           </div>
-          <div className="text-[10px] text-zinc-400 mt-1">Self-Reported Investment</div>
+          <div className="text-[10px] text-zinc-400 mt-1">
+            {reportedInvestmentCount > 0
+              ? `Lower bound of ${reportedInvestmentCount} self-reported band${
+                  reportedInvestmentCount === 1 ? '' : 's'
+                }`
+              : 'No applicant stated an investment band'}
+          </div>
         </div>
 
         <div className="bg-surface p-5 rounded-2xl border border-border shadow-xl">
@@ -190,10 +214,10 @@ export function FranchiseLeadsPipeline({ onConvertToBranch }: FranchiseLeadsPipe
                     Budget: {lead.investmentBudget}
                   </span>
                   <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-[#112415] text-zinc-300 border border-border">
-                    {lead.commercialSpace === 'owned'
-                      ? `Owned Space (${lead.spaceAreaSqFt || 1000} sq.ft)`
-                      : lead.commercialSpace === 'rented'
-                      ? `Rented Space (${lead.spaceAreaSqFt || 800} sq.ft)`
+                    {lead.commercialSpace === 'owned' || lead.commercialSpace === 'rented'
+                      ? `${lead.commercialSpace === 'owned' ? 'Owned' : 'Rented'} Space (${
+                          lead.spaceAreaSqFt ? `${lead.spaceAreaSqFt} sq.ft` : 'Area not provided'
+                        })`
                       : 'Searching for Space'}
                   </span>
                 </div>
@@ -239,10 +263,20 @@ export function FranchiseLeadsPipeline({ onConvertToBranch }: FranchiseLeadsPipe
                 <select
                   value={lead.status}
                   onChange={(e) =>
-                    updateLeadStatus.mutate({
-                      leadId: lead.id,
-                      status: e.target.value as any,
-                    })
+                    updateLeadStatus.mutate(
+                      {
+                        leadId: lead.id,
+                        status: e.target.value as any,
+                      },
+                      {
+                        // The select is controlled by lead.status, so a failed
+                        // write snaps back silently — surface the failure.
+                        onError: () =>
+                          toast.error(
+                            `Could not update ${lead.applicantName}'s status. The lead is unchanged.`
+                          ),
+                      }
+                    )
                   }
                   className="px-3 py-2 text-xs bg-bg border border-border rounded-xl text-white focus:outline-none focus:border-accent cursor-pointer"
                 >

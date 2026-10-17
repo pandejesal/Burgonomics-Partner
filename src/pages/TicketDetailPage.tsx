@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { useTicket } from '@/hooks/useTicket';
 import { useAuthStore } from '@/stores/authStore';
 import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
@@ -80,7 +81,7 @@ export function TicketDetailPage() {
   // tool — fail-closed: any other or missing role is denied.
   const canViewDiagnostics = user?.role === 'developer' || user?.role === 'brand_owner';
 
-  const handleCopyPayload = () => {
+  const handleCopyPayload = async () => {
     const payload = JSON.stringify(
       {
         ticketId: ticket.id,
@@ -94,9 +95,17 @@ export function TicketDetailPage() {
       null,
       2
     );
-    navigator.clipboard.writeText(payload);
-    setCopiedPayload(true);
-    setTimeout(() => setCopiedPayload(false), 2000);
+    // M5: the clipboard write is async and can reject (denied permission,
+    // insecure context, absent API). Announce the copy only after it resolves;
+    // otherwise report an honest failure instead of faking success.
+    try {
+      await navigator.clipboard.writeText(payload);
+      setCopiedPayload(true);
+      toast.success('Diagnostics payload copied to clipboard.');
+      setTimeout(() => setCopiedPayload(false), 2000);
+    } catch {
+      toast.error('Copy failed — select the payload and copy it manually.');
+    }
   };
 
   // Partial-refund validation lives in utils/refundValidation (unit-tested):
@@ -236,11 +245,19 @@ export function TicketDetailPage() {
     if (!replyText.trim()) return;
     // authorRole is intentionally NOT sent: the legacy fallback derives the
     // timeline actor role from the session store, never from screen props.
-    await addMessage.mutateAsync({
-      text: replyText.trim(),
-      authorName: user?.name || 'Store Staff',
-    });
-    setReplyText('');
+    // L5: a rejected send must be reported, not swallowed — and the draft is
+    // cleared only once the server call resolves.
+    try {
+      await addMessage.mutateAsync({
+        text: replyText.trim(),
+        authorName: user?.name || 'Store Staff',
+      });
+      setReplyText('');
+    } catch (err) {
+      toast.error('Reply NOT sent.', {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    }
   };
 
   return (

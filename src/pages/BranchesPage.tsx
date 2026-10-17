@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import type { Branch } from '@/types';
 import type { FranchiseLead } from '@/hooks/useFranchiseLeads';
+import { toast } from 'sonner';
 
 const isActiveBranch = (branch: Branch): boolean =>
   branch.status === 'active' || (branch.active && !branch.status);
@@ -300,7 +301,9 @@ export function BranchesPage() {
                             <span>Delivery Radius:</span>
                           </div>
                           <div className="font-mono font-bold text-white mt-0.5">
-                            {branch.deliveryRadiusKm || 7} km Geofence
+                            {branch.deliveryRadiusKm
+                              ? `${branch.deliveryRadiusKm} km Geofence`
+                              : 'Not configured'}
                           </div>
                         </div>
 
@@ -310,7 +313,9 @@ export function BranchesPage() {
                             <span>Route Royalty:</span>
                           </div>
                           <div className="font-mono font-bold text-white mt-0.5">
-                            {branch.brandRoyaltyPercent || 5.0}% Escrow Cut
+                            {branch.brandRoyaltyPercent != null
+                              ? `${branch.brandRoyaltyPercent}% Escrow Cut`
+                              : 'Not configured'}
                           </div>
                         </div>
                       </div>
@@ -352,10 +357,20 @@ export function BranchesPage() {
                       {userCanEdit && !isComingSoon && (
                         <button
                           onClick={() =>
-                            toggleBranchStatus.mutate({
-                              branchId: branch.id,
-                              active: !branch.active,
-                            })
+                            toggleBranchStatus.mutate(
+                              {
+                                branchId: branch.id,
+                                active: !branch.active,
+                              },
+                              {
+                                // A rejected write leaves the outlet in its old
+                                // state — say so instead of failing silently.
+                                onError: () =>
+                                  toast.error(
+                                    `Could not update ${branch.name}. The outlet status is unchanged.`
+                                  ),
+                              }
+                            )
                           }
                           className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors flex items-center gap-1.5 cursor-pointer ${
                             branch.active

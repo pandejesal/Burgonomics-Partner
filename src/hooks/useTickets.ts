@@ -48,11 +48,19 @@ export function useTickets(params: UseTicketsParams = {}) {
         } else if ((user.branchIds || []).includes(selectedBranchId)) {
           branchIds = [selectedBranchId];
         } else if (user.role === 'regional_manager') {
-          const citySnap = await getDocs(
-            query(collection(db, 'branches'), where('city', 'in', user.cityIds || ['Ahmedabad', 'Surat']))
-          );
-          const cityIds = citySnap.docs.map((d) => d.id);
-          branchIds = cityIds.includes(selectedBranchId) ? [selectedBranchId] : [];
+          // Fail closed: a manager with no assigned cities has NO scope. The
+          // old `|| ['Ahmedabad','Surat']` silently handed them two foreign
+          // cities' tickets.
+          const cityIds = user.cityIds ?? [];
+          if (cityIds.length > 0) {
+            const citySnap = await getDocs(
+              query(collection(db, 'branches'), where('city', 'in', cityIds))
+            );
+            const scopedBranchIds = citySnap.docs.map((d) => d.id);
+            branchIds = scopedBranchIds.includes(selectedBranchId) ? [selectedBranchId] : [];
+          } else {
+            branchIds = [];
+          }
         } else {
           branchIds = [];
         }
@@ -61,10 +69,17 @@ export function useTickets(params: UseTicketsParams = {}) {
           const branchesSnap = await getDocs(collection(db, 'branches'));
           branchIds = branchesSnap.docs.map((d) => d.id);
         } else if (user.role === 'regional_manager') {
-          const branchesSnap = await getDocs(
-            query(collection(db, 'branches'), where('city', 'in', user.cityIds || ['Ahmedabad', 'Surat']))
-          );
-          branchIds = branchesSnap.docs.map((d) => d.id);
+          // Fail closed (see above): an unknown city scope denies, it never
+          // falls back to two hardcoded cities.
+          const cityIds = user.cityIds ?? [];
+          if (cityIds.length > 0) {
+            const branchesSnap = await getDocs(
+              query(collection(db, 'branches'), where('city', 'in', cityIds))
+            );
+            branchIds = branchesSnap.docs.map((d) => d.id);
+          } else {
+            branchIds = [];
+          }
         } else {
           branchIds = user.branchIds || [];
         }
@@ -73,6 +88,12 @@ export function useTickets(params: UseTicketsParams = {}) {
       // Loop 7: scoped role with no branches sees NOTHING — the old fallback
       // handed two foreign branches (surat/ahmedabad) to unassigned roles.
       if (branchIds.length === 0) {
+        // An unknown regional scope is a denial, not a silent empty list.
+        if (user.role === 'regional_manager' && (user.cityIds ?? []).length === 0) {
+          warningsRef.current.push(
+            'No cities are assigned to your account - tickets are scoped to your cities.'
+          );
+        }
         return [];
       }
 

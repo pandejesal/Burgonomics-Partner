@@ -16,10 +16,20 @@ interface HourlyRushHeatmapProps {
 }
 
 export function HourlyRushHeatmap({ data }: HourlyRushHeatmapProps) {
-  const peakHour = [...data].sort((a, b) => b.orders - a.orders)[0] || {
-    label: '8 PM',
-    orders: 42,
-  };
+  // Real peak only: the highest hour that actually recorded an order. An empty
+  // period has NO peak — the old fallback asserted "8 PM / 42 orders" for every
+  // outlet, including ones with zero orders.
+  const peakHour = data.reduce<HourlyRushData | null>(
+    (best, slot) => (slot.orders > 0 && (!best || slot.orders > best.orders) ? slot : best),
+    null
+  );
+
+  // Prep time is only real when the analytics source reports one; the hook
+  // deliberately leaves avgPrepMinutes at 0 = unmeasured.
+  const measuredPrep = data.filter((slot) => slot.avgPrepMinutes > 0);
+  const averagePrepMinutes = measuredPrep.length
+    ? measuredPrep.reduce((sum, slot) => sum + slot.avgPrepMinutes, 0) / measuredPrep.length
+    : null;
 
   return (
     <div className="bg-surface rounded-2xl border border-border p-6 shadow-xl space-y-5 select-none">
@@ -39,12 +49,17 @@ export function HourlyRushHeatmap({ data }: HourlyRushHeatmapProps) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        {peakHour ? (
           <span className="flex items-center gap-1.5 px-3 py-1 bg-bg rounded-xl border border-border text-xs font-bold text-amber-400">
             <Flame className="w-3.5 h-3.5 text-accent-light" />
             <span>Peak: {peakHour.label} ({peakHour.orders} orders)</span>
           </span>
-        </div>
+        ) : (
+          <span className="flex items-center gap-1.5 px-3 py-1 bg-bg rounded-xl border border-border text-xs font-bold text-zinc-400">
+            <Flame className="w-3.5 h-3.5 text-zinc-500" />
+            <span>No peak hour - no orders recorded in this period</span>
+          </span>
+        )}
       </div>
 
       {/* 24-Hour Bar Chart */}
@@ -106,7 +121,15 @@ export function HourlyRushHeatmap({ data }: HourlyRushHeatmapProps) {
           <ChefHat className="w-4 h-4 text-emerald-400" />
           <div>
             <div className="text-xs font-bold text-white">Avg Peak Prep Time</div>
-            <div className="text-[10px] text-emerald-300 font-mono">13.5 mins (KDS SLA compliant)</div>
+            <div
+              className={`text-[10px] font-mono ${
+                averagePrepMinutes !== null ? 'text-emerald-300' : 'text-zinc-400'
+              }`}
+            >
+              {averagePrepMinutes !== null
+                ? `${averagePrepMinutes.toFixed(1)} mins (KDS measured)`
+                : 'Not measured'}
+            </div>
           </div>
         </div>
 
@@ -114,7 +137,7 @@ export function HourlyRushHeatmap({ data }: HourlyRushHeatmapProps) {
           <Zap className="w-4 h-4 text-accent-light" />
           <div>
             <div className="text-xs font-bold text-white">Staffing Recommendation</div>
-            <div className="text-[10px] text-zinc-400">3 Grill Masters + 2 Assembly Line</div>
+            <div className="text-[10px] text-zinc-400">Not measured (no staffing data source)</div>
           </div>
         </div>
       </div>

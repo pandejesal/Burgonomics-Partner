@@ -153,7 +153,52 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
       }
 
       try {
-        if (isGlobalRole(user.role)) {
+        if (user.role === 'regional_manager') {
+          // Regional managers are CITY-scoped, so their city check runs
+          // BEFORE the explicit-selection short-circuit: a forged or stale
+          // localStorage `selectedBranchId` must never widen them past their
+          // assigned cities (the old code took it verbatim). Fail closed: no
+          // assigned cities means NO analytics scope, never a two-city guess.
+          const cityIds = user.cityIds ?? [];
+          if (cityIds.length === 0) {
+            return emptyResult(
+              'No cities are assigned to your account - analytics are scoped to your cities.'
+            );
+          }
+          const branchesSnap = await getDocs(
+            query(collection(db, 'branches'), where('city', 'in', cityIds), limit(100))
+          );
+          const allowedBranchIds = new Set<string>();
+          branchesSnap.docs.forEach((d) => {
+            allowedBranchIds.add(d.id);
+            const data = d.data();
+            branchMeta[d.id] = {
+              name: data.name || d.id,
+              city: data.city || 'Gujarat',
+              accountId: data.razorpayAccountId || `acc_Rzp_${d.id}`,
+            };
+          });
+          if (
+            selectedBranchId &&
+            selectedBranchId !== 'all' &&
+            !allowedBranchIds.has(selectedBranchId)
+          ) {
+            return emptyResult(
+              'Selected outlet is outside your assigned cities - analytics are scoped to your cities.'
+            );
+          }
+          branchIds =
+            selectedBranchId && selectedBranchId !== 'all'
+              ? [selectedBranchId]
+              : [...allowedBranchIds];
+          if (branchIds.length === 0) {
+            // Mirrors useTickets: a city scope that resolves to no outlets is
+            // a denial, never an unfiltered all-outlets read.
+            return emptyResult(
+              'No outlets were found in your assigned cities - analytics are scoped to your cities.'
+            );
+          }
+        } else if (isGlobalRole(user.role)) {
           if (selectedBranchId && selectedBranchId !== 'all') {
             branchIds = [selectedBranchId];
           } else if (['brand_owner', 'developer', 'support'].includes(user.role)) {
@@ -169,24 +214,17 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
                 accountId: data.razorpayAccountId || `acc_Rzp_${d.id}`,
               };
             });
-          } else if (user.role === 'regional_manager') {
-            const cityIds = user.cityIds?.length ? user.cityIds : ['Ahmedabad', 'Surat'];
-            const branchesSnap = await getDocs(
-              query(collection(db, 'branches'), where('city', 'in', cityIds), limit(100))
-            );
-            branchesSnap.docs.forEach((d) => {
-              branchIds.push(d.id);
-              const data = d.data();
-              branchMeta[d.id] = {
-                name: data.name || d.id,
-                city: data.city || 'Gujarat',
-                accountId: data.razorpayAccountId || `acc_Rzp_${d.id}`,
-              };
-            });
           }
         }
       } catch (err) {
         console.warn('Error querying branches for analytics:', err);
+        // Fail CLOSED for every role whose scope needed this read: an
+        // unresolved scope must never fall through to an unfiltered,
+        // all-outlets orders read. Brand-wide roles are the only exception
+        // (their empty scope genuinely means "all outlets").
+        if (user.role === 'regional_manager' || !isGlobalRole(user.role)) {
+          return emptyResult('Could not resolve your outlet scope - analytics are not shown.');
+        }
         warnings.push('Branch list failed to load — figures cover all outlets.');
       }
 
@@ -540,10 +578,15 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         .reduce((s, o) => s + (Number((o as any).deliveryFee) || 0), 0);
       const deliveryOrders = chanAgg.delivery.orders;
 
+      // No Porter billing source is wired: the courier cost is UNKNOWN, not
+      // zero. It is reported as 0 here and the UI withholds any margin verdict
+      // while cost === 0 beside live trips (see FulfillmentDonut).
+      const porterIncurredCost = 0;
+
       const logistics: LogisticsSummary = {
         deliveryFeesCollected: Math.round(deliveryFeesCollected),
-        porterIncurredCost: 0,
-        netMargin: Math.round(deliveryFeesCollected),
+        porterIncurredCost,
+        netMargin: Math.round(deliveryFeesCollected - porterIncurredCost),
         totalDeliveryTrips: deliveryOrders,
         avgDeliveryDistanceKm: 0,
       };

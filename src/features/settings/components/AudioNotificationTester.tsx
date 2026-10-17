@@ -15,6 +15,7 @@ import {
   isKDSAudioUnlocked,
   isKDSAudioMuted,
   setKDSAudioMuted,
+  KDS_ALARM_REPEAT_MS,
 } from '@/utils/kdsAudio';
 import { toast } from 'sonner';
 
@@ -22,7 +23,6 @@ export function AudioNotificationTester() {
   const [volume, setVolume] = useState<number>(85);
   const [isMuted, setIsMuted] = useState<boolean>(isKDSAudioMuted());
   const [isAudioUnlocked, setIsAudioUnlocked] = useState<boolean>(isKDSAudioUnlocked());
-  const [repeatAlarm, setRepeatAlarm] = useState<boolean>(true);
   const [isPlayingTest, setIsPlayingTest] = useState<boolean>(false);
 
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(
@@ -35,17 +35,28 @@ export function AudioNotificationTester() {
     setIsMuted(muted);
     setKDSAudioMuted(muted);
     if (!muted) {
-      unlockKDSAudio().then(() => setIsAudioUnlocked(true));
+      // Reflect the REAL unlock result, never a hardcoded success.
+      unlockKDSAudio().then((ok) => setIsAudioUnlocked(ok));
     }
   };
 
   const handleTestChime = async () => {
     setIsPlayingTest(true);
-    await unlockKDSAudio();
-    setIsAudioUnlocked(true);
-    playKDSChime();
+    const unlocked = await unlockKDSAudio();
+    setIsAudioUnlocked(unlocked);
 
-    toast.success('Played kitchen acoustic alarm test tone (E5-G#5-B5)!');
+    // Report the real state: a muted alarm plays nothing (playKDSChime
+    // short-circuits on mute) and a failed unlock leaves the context silent,
+    // so the toast must never claim a tone that did not play.
+    if (isMuted) {
+      toast.error('Alarm is muted — nothing played. Unmute to test the chime.');
+    } else if (!unlocked) {
+      toast.error('Audio could not be unlocked — nothing played. Tap the screen once, then retry.');
+    } else {
+      playKDSChime();
+      toast.success('Played the kitchen alarm test tone (A5 → D6).');
+    }
+
     setTimeout(() => {
       setIsPlayingTest(false);
     }, 1200);
@@ -62,11 +73,13 @@ export function AudioNotificationTester() {
       setNotificationPermission(permission);
 
       if (permission === 'granted') {
+        // Local browser notification only — no push service / server delivery
+        // is configured, so the copy never claims a background push was sent.
         new Notification('Burgonomics Kitchen POS', {
-          body: '🔔 Push notification channel verified! New order alarms are active.',
+          body: '🔔 Test browser notification delivered. Kitchen alarms sound only while this app is open.',
           icon: '/favicon.ico',
         });
-        toast.success('Notification permission granted & test push sent!');
+        toast.success('Permission granted — test browser notification sent.');
       } else {
         toast.error('Notification permission was not granted.');
       }
@@ -85,13 +98,13 @@ export function AudioNotificationTester() {
           </div>
           <div>
             <h2 className="text-base font-black tracking-tight text-white flex items-center gap-2">
-              <span>Acoustic Chime & Push Notification Alarm</span>
+              <span>Acoustic Chime & Browser Notification Test</span>
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/40 text-emerald-400 font-mono font-bold">
                 High Priority Alert
               </span>
             </h2>
             <p className="text-xs text-neutral-400">
-              Configure speaker volume, Web Audio API synthesis, and browser push notification permissions
+              Preview the kitchen chime, set the local mute, and manage browser notification permission
             </p>
           </div>
         </div>
@@ -115,7 +128,7 @@ export function AudioNotificationTester() {
                 : 'bg-neutral-900 border-neutral-700 text-neutral-400'
             }`}
           >
-            Push: {notificationPermission.toUpperCase()}
+            Notifications: {notificationPermission.toUpperCase()}
           </span>
         </div>
       </div>
@@ -125,7 +138,7 @@ export function AudioNotificationTester() {
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <label className="text-xs font-bold uppercase text-neutral-400">
-              Kitchen Buzzer Volume
+              Preview Volume
             </label>
             <span className="font-mono font-bold text-xs text-[#4ADE80]">{isMuted ? 'Muted' : `${volume}%`}</span>
           </div>
@@ -151,6 +164,11 @@ export function AudioNotificationTester() {
             />
           </div>
 
+          <p className="text-[10px] text-neutral-500">
+            Visual reference only — this slider does not change the alarm volume or the
+            system volume (use your device volume).
+          </p>
+
           <div className="flex items-center justify-between pt-1">
             <button
               type="button"
@@ -162,27 +180,22 @@ export function AudioNotificationTester() {
               <span>{isPlayingTest ? 'Playing Chime...' : 'Test Kitchen Chime'}</span>
             </button>
 
-            <label className="flex items-center gap-2 cursor-pointer text-xs text-neutral-300">
-              <input
-                type="checkbox"
-                checked={repeatAlarm}
-                onChange={(e) => setRepeatAlarm(e.target.checked)}
-                className="rounded border-neutral-700 text-[#0E4825] focus:ring-0 cursor-pointer"
-              />
-              <span className="font-semibold text-xs">Repeat every 15s until acknowledged</span>
-            </label>
+            <p className="text-[11px] font-semibold text-neutral-300 text-right">
+              {`Pending-order alarm repeats every ${KDS_ALARM_REPEAT_MS / 1000}s until acknowledged.`}
+            </p>
           </div>
         </div>
 
-        {/* Browser Push Permission & FCM Tester */}
+        {/* Browser Notifications */}
         <div className="space-y-3 p-4 rounded-2xl bg-neutral-900/60 border border-neutral-800 flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-2 text-white font-bold text-xs mb-1">
               <Bell className="w-4 h-4 text-[#FF6600]" />
-              <span>Browser Push & Background Wakeup</span>
+              <span>Browser Notifications</span>
             </div>
             <p className="text-[11px] text-neutral-400">
-              Enables background KOT chime alerts and dispatch status notifications even when the POS tab is minimized.
+              Uses the browser Notification API only — no push service is configured, so
+              alerts display while this app stays open in a tab.
             </p>
           </div>
 
@@ -194,8 +207,8 @@ export function AudioNotificationTester() {
             <Bell className="w-3.5 h-3.5 text-emerald-400" />
             <span>
               {notificationPermission === 'granted'
-                ? 'Send Test Push Alert'
-                : 'Request Permission & Test FCM'}
+                ? 'Send Test Browser Notification'
+                : 'Enable Browser Notifications'}
             </span>
           </button>
         </div>

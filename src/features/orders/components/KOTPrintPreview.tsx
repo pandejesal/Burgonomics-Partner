@@ -52,21 +52,22 @@ export function KOTPrintPreview({ order, isOpen, onClose }: KOTPrintPreviewProps
   };
 
   const handleCopy = () => {
+    // M6: no clipboard API (insecure context / unsupported browser) means
+    // nothing is copied — say so instead of showing a fake "Copied".
+    if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+      toast.error('Clipboard not available — select the slip text and copy it manually.');
+      return;
+    }
     try {
-      const done = navigator.clipboard?.writeText(asciiKOT);
-      if (done && typeof (done as Promise<void>).then === 'function') {
-        (done as Promise<void>)
-          .then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-          })
-          .catch(() => {
-            toast.error('Copy failed — select the slip text and copy manually.');
-          });
-        return;
-      }
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      navigator.clipboard
+        .writeText(asciiKOT)
+        .then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        })
+        .catch(() => {
+          toast.error('Copy failed — select the slip text and copy manually.');
+        });
     } catch {
       toast.error('Copy failed — select the slip text and copy manually.');
     }
@@ -216,7 +217,7 @@ export function KOTPrintPreview({ order, isOpen, onClose }: KOTPrintPreviewProps
               <div className="pt-3 text-center text-[10px] font-bold">
                 <p>Total Items: {kotData.items.reduce((a, b) => a + b.quantity, 0)}</p>
                 <p className="mt-1 border-t border-dotted border-black pt-1">
-                  Printed via Petpooja POS
+                  Printed from Burgonomics Partner
                 </p>
               </div>
             </div>

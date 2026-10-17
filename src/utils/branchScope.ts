@@ -1,6 +1,11 @@
 import type { User, UserRole } from '@/types';
 
-/** Roles with brand-wide visibility. Everyone else is scoped to user.branchIds. */
+/**
+ * Roles with brand-wide *selection* visibility — they may pick any outlet in
+ * the switcher. NOTE: `regional_manager` is listed here for SELECTION only;
+ * its data reads must still be clamped to `user.cityIds` (see useAnalytics /
+ * useTickets), so this list is not a licence for brand-wide data access.
+ */
 export const GLOBAL_ROLES: UserRole[] = [
   'brand_owner',
   'developer',

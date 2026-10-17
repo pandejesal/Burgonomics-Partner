@@ -218,7 +218,19 @@ export function UsersPage() {
           users={filteredUsers}
           branches={branches}
           onEdit={(user) => setEditingUser(user)}
-          onToggleStatus={(userId, active) => toggleUserStatus.mutate({ userId, active })}
+          onToggleStatus={(userId, active) =>
+            // L4: a rejected toggle used to leave the roster unchanged with no
+            // feedback — surface the failure instead of failing silently.
+            toggleUserStatus.mutate(
+              { userId, active },
+              {
+                onError: (err) =>
+                  toast.error('Status NOT changed.', {
+                    description: err instanceof Error ? err.message : String(err),
+                  }),
+              }
+            )
+          }
           onRevoke={(user) => setRevokingUser(user)}
         />
       )}

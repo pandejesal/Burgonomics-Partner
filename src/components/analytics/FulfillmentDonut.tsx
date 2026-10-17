@@ -23,6 +23,15 @@ export function FulfillmentDonut({ breakdown, logistics }: FulfillmentDonutProps
     percentage: b.percentage,
   }));
 
+  // A courier cost of exactly 0 alongside live trips means the cost side is
+  // UNMEASURED (no Porter billing source), not free delivery — so no margin
+  // verdict can be stated. The old badge asserted "Positive Margin" always.
+  const courierCostKnown = !(
+    logistics.porterIncurredCost === 0 && logistics.totalDeliveryTrips > 0
+  );
+  const netMargin = logistics.netMargin;
+  const marginIsNegative = netMargin < 0;
+
   const getChannelIcon = (channel: string) => {
     switch (channel) {
       case 'delivery':
@@ -130,12 +139,29 @@ export function FulfillmentDonut({ breakdown, logistics }: FulfillmentDonutProps
         <div className="space-y-0.5">
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold text-white">Porter Logistics Reconciliation</span>
-            <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">
-              Positive Margin
-            </span>
+            {!courierCostKnown ? (
+              <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-zinc-900 text-zinc-400 border border-zinc-700">
+                Cost data unavailable
+              </span>
+            ) : (
+              <span
+                className={`px-2 py-0.5 rounded text-[9px] font-bold border ${
+                  marginIsNegative
+                    ? 'bg-rose-950 text-rose-300 border-rose-800'
+                    : netMargin > 0
+                    ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                    : 'bg-zinc-900 text-zinc-300 border-zinc-700'
+                }`}
+              >
+                {marginIsNegative ? 'Negative Margin' : netMargin > 0 ? 'Positive Margin' : 'Break-even'}
+              </span>
+            )}
           </div>
           <p className="text-[10px] text-zinc-400">
-            {logistics.totalDeliveryTrips} Porter delivery trips dispatched (Avg {logistics.avgDeliveryDistanceKm} km per trip)
+            {logistics.totalDeliveryTrips} Porter delivery trips dispatched
+            {logistics.avgDeliveryDistanceKm > 0
+              ? ` (Avg ${logistics.avgDeliveryDistanceKm} km per trip)`
+              : ''}
           </p>
         </div>
 
@@ -151,8 +177,30 @@ export function FulfillmentDonut({ breakdown, logistics }: FulfillmentDonutProps
           </div>
           <span className="text-zinc-600">=</span>
           <div>
-            <span className="text-[10px] text-emerald-400 block">Net Margin</span>
-            <span className="text-emerald-300 font-black">+₹{logistics.netMargin.toLocaleString()}</span>
+            <span
+              className={`text-[10px] block ${
+                !courierCostKnown
+                  ? 'text-zinc-400'
+                  : marginIsNegative
+                  ? 'text-rose-400'
+                  : 'text-emerald-400'
+              }`}
+            >
+              Net Margin
+            </span>
+            <span
+              className={`font-black ${
+                !courierCostKnown
+                  ? 'text-zinc-400'
+                  : marginIsNegative
+                  ? 'text-rose-300'
+                  : 'text-emerald-300'
+              }`}
+            >
+              {!courierCostKnown
+                ? 'Unavailable'
+                : `${marginIsNegative ? '-' : netMargin > 0 ? '+' : ''}₹${Math.abs(netMargin).toLocaleString()}`}
+            </span>
           </div>
         </div>
       </div>
