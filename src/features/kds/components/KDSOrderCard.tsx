@@ -269,7 +269,7 @@ export function KDSOrderCard({
           {isReady && (
             <>
               <CheckCircle2 className="w-5 h-5 stroke-[2.5]" />
-              <span>{isDelivery ? 'Dispatch to Rider ✓' : 'Handover to Customer ✓'}</span>
+              <span>{isDelivery ? 'Mark Out for Delivery ✓' : 'Handover to Customer ✓'}</span>
             </>
           )}
         </button>

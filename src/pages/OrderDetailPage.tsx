@@ -10,10 +10,6 @@ import {
   PetpoojaTestRunnerModal,
 } from '@/features/orders';
 import {
-  getPorterDeliveryQuote,
-  type PorterDeliveryQuote,
-} from '@/services/porterDelivery';
-import {
   ArrowLeft,
   Printer,
   Bike,
@@ -35,7 +31,8 @@ import { ConfirmDialog } from '../admin/components/Utilities';
 import { DeliveryOtpModal } from '@/components/DeliveryOtpModal';
 import { useAuthStore } from '@/stores/authStore';
 import { useQueryClient } from '@tanstack/react-query';
-import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
+import { partnerFunctionsApi, dispatchProviderLabel } from '@/services/partnerFunctionsApi';
+import type { DispatchQuoteResult } from '@/services/partnerFunctionsApi';
 
 /**
  * POST /payments/refund is requireRole(["brand_owner","developer","support"])
@@ -54,6 +51,7 @@ export function OrderDetailPage() {
   const {
     order,
     isLoading,
+    error: orderError,
     updateStatus,
     pushToPetpooja,
     autoDispatchPorter,
@@ -70,8 +68,10 @@ export function OrderDetailPage() {
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [isSyncingPetpooja, setIsSyncingPetpooja] = useState(false);
 
-  // Porter quote state
-  const [porterQuote, setPorterQuote] = useState<PorterDeliveryQuote | null>(null);
+  // Server quote state: the authoritative dispatch quote replaces the old
+  // client-side rate card, which fabricated a fare (₹40 base + ₹10/km) and
+  // presented it as a live Porter quote.
+  const [porterQuote, setPorterQuote] = useState<DispatchQuoteResult | null>(null);
   const [loadingQuote, setLoadingQuote] = useState(false);
   const { branches } = useBranches();
   const [isDispatchingPorter, setIsDispatchingPorter] = useState(false);
@@ -92,29 +92,48 @@ export function OrderDetailPage() {
     order?.orderType === 'delivery' || (order as any)?.fulfillment === 'delivery';
 
   useEffect(() => {
-    if (!order || !isDeliveryOrder) return;
+    if (!order || !isDeliveryOrder || !orderIdForQuote) return;
     setLoadingQuote(true);
-    // Pickup from the branch record's real coordinates (fail-closed in the
-    // service when missing — never fabricated defaults).
-    getPorterDeliveryQuote({
-      pickupLat,
-      pickupLng,
-      dropLat,
-      dropLng,
-      customerName: order.customerName,
-      customerPhone: order.customerPhone,
-    })
+    // Server-authoritative quote (multi-provider): pickup from the branch
+    // record's real coordinates, drop from the order — missing pins fail
+    // closed client-side before a request is sent, never a number without
+    // server backing. A failure or serviceable:false renders honestly below;
+    // the fabricated client rate card has been removed.
+    if (![pickupLat, pickupLng, dropLat, dropLng].every((c) => typeof c === 'number' && Number.isFinite(c))) {
+      setPorterQuote(null);
+      setLoadingQuote(false);
+      return;
+    }
+    let stale = false;
+    partnerFunctionsApi
+      .dispatchQuote({
+        pickupLat: pickupLat as number,
+        pickupLng: pickupLng as number,
+        dropLat: dropLat as number,
+        dropLng: dropLng as number,
+        customerName: order.customerName,
+        customerPhone: order.customerPhone,
+        orderId: orderIdForQuote,
+      })
       .then((q) => {
+        if (stale) return;
         setPorterQuote(q);
         setLoadingQuote(false);
       })
       .catch((err) => {
+        if (stale) return;
+        setPorterQuote(null);
         setLoadingQuote(false);
         // Never swallow: a missing quote looks identical to "free delivery".
         toast.error('Delivery quote failed', {
           description: err instanceof Error ? err.message : 'Could not reach the dispatcher.',
         });
       });
+    // Out-of-order guard: a refetch (new drop pin / branch coordinates) must
+    // not let the older request's response overwrite the newer one.
+    return () => {
+      stale = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderIdForQuote, dropLat, dropLng, pickupLat, pickupLng, isDeliveryOrder]);
 
@@ -128,20 +147,47 @@ export function OrderDetailPage() {
   }
 
   if (!order) {
+    // Typed read failures are not "not found": permission-denied means the
+    // order is outside the caller's scope, unavailable/network means the
+    // backend could not answer, and only a doc that genuinely does not exist
+    // (or a refusal with no typed code) claims it is gone. No raw internals
+    // are exposed.
+    const readCode = (orderError as { code?: string } | null)?.code;
+    const retryable = readCode === 'unavailable' || readCode === 'network-request-failed';
+    const denied = readCode === 'permission-denied';
+    const heading = denied
+      ? 'Order Outside Your Branch'
+      : retryable
+      ? 'Order Details Unreachable'
+      : 'Order Not Found';
+    const detail = denied
+      ? 'This order belongs to a branch outside your assigned scope, or its outlet is unlinked.'
+      : retryable
+      ? 'Could not read this order right now. Check the connection and retry.'
+      : 'The requested order ID may have been archived or deleted.';
     return (
       <div className="text-center py-20 bg-neutral-900/60 rounded-3xl border border-neutral-800 max-w-xl mx-auto my-12 p-8">
         <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto mb-3" />
-        <h2 className="text-lg font-black text-white">Order Not Found</h2>
-        <p className="text-xs text-neutral-400 mt-1">
-          The requested order ID may have been archived or deleted.
-        </p>
-        <Link
-          to="/orders"
-          className="mt-5 inline-flex items-center gap-2 px-5 py-2.5 bg-[#0E4825] text-emerald-300 font-bold text-xs rounded-xl shadow-sm"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          <span>Back to Live Orders</span>
-        </Link>
+        <h2 className="text-lg font-black text-white">{heading}</h2>
+        <p className="text-xs text-neutral-400 mt-1">{detail}</p>
+        <div className="mt-5 inline-flex flex-wrap items-center justify-center gap-3">
+          <Link
+            to="/orders"
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#0E4825] text-emerald-300 font-bold text-xs rounded-xl shadow-sm"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Back to Live Orders</span>
+          </Link>
+          {(retryable || denied) && (
+            <button
+              type="button"
+              onClick={() => queryClient.invalidateQueries({ queryKey: ['order', id] })}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-neutral-800 border border-neutral-700 text-white font-bold text-xs rounded-xl"
+            >
+              Retry
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -294,14 +340,17 @@ export function OrderDetailPage() {
       toast.error("You're offline — booking not attempted. Reconnect and retry.");
       return;
     }
-    // Paid-booking confirm with the live fare — a Porter dispatch spends
-    // real money and cannot be undone.
-    const fareHint = porterQuote ? ` (~₹${porterQuote.estimatedFare})` : '';
+    // Paid-booking confirm with the SERVER-backed fare and provider only —
+    // a fabricated client number must never be presented as the booking price.
+    const fareHint =
+      porterQuote?.serviceable === true && typeof porterQuote.estimatedFare === 'number'
+        ? `(server quote ~₹${porterQuote.estimatedFare} via ${dispatchProviderLabel(porterQuote.winner)})`
+        : '';
     const confirmed =
       typeof window === 'undefined'
         ? true
         : window.confirm(
-            `Book a PAID Porter rider${fareHint} for this order? This charges the branch and cannot be undone.`
+            `Book a PAID courier rider${fareHint} for this order? This charges the branch and cannot be undone.`
           );
     if (!confirmed) return;
     setIsDispatchingPorter(true);
@@ -611,14 +660,28 @@ export function OrderDetailPage() {
             {/* Porter Delivery Dispatch Section */}
             {isDelivery && (
               <div className="pt-3 border-t border-neutral-800 space-y-2">
+                {/* Courier Quote: server-authoritative multi-provider quote.
+                    The client-side Porter rate card (fabricated ₹40 + ₹10/km)
+                    has been removed — anything that is not a server-backed
+                    number renders as unavailable, never "Available". */}
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-neutral-400">Porter Courier:</span>
+                  <span className="font-bold text-neutral-400">Courier Quote:</span>
                   <span className="font-mono text-emerald-400 font-bold">
                     {loadingQuote
                       ? 'Fetching quote...'
-                      : porterQuote
-                      ? `₹${porterQuote.estimatedFare} (${porterQuote.estimatedPickupMinutes}m)`
-                      : 'Available'}
+                      : porterQuote?.serviceable === true &&
+                        typeof porterQuote.estimatedFare === 'number'
+                      ? [
+                          `₹${porterQuote.estimatedFare} via ${dispatchProviderLabel(porterQuote.winner)}`,
+                          typeof porterQuote.estimatedPickupMinutes === 'number'
+                            ? `(${porterQuote.estimatedPickupMinutes}m)`
+                            : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ')
+                      : porterQuote?.serviceable === false
+                      ? porterQuote.message || porterQuote.reason || 'Out of dispatch zone'
+                      : 'Quote unavailable — dispatch from the Delivery Queue'}
                   </span>
                 </div>
 
@@ -639,8 +702,8 @@ export function OrderDetailPage() {
                       setConfirmPorterDispatch(false);
                       void handleDispatchPorterRider();
                     }}
-                    title="Dispatch Porter rider?"
-                    description={`This books a real paid courier${porterQuote ? ` at an estimated fare of ₹${porterQuote.estimatedFare} (ETA ${porterQuote.estimatedPickupMinutes}m)` : ''}. This action spends money.`}
+                    title="Dispatch courier rider?"
+                    description={`This books a real paid courier${porterQuote?.serviceable === true && typeof porterQuote.estimatedFare === 'number' ? ` at an estimated fare of ₹${porterQuote.estimatedFare} via ${dispatchProviderLabel(porterQuote.winner)}${typeof porterQuote.estimatedPickupMinutes === 'number' ? ` (ETA ${porterQuote.estimatedPickupMinutes}m)` : ''}` : ''}. This action spends money.`}
                     confirmLabel="Dispatch Rider"
                   />
                 )}

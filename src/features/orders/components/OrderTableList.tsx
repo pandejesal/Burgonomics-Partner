@@ -170,7 +170,11 @@ export function OrderTableList({
                         : 'text-amber-400'
                     }`}
                   >
-                    {order.paymentStatus === 'completed' ? 'Paid ✓' : 'Pending'}
+                    {order.paymentStatus === 'completed'
+                      ? 'Paid ✓'
+                      : order.paymentStatus === 'failed'
+                      ? 'Failed'
+                      : 'Pending'}
                   </span>
                 </td>
 
