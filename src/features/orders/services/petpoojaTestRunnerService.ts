@@ -2,10 +2,15 @@
  * Petpooja test runner service — the 5-scenario onboarding relay suite.
  *
  * Each scenario relays a synthetic order through POST /petpooja/testRunner
- * (see partnerFunctionsApi.runPetpoojaTestScenario) and returns the
- * Petpooja-side order id that support needs for reconciliation.
+ * (see partnerFunctionsApi.runPetpoojaTestScenario). When the POS returns an
+ * order id it is collected for support reconciliation; when the POS accepts
+ * without returning an id (its documented sandbox behaviour) the result
+ * carries `petpoojaOrderId: null` and the copy list simply omits it.
  * Status lifecycle per scenario: Pending -> Relaying -> Fulfilled (or Failed
- * on relay error — never a silent skip).
+ * on relay error — never a silent skip). NOTE: `Fulfilled` means the POS
+ * ACCEPTED the relay — POS-side fulfilment is NOT verified here; when
+ * Petpooja returns no order id (its documented sandbox behaviour) the result
+ * carries `petpoojaOrderId: null` and is excluded from the support copy list.
  */
 import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
 
@@ -53,14 +58,60 @@ export const PETPOOJA_TEST_SCENARIOS: PetpoojaTestScenario[] = [
   },
 ];
 
-export type TestScenarioRunner = (scenarioId: string) => Promise<{ petpoojaOrderId: string }>;
+export type TestScenarioRunner = (
+  scenarioId: string,
+) => Promise<{ petpoojaOrderId: string | null }>;
 
-/** Default runner — live test runner API. Throws when no order id returns. */
+/**
+ * Default runner — live test runner API.
+ *
+ * Honesty contract (mirrors the functions-side relay in
+ * functions/src/modules/petpooja/testRunner.ts; evidence in
+ * references/petpooja_save_order_api.md §16.8/§19.2): the server answers
+ * { success:true, petpoojaOrderId: string|null, petpoojaOrderIdReturned }. A
+ * `success:true` body with an absent / null `petpoojaOrderId` means the POS
+ * ACCEPTED the relay and returned no id — Petpooja's real save_order does this
+ * in the sandbox (empty `orderID` is the normal shape of a successful save and
+ * says nothing about fulfilment). Reporting that as a failure is a false
+ * negative: it claims nothing synced when the POS holds the order. It returns
+ * { petpoojaOrderId: null } instead of throwing. Only a relay the server did
+ * NOT accept (explicit refusal), an unexpected body, or a transport failure
+ * throws — never id absence on its own.
+ */
 export const defaultTestScenarioRunner: TestScenarioRunner = async (scenarioId) => {
   const res = await partnerFunctionsApi.runPetpoojaTestScenario({ scenarioId });
-  const petpoojaOrderId = (res as { petpoojaOrderId?: string } | null)?.petpoojaOrderId;
-  if (!petpoojaOrderId) {
-    throw new Error('Test runner returned no Petpooja Order ID.');
+  const body = res as {
+    success?: boolean | number | string;
+    status?: unknown;
+    petpoojaOrderIdReturned?: boolean;
+    petpoojaOrderId?: string | null;
+  } | null;
+  const petpoojaOrderId =
+    typeof body?.petpoojaOrderId === 'string' && body.petpoojaOrderId.trim().length > 0
+      ? body.petpoojaOrderId.trim()
+      : null;
+  // Fail closed on: no body, an explicit refusal (success false), or a body
+  // with neither acceptance nor an id.
+  if (!body) {
+    throw new Error('Petpooja test runner returned no response.');
+  }
+  if (body.success === false || body.success === 0 || body.success === '0') {
+    throw new Error(
+      'Petpooja test runner relay failed — POS did not accept the scenario.',
+    );
+  }
+  // Mirrors the server's own accepted set (testRunner.ts:699-703) so a future
+  // variant that reports acceptance without a boolean success still resolves
+  // honestly instead of through the "unrecognised response" fallback.
+  const accepted =
+    body.success === true ||
+    body.success === 1 ||
+    body.success === '1' ||
+    body.status === 'success' ||
+    body.petpoojaOrderIdReturned === true ||
+    petpoojaOrderId !== null;
+  if (!accepted) {
+    throw new Error('Petpooja test runner relay failed — unrecognised response.');
   }
   return { petpoojaOrderId };
 };
@@ -99,7 +150,17 @@ export async function runAllPetpoojaTestScenarios(options?: {
     onUpdate?.(results.map((r) => ({ ...r })));
     try {
       const { petpoojaOrderId } = await runner(scenarios[i].id);
-      results[i] = { ...results[i], status: 'Fulfilled', petpoojaOrderId, error: null };
+      // POS accepted. `petpoojaOrderId` may be null (documented accepted-
+      // without-id sandbox response); the id-less outcome stays Fulfilled,
+      // and formatPetpoojaIdsForCopy excludes it from the support list.
+      // Normalise a loosely-shaped runner result to the declared null
+      // contract so downstream `=== null` checks hold.
+      results[i] = {
+        ...results[i],
+        status: 'Fulfilled',
+        petpoojaOrderId: petpoojaOrderId ?? null,
+        error: null,
+      };
     } catch (err) {
       results[i] = {
         ...results[i],
