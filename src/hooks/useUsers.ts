@@ -15,6 +15,102 @@ import {
 import type { UserRole } from '@/types';
 import { hashPinSimple } from '@/core/auth/pinHelpers';
 
+/** Firestore rules intentionally deny most staff reads (users/{uid} is
+ * owner-or-brand). A denied read is an HONEST empty — any other failure
+ * propagates (Runbook §8: no fake data masks broken wiring). */
+export function isPermissionDenied(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: string }).code === 'permission-denied'
+  );
+}
+
+/**
+ * Dev-only seed roster (Runbook §8). [DEMO]-prefixed names, and NO invented
+ * presence/session claims (no "Live in KDS" / "Just now") — a demo roster is
+ * a UI fixture, not a record that anyone is online. PIN hashes exist only for
+ * the dev demo login and authenticate nothing (sessions roster is empty).
+ */
+export function demoSeedRoster(): TeamUser[] {
+  return [
+    {
+      id: 'user_aarav_brand',
+      name: '[DEMO] Aarav Mehta',
+      email: 'aarav.mehta@burgonomics.in',
+      phone: '+91 98251 00001',
+      role: 'brand_owner' as UserRole,
+      active: true,
+      pinSet: true,
+      hashedPin: hashPinSimple('9999'),
+      cityIds: ['Surat', 'Ahmedabad', 'Mumbai', 'Vadodara'],
+      createdAt: Timestamp.fromMillis(Date.now() - 60 * 24 * 60 * 60 * 1000),
+    },
+    {
+      id: 'user_ananya_reg',
+      name: '[DEMO] Ananya Deshmukh',
+      email: 'ananya.deshmukh@burgonomics.in',
+      phone: '+91 97654 88123',
+      role: 'regional_manager' as UserRole,
+      active: true,
+      pinSet: true,
+      hashedPin: hashPinSimple('7777'),
+      cityIds: ['Ahmedabad', 'Surat'],
+      branchIds: ['branch_surat_01', 'branch_ahmedabad_01'],
+      createdAt: Timestamp.fromMillis(Date.now() - 30 * 24 * 60 * 60 * 1000),
+    },
+    {
+      id: 'user_sanjay_owner',
+      name: '[DEMO] Sanjay Patel',
+      email: 'sanjay.patel@burgonomics.in',
+      phone: '+91 98765 43210',
+      role: 'branch_owner' as UserRole,
+      active: true,
+      pinSet: true,
+      hashedPin: hashPinSimple('5678'),
+      branchIds: ['branch_surat_01'],
+      cityIds: ['Surat'],
+      createdAt: Timestamp.fromMillis(Date.now() - 45 * 24 * 60 * 60 * 1000),
+    },
+    {
+      id: 'user_ramesh_kitchen',
+      name: '[DEMO] Ramesh Patel',
+      email: 'ramesh.kitchen@burgonomics.in',
+      phone: '+91 98765 43219',
+      role: 'branch_staff' as UserRole,
+      active: true,
+      pinSet: true,
+      hashedPin: hashPinSimple('1234'),
+      branchIds: ['branch_surat_01'],
+      cityIds: ['Surat'],
+      createdAt: Timestamp.fromMillis(Date.now() - 20 * 24 * 60 * 60 * 1000),
+    },
+    {
+      id: 'user_priya_support',
+      name: '[DEMO] Priya Sharma',
+      email: 'priya.support@burgonomics.in',
+      phone: '+91 98200 99887',
+      role: 'support' as UserRole,
+      active: true,
+      pinSet: true,
+      hashedPin: hashPinSimple('4321'),
+      cityIds: ['Surat', 'Ahmedabad'],
+      createdAt: Timestamp.fromMillis(Date.now() - 15 * 24 * 60 * 60 * 1000),
+    },
+    {
+      id: 'user_alex_dev',
+      name: '[DEMO] Alex',
+      email: 'alex.dev@burgonomics.in',
+      phone: '+91 99999 88888',
+      role: 'developer' as UserRole,
+      active: true,
+      pinSet: true,
+      hashedPin: hashPinSimple('0000'),
+      createdAt: Timestamp.fromMillis(Date.now() - 90 * 24 * 60 * 60 * 1000),
+    },
+  ];
+}
+
 export interface TeamUser {
   id: string;
   name: string;
@@ -37,124 +133,41 @@ export function useUsers() {
   const { user } = useAuthStore();
   const queryClient = useQueryClient();
 
-  const { data: users = [], isLoading } = useQuery<TeamUser[]>({
+  const { data: users = [], isLoading, error } = useQuery<TeamUser[]>({
     queryKey: ['team-users', user?.id],
     queryFn: async () => {
-      try {
-        // Loop 43/120: bounded (same class as prior loops). Note: non-brand
-        // roles read near-nothing here by rules design (users/{uid} is
-        // owner-or-brand) — empty is honest, seeds stay DEV-only below.
-        let usersQuery = query(collection(db, 'users'), limit(500));
+      // Loop 43/120: bounded (same class as prior loops). Note: non-brand
+      // roles read near-nothing here by rules design (users/{uid} is
+      // owner-or-brand) — empty is honest. DEV-only seed roster loads when
+      // the collection is genuinely EMPTY; a PERMISSION-DENIED for those
+      // roles is also an honest empty (documented rules design), while any
+      // OTHER read failure surfaces as an error instead of a seed roster
+      // (Runbook §8: no fake data masks broken wiring).
+      let usersQuery = query(collection(db, 'users'), limit(500));
 
-        if (user?.role === 'regional_manager' && user.cityIds?.length) {
-          usersQuery = query(
-            collection(db, 'users'),
-            where('cityIds', 'array-contains-any', user.cityIds),
-            limit(500)
-          );
-        }
-
-        const usersSnap = await getDocs(usersQuery);
-
-        if (!usersSnap.empty) {
-          return usersSnap.docs.map((d) => ({
-            id: d.id,
-            active: true,
-            pinSet: true,
-            ...d.data(),
-          })) as TeamUser[];
-        }
-      } catch (err) {
-        console.warn('Error fetching team users, loading seed roster:', err);
+      if (user?.role === 'regional_manager' && user.cityIds?.length) {
+        usersQuery = query(
+          collection(db, 'users'),
+          where('cityIds', 'array-contains-any', user.cityIds),
+          limit(500)
+        );
       }
 
-      // Loop: 6-tier seed roster (names/phones/PIN hashes) shown when the
-      // collection is empty or denied — DEV-only. Prod shows empty; the
-      // hashes never authenticate anything (sessions roster is empty).
-      if (!import.meta.env.DEV) return [];
-      // Rich 6-Tier Seed Roster with Fast PIN mappings
-      return [
-        {
-          id: 'user_aarav_brand',
-          name: 'Aarav Mehta',
-          email: 'aarav.mehta@burgonomics.in',
-          phone: '+91 98251 00001',
-          role: 'brand_owner' as UserRole,
-          active: true,
-          pinSet: true,
-          hashedPin: hashPinSimple('9999'),
-          cityIds: ['Surat', 'Ahmedabad', 'Mumbai', 'Vadodara'],
-          lastActiveAt: 'Just now',
-          createdAt: Timestamp.fromMillis(Date.now() - 60 * 24 * 60 * 60 * 1000),
-        },
-        {
-          id: 'user_ananya_reg',
-          name: 'Ananya Deshmukh',
-          email: 'ananya.deshmukh@burgonomics.in',
-          phone: '+91 97654 88123',
-          role: 'regional_manager' as UserRole,
-          active: true,
-          pinSet: true,
-          hashedPin: hashPinSimple('7777'),
-          cityIds: ['Ahmedabad', 'Surat'],
-          branchIds: ['branch_surat_01', 'branch_ahmedabad_01'],
-          lastActiveAt: '15 mins ago',
-          createdAt: Timestamp.fromMillis(Date.now() - 30 * 24 * 60 * 60 * 1000),
-        },
-        {
-          id: 'user_sanjay_owner',
-          name: 'Sanjay Patel',
-          email: 'sanjay.patel@burgonomics.in',
-          phone: '+91 98765 43210',
-          role: 'branch_owner' as UserRole,
-          active: true,
-          pinSet: true,
-          hashedPin: hashPinSimple('5678'),
-          branchIds: ['branch_surat_01'],
-          cityIds: ['Surat'],
-          lastActiveAt: '2 mins ago',
-          createdAt: Timestamp.fromMillis(Date.now() - 45 * 24 * 60 * 60 * 1000),
-        },
-        {
-          id: 'user_ramesh_kitchen',
-          name: 'Ramesh Patel',
-          email: 'ramesh.kitchen@burgonomics.in',
-          phone: '+91 98765 43219',
-          role: 'branch_staff' as UserRole,
-          active: true,
-          pinSet: true,
-          hashedPin: hashPinSimple('1234'),
-          branchIds: ['branch_surat_01'],
-          cityIds: ['Surat'],
-          lastActiveAt: 'Live in KDS',
-          createdAt: Timestamp.fromMillis(Date.now() - 20 * 24 * 60 * 60 * 1000),
-        },
-        {
-          id: 'user_priya_support',
-          name: 'Priya Sharma',
-          email: 'priya.support@burgonomics.in',
-          phone: '+91 98200 99887',
-          role: 'support' as UserRole,
-          active: true,
-          pinSet: true,
-          hashedPin: hashPinSimple('4321'),
-          cityIds: ['Surat', 'Ahmedabad'],
-          lastActiveAt: '1 hour ago',
-          createdAt: Timestamp.fromMillis(Date.now() - 15 * 24 * 60 * 60 * 1000),
-        },
-        {
-          id: 'user_alex_dev',
-          name: 'Alex',
-          email: 'alex.dev@burgonomics.in',
-          phone: '+91 99999 88888',
-          role: 'developer' as UserRole,
-          active: true,
-          pinSet: true,
-          hashedPin: hashPinSimple('0000'),
-          lastActiveAt: 'Live in Console',
-          createdAt: Timestamp.fromMillis(Date.now() - 90 * 24 * 60 * 60 * 1000),
-        },
-      ];
+      const usersSnap = await getDocs(usersQuery).catch((err) => {
+        if (isPermissionDenied(err)) return null; // honest empty by design
+        throw err; // real backend failure — surface, never mask with seeds
+      });
+      if (usersSnap === null || usersSnap.empty) {
+        if (!import.meta.env.DEV) return [];
+        return demoSeedRoster();
+      }
+
+      return usersSnap.docs.map((d) => ({
+        id: d.id,
+        active: true,
+        pinSet: true,
+        ...d.data(),
+      })) as TeamUser[];
     },
     enabled: !!user,
   });
@@ -256,5 +269,5 @@ export function useUsers() {
     },
   });
 
-  return { users, isLoading, inviteUser, updateUser, toggleUserStatus, revokeUser };
+  return { users, isLoading, error, inviteUser, updateUser, toggleUserStatus, revokeUser };
 }

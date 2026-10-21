@@ -15,6 +15,7 @@ import {
   Store,
   User,
   AlertCircle,
+  AlertTriangle,
   DollarSign,
   Gift,
   Building,
@@ -34,7 +35,7 @@ export function TicketDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuthStore();
-  const { ticket, isLoading, addMessage } = useTicket(id || '');
+  const { ticket, isLoading, error, addMessage } = useTicket(id || '');
   const queryClient = useQueryClient();
 
   // 5 Tabs: 'refund' | 'goodwill' | 'escalate_brand' | 'escalate_dev' | 'standard'
@@ -56,6 +57,34 @@ export function TicketDetailPage() {
     return (
       <div className="p-16 text-center text-zinc-400 text-xs">Loading incident details...</div>
     );
+  }
+
+  if (error) {
+    const isTicketNotFound = error instanceof Error && error.message === 'Ticket not found.';
+    if (!isTicketNotFound) {
+      // A read failure is NOT "ticket not found" — an incident page must not
+      // conflate an outage with absence (Runbook §8 partial-data honesty).
+      return (
+        <div className="p-16 text-center bg-surface rounded-2xl border border-[#5A2A10] text-white space-y-3">
+          <AlertTriangle className="w-10 h-10 mx-auto text-orange-400" />
+          <h3 className="font-bold text-sm">Could not load ticket</h3>
+          <p className="text-xs text-zinc-400 max-w-sm mx-auto">
+            The ticket read failed from Firestore — this is a connection/backend
+            outage, not a deleted ticket. Check the connection, then return to
+            the incident queue to reload this ticket.
+          </p>
+          <p className="text-xs text-orange-300 max-w-sm mx-auto font-mono break-words">
+            {error instanceof Error ? error.message : String(error)}
+          </p>
+          <button
+            onClick={() => navigate('/tickets')}
+            className="px-4 py-2 bg-accent text-white text-xs font-semibold rounded-xl cursor-pointer"
+          >
+            Return to Incident Queue
+          </button>
+        </div>
+      );
+    }
   }
 
   if (!ticket) {

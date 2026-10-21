@@ -9,9 +9,6 @@ import {
   where,
   orderBy,
   getDocs,
-  doc,
-  updateDoc,
-  addDoc,
   Timestamp,
 } from 'firebase/firestore';
 import type { Ticket, TicketStatus, TicketType } from '@/types';
@@ -113,6 +110,8 @@ export function useTickets(params: UseTicketsParams = {}) {
         return constraints;
       };
 
+      let fetchFailed = false;
+
       const fetchSupportTickets = async (): Promise<Ticket[]> => {
         try {
           const supportSnap = await getDocs(
@@ -146,6 +145,7 @@ export function useTickets(params: UseTicketsParams = {}) {
           return out;
         } catch (err) {
           console.warn('[useTickets] support_tickets fetch fallback:', err);
+          fetchFailed = true;
           warningsRef.current.push('Support tickets could not be loaded.');
           return [];
         }
@@ -163,6 +163,7 @@ export function useTickets(params: UseTicketsParams = {}) {
           return out;
         } catch (err) {
           console.warn('[useTickets] tickets collection fetch fallback:', err);
+          fetchFailed = true;
           warningsRef.current.push('Legacy tickets could not be loaded.');
           return [];
         }
@@ -193,10 +194,11 @@ export function useTickets(params: UseTicketsParams = {}) {
         return filtered;
       }
 
-      // Dev-only fallback dataset (Runbook §8). Production with an empty
-      // ticket backend shows zero tickets — these invented customer complaints
-      // and payment disputes must never reach staff screens.
-      if (!import.meta.env.DEV) return [];
+      // Dev-only seed tickets (Runbook §8) — ONLY when the backend is
+      // genuinely empty. A collection read failure must stay surfaced (the
+      // partial-data warnings already record it and never invert into fake
+      // tickets making broken wiring look like a quiet queue).
+      if (fetchFailed || !import.meta.env.DEV) return [];
 
       // Fallback rich 3-tier dataset with live timestamps
       const nowMillis = Date.now();
@@ -208,18 +210,18 @@ export function useTickets(params: UseTicketsParams = {}) {
       const defaultTickets: Ticket[] = [
         {
           id: 'tkt_001',
-          ticketNumber: 'TICK-2026-8942',
-          title: 'Missing Peri-Peri Fries in Delivery Order #ord_901',
+          ticketNumber: 'DEMO-TICK-0001',
+          title: '[DEMO] Missing item in delivery order #ord_901',
           branchId: 'branch_surat_01',
           branchName: 'Surat Adajan',
           city: 'Surat',
           category: 'wrong_item' as any,
           priority: 'high',
-          message: 'Customer received 2x Paneer Burgers but the Peri-Peri Fries was not included in the bag. Requesting ₹99 refund or credit.',
+          message: 'Demo ticket: customer received 2x Paneer Burgers but the Peri-Peri Fries was not included in the bag. Narrative fixture — do not act on it.',
           orderId: 'ord_901',
           status: 'open',
           raisedById: 'cust_01',
-          raisedByName: 'Aarav Mehta',
+          raisedByName: '[DEMO] Aarav Mehta',
           raisedByRole: 'customer',
           assignedTo: { tier: 'branch' } as any,
           createdAt: seventyFiveMinsAgo, // 75 mins ago -> triggers >60m Inactivity Warning!
@@ -227,17 +229,17 @@ export function useTickets(params: UseTicketsParams = {}) {
         },
         {
           id: 'tkt_002',
-          ticketNumber: 'TICK-2026-7731',
-          title: 'Franchise Delivery Radius Border Dispute - Customer Claim',
+          ticketNumber: 'DEMO-TICK-0002',
+          title: '[DEMO] Franchise delivery radius dispute (narrative fixture)',
           branchId: 'branch_ahmedabad_01',
           branchName: 'Ahmedabad SG Highway',
           city: 'Ahmedabad',
           category: 'customer_escalation' as any,
           priority: 'medium',
-          message: 'Customer address on Bopal border was rejected by automated Porter geofence. Requesting Brand Support exception approval for ₹150 Goodwill credit.',
+          message: 'Demo ticket: customer address on Bopal border rejected by automated geofence. Narrative fixture — do not act on it.',
           status: 'in_progress',
           raisedById: 'user_branch_01',
-          raisedByName: 'Sanjay Patel (Branch Owner)',
+          raisedByName: '[DEMO] Sanjay Patel (Branch Owner)',
           raisedByRole: 'branch_owner',
           assignedTo: { tier: 'brand_support' } as any,
           createdAt: thirtyMinsAgo,
@@ -245,18 +247,18 @@ export function useTickets(params: UseTicketsParams = {}) {
         },
         {
           id: 'tkt_003',
-          ticketNumber: 'TICK-2026-9904',
-          title: 'Razorpay UPI Webhook Timeout & POS Double-Deduction',
+          ticketNumber: 'DEMO-TICK-0003',
+          title: '[DEMO] Payment issue narrative fixture (order #ord_903)',
           branchId: 'branch_surat_01',
           branchName: 'Surat Adajan',
           city: 'Surat',
           category: 'payment_refund' as any,
           priority: 'urgent',
-          message: 'UPI payment of ₹552 succeeded in Razorpay dashboard (pay_Rzp99214) but Cloud Function verifyPayment timed out. POS KOT did not print.',
+          message: 'Demo ticket: narrative fixture about a payment flow — no real payment event, no fabricated gateway ids.',
           orderId: 'ord_903',
           status: 'open',
           raisedById: 'user_branch_01',
-          raisedByName: 'Sanjay Patel (Branch Owner)',
+          raisedByName: '[DEMO] Sanjay Patel (Branch Owner)',
           raisedByRole: 'branch_owner',
           assignedTo: { tier: 'developer_team' } as any,
           createdAt: tenMinsAgo,
@@ -264,20 +266,20 @@ export function useTickets(params: UseTicketsParams = {}) {
         },
         {
           id: 'tkt_004',
-          ticketNumber: 'TICK-2026-6112',
-          title: 'Burger packaging torn during transit - Replacement Issued',
+          ticketNumber: 'DEMO-TICK-0004',
+          title: '[DEMO] Packaging issue narrative fixture (order #ord_904)',
           branchId: 'branch_ahmedabad_01',
           branchName: 'Ahmedabad SG Highway',
           city: 'Ahmedabad',
           category: 'app_bug' as any,
           priority: 'low',
-          message: 'Customer reported burger box seal opened. Store dispatched replacement box via store fleet rider Ramesh.',
+          message: 'Demo ticket: narrative fixture about packaging. No real rider, no real replacement dispatch.',
           orderId: 'ord_904',
           status: 'resolved',
-          resolution: 'Issued immediate replacement order and credited ₹50 goodwill Grill Coins.',
-          resolvedByName: 'Alex (Lead Dev)',
+          resolution: 'Demo narrative: replacement recorded as a fixture event — do not treat as a real dispatch.',
+          resolvedByName: '[DEMO] Alex (Lead Dev)',
           raisedById: 'cust_04',
-          raisedByName: 'Neha Kothari',
+          raisedByName: '[DEMO] Neha Kothari',
           raisedByRole: 'customer',
           assignedTo: { tier: 'branch' } as any,
           createdAt: twoHoursAgo,
