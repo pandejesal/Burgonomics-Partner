@@ -5,6 +5,7 @@ import {
   PETPOOJA_TEST_SCENARIOS,
   formatPetpoojaIdsForCopy,
   initialTestResults,
+  petpoojaCopyListLines,
   runAllPetpoojaTestScenarios,
   type PetpoojaTestResult,
   type PetpoojaTestStatus,
@@ -48,7 +49,12 @@ export function PetpoojaTestRunnerModal({ isOpen, onClose, runner }: PetpoojaTes
 
   if (!isOpen) return null;
 
-  const fulfilled = results.filter((r) => r.status === 'Fulfilled' && r.petpoojaOrderId);
+  // Reconciliation lines: the POS id when the vendor returned one, OUR client
+  // reference otherwise (documented sandbox: 5/5 accepted with no id). This
+  // mirrors formatPetpoojaIdsForCopy so the panel shows exactly what the copy
+  // button sends — an accepted relay must never leave the list empty.
+  const copyLines = petpoojaCopyListLines(results);
+  const fulfilled = copyLines.length;
 
   const handleRunAll = async () => {
     if (isRunning) return;
@@ -62,10 +68,17 @@ export function PetpoojaTestRunnerModal({ isOpen, onClose, runner }: PetpoojaTes
         onUpdate: (next) => setResults(next),
       });
       const okCount = finalResults.filter((r) => r.status === 'Fulfilled').length;
-      if (okCount === PETPOOJA_TEST_SCENARIOS.length) {
-        toast.success('All 5 test scenarios fulfilled — IDs ready for support.');
+      const labelled = finalResults.filter(
+        (r) => r.status === 'Fulfilled' && r.petpoojaOrderId,
+      ).length;
+      if (okCount === PETPOOJA_TEST_SCENARIOS.length && labelled === okCount) {
+        toast.success('All 5 relays accepted — POS order IDs ready for support.');
+      } else if (okCount === PETPOOJA_TEST_SCENARIOS.length) {
+        toast.warning(
+          'All 5 relays accepted — some POS order IDs were not returned; client references cover those rows.',
+        );
       } else {
-        toast.warning(`${okCount}/5 scenarios fulfilled — retry the failed ones.`);
+        toast.warning(`${okCount}/5 relays accepted — retry the failed ones.`);
       }
     } catch {
       toast.error('Test run aborted — no changes were confirmed. Retry safely.');
@@ -78,16 +91,16 @@ export function PetpoojaTestRunnerModal({ isOpen, onClose, runner }: PetpoojaTes
   const handleCopyAllIds = async () => {
     const text = formatPetpoojaIdsForCopy(results);
     if (!text) {
-      toast.error('No fulfilled IDs yet — run the scenarios first.');
+      toast.error('No relay references yet — run the scenarios first.');
       return;
     }
     try {
       await navigator.clipboard.writeText(text);
       setCopiedAll(true);
-      toast.success('Petpooja Order IDs copied — paste into your support email.');
+      toast.success('Relay references copied — paste into your support email.');
       setTimeout(() => setCopiedAll(false), 2000);
     } catch {
-      toast.error('Copy failed — long-press the IDs to copy them manually.');
+      toast.error('Copy failed — long-press the references to copy them manually.');
     }
   };
 
@@ -160,6 +173,14 @@ export function PetpoojaTestRunnerModal({ isOpen, onClose, runner }: PetpoojaTes
                         {result.petpoojaOrderId}
                       </p>
                     )}
+                    {result?.status === 'Fulfilled' &&
+                      !result.petpoojaOrderId &&
+                      result.clientOrderRef && (
+                        <p className="text-[11px] font-mono text-neutral-400 mt-1">
+                          {result.clientOrderRef}
+                          <span className="text-neutral-500"> (client reference)</span>
+                        </p>
+                      )}
                     {result?.status === 'Failed' && (
                       <p className="text-[11px] text-rose-300 mt-1 flex items-center gap-1">
                         <AlertTriangle className="w-3 h-3 shrink-0" />
@@ -177,12 +198,12 @@ export function PetpoojaTestRunnerModal({ isOpen, onClose, runner }: PetpoojaTes
             })}
           </ol>
 
-          {/* Resulting IDs */}
-          {fulfilled.length > 0 && (
+          {/* Reconciliation references */}
+          {fulfilled > 0 && (
             <div className="p-4 rounded-2xl bg-neutral-950 border border-neutral-800 border-divider space-y-2">
               <div className="flex items-center justify-between">
                 <h3 className="text-xs font-black uppercase tracking-wider text-neutral-400">
-                  Petpooja Order IDs ({fulfilled.length}/5)
+                  Relay references ({fulfilled}/5)
                 </h3>
                 <button
                   type="button"
@@ -194,13 +215,13 @@ export function PetpoojaTestRunnerModal({ isOpen, onClose, runner }: PetpoojaTes
                   ) : (
                     <Copy className="w-3.5 h-3.5" />
                   )}
-                  <span>{copiedAll ? 'Copied!' : 'Copy All IDs'}</span>
+                  <span>{copiedAll ? 'Copied!' : 'Copy All References'}</span>
                 </button>
               </div>
               <ul className="space-y-1">
-                {fulfilled.map((r) => (
-                  <li key={r.scenarioId} className="text-[11px] font-mono text-neutral-300">
-                    <span className="text-neutral-500">{r.scenarioId}:</span> {r.petpoojaOrderId}
+                {copyLines.map((line) => (
+                  <li key={line} className="text-[11px] font-mono text-neutral-300">
+                    {line}
                   </li>
                 ))}
               </ul>

@@ -5,12 +5,14 @@
  * (see partnerFunctionsApi.runPetpoojaTestScenario). When the POS returns an
  * order id it is collected for support reconciliation; when the POS accepts
  * without returning an id (its documented sandbox behaviour) the result
- * carries `petpoojaOrderId: null` and the copy list simply omits it.
+ * carries our own client reference (clientOrderRef — the same key the vendor
+ * Order List shows as Order No.) and the copy list echoes it, labelled.
  * Status lifecycle per scenario: Pending -> Relaying -> Fulfilled (or Failed
  * on relay error — never a silent skip). NOTE: `Fulfilled` means the POS
- * ACCEPTED the relay — POS-side fulfilment is NOT verified here; when
- * Petpooja returns no order id (its documented sandbox behaviour) the result
- * carries `petpoojaOrderId: null` and is excluded from the support copy list.
+ * ACCEPTED the relay — POS-side fulfilment is NOT verified here. When
+ * Petpooja returns no order id, `petpoojaOrderId` is null and the support
+ * copy list echoes OUR client reference instead (labelled), so an accepted
+ * relay never yields an empty reconciliation list.
  */
 import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
 
@@ -27,6 +29,9 @@ export interface PetpoojaTestResult {
   title: string;
   status: PetpoojaTestStatus;
   petpoojaOrderId: string | null;
+  /** OUR client reference sent as Order.orderID (the vendor Order List's
+   *  Order No.). Present even when the POS returned no id; null on failure. */
+  clientOrderRef: string | null;
   error: string | null;
 }
 
@@ -60,7 +65,7 @@ export const PETPOOJA_TEST_SCENARIOS: PetpoojaTestScenario[] = [
 
 export type TestScenarioRunner = (
   scenarioId: string,
-) => Promise<{ petpoojaOrderId: string | null }>;
+) => Promise<{ petpoojaOrderId: string | null; clientOrderRef?: string | null }>;
 
 /**
  * Default runner — live test runner API.
@@ -85,10 +90,18 @@ export const defaultTestScenarioRunner: TestScenarioRunner = async (scenarioId) 
     status?: unknown;
     petpoojaOrderIdReturned?: boolean;
     petpoojaOrderId?: string | null;
+    clientOrderID?: string | null;
   } | null;
   const petpoojaOrderId =
     typeof body?.petpoojaOrderId === 'string' && body.petpoojaOrderId.trim().length > 0
       ? body.petpoojaOrderId.trim()
+      : null;
+  // OUR client reference (Order.orderID we sent). The vendor Order List shows
+  // it as the Order No.; with no POS id reachable through the API it is the
+  // reconciliation key support actually matches against (ref §16.2/§16.8).
+  const clientOrderRef =
+    typeof body?.clientOrderID === 'string' && body.clientOrderID.trim().length > 0
+      ? body.clientOrderID.trim()
       : null;
   // Fail closed on: no body, an explicit refusal (success false), or a body
   // with neither acceptance nor an id.
@@ -113,7 +126,7 @@ export const defaultTestScenarioRunner: TestScenarioRunner = async (scenarioId) 
   if (!accepted) {
     throw new Error('Petpooja test runner relay failed — unrecognised response.');
   }
-  return { petpoojaOrderId };
+  return { petpoojaOrderId, clientOrderRef };
 };
 
 export function initialTestResults(
@@ -124,6 +137,7 @@ export function initialTestResults(
     title: s.title,
     status: 'Pending' as const,
     petpoojaOrderId: null,
+    clientOrderRef: null,
     error: null,
   }));
 }
@@ -149,16 +163,17 @@ export async function runAllPetpoojaTestScenarios(options?: {
     results[i] = { ...results[i], status: 'Relaying' };
     onUpdate?.(results.map((r) => ({ ...r })));
     try {
-      const { petpoojaOrderId } = await runner(scenarios[i].id);
+      const { petpoojaOrderId, clientOrderRef } = await runner(scenarios[i].id);
       // POS accepted. `petpoojaOrderId` may be null (documented accepted-
       // without-id sandbox response); the id-less outcome stays Fulfilled,
-      // and formatPetpoojaIdsForCopy excludes it from the support list.
-      // Normalise a loosely-shaped runner result to the declared null
-      // contract so downstream `=== null` checks hold.
+      // and the copy list echoes our client reference for it. Normalise a
+      // loosely-shaped runner result to the declared null contract so
+      // downstream `=== null` checks hold; a whitespace-only ref is no ref.
       results[i] = {
         ...results[i],
         status: 'Fulfilled',
         petpoojaOrderId: petpoojaOrderId ?? null,
+        clientOrderRef: clientOrderRef?.trim() || null,
         error: null,
       };
     } catch (err) {
@@ -166,6 +181,7 @@ export async function runAllPetpoojaTestScenarios(options?: {
         ...results[i],
         status: 'Failed',
         petpoojaOrderId: null,
+        clientOrderRef: null,
         error: err instanceof Error ? err.message : 'Relay failed.',
       };
     }
@@ -174,10 +190,30 @@ export async function runAllPetpoojaTestScenarios(options?: {
   return results;
 }
 
-/** "scenario-id: PETPOOJA-ID" lines for pasting into a support email. */
+/** Support reconciliation text for the copy button — the newline join of
+ *  petpoojaCopyListLines below. */
 export function formatPetpoojaIdsForCopy(results: PetpoojaTestResult[]): string {
+  return petpoojaCopyListLines(results).join('\n');
+}
+
+/** The per-scenario reconciliation lines behind the copy block. Pure, so the
+ *  modal renders exactly what the copy button sends. When the POS returned
+ *  an id, both the POS id and our reference are carried (support matches the
+ *  Order List by the reference). */
+export function petpoojaCopyListLines(results: PetpoojaTestResult[]): string[] {
   return results
-    .filter((r) => r.status === 'Fulfilled' && r.petpoojaOrderId)
-    .map((r) => `${r.scenarioId}: ${r.petpoojaOrderId}`)
-    .join('\n');
+    .filter((r) => r.status === 'Fulfilled')
+    .filter((r) => r.petpoojaOrderId || r.clientOrderRef)
+    .map((r) => {
+      const first = r.petpoojaOrderId
+        ? `POS order id ${r.petpoojaOrderId}`
+        : 'POS returned no order id';
+      const ref =
+        r.clientOrderRef && r.clientOrderRef !== r.petpoojaOrderId
+          ? ` — client reference ${r.clientOrderRef}`
+          : r.clientOrderRef
+            ? ` (client reference ${r.clientOrderRef})`
+            : '';
+      return `${r.scenarioId}: ${first}${ref}`;
+    });
 }

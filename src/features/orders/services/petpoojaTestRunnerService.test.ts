@@ -5,6 +5,7 @@ import {
   defaultTestScenarioRunner,
   formatPetpoojaIdsForCopy,
   initialTestResults,
+  petpoojaCopyListLines,
   runAllPetpoojaTestScenarios,
 } from './petpoojaTestRunnerService';
 
@@ -101,6 +102,7 @@ describe('defaultTestScenarioRunner — POS-accepted-without-id honesty contract
     } as never);
     await expect(defaultTestScenarioRunner('dinein-basic-kot')).resolves.toEqual({
       petpoojaOrderId: 'PP-123',
+      clientOrderRef: null,
     });
   });
 
@@ -116,6 +118,7 @@ describe('defaultTestScenarioRunner — POS-accepted-without-id honesty contract
     } as never);
     await expect(defaultTestScenarioRunner('dinein-basic-kot')).resolves.toEqual({
       petpoojaOrderId: null,
+      clientOrderRef: null,
     });
   });
 
@@ -126,6 +129,7 @@ describe('defaultTestScenarioRunner — POS-accepted-without-id honesty contract
     } as never);
     await expect(defaultTestScenarioRunner('delivery-gst-fee')).resolves.toEqual({
       petpoojaOrderId: null,
+      clientOrderRef: null,
     });
   });
 
@@ -147,6 +151,7 @@ describe('defaultTestScenarioRunner — POS-accepted-without-id honesty contract
     } as never);
     await expect(defaultTestScenarioRunner('delivery-gst-fee')).resolves.toEqual({
       petpoojaOrderId: null,
+      clientOrderRef: null,
     });
   });
 
@@ -156,7 +161,32 @@ describe('defaultTestScenarioRunner — POS-accepted-without-id honesty contract
     } as never);
     await expect(defaultTestScenarioRunner('dinein-basic-kot')).resolves.toEqual({
       petpoojaOrderId: 'PP-9',
+      clientOrderRef: null,
     });
+  });
+
+  it('a whitespace-only client reference from the server normalises like the id', async () => {
+    runPetpoojaTestScenarioMock.mockResolvedValueOnce({
+      success: true,
+      petpoojaOrderId: null,
+      clientOrderID: '  pp_test_dinein-basic-kot_12  ',
+    } as never);
+    await expect(defaultTestScenarioRunner('dinein-basic-kot')).resolves.toEqual({
+      petpoojaOrderId: null,
+      clientOrderRef: 'pp_test_dinein-basic-kot_12',
+    });
+  });
+
+  it('petpoojaCopyListLines returns the same strings the copy text joins', async () => {
+    const runner = vi.fn(async (scenarioId: string) => ({
+      petpoojaOrderId: null,
+      clientOrderRef: `pp_ref_${scenarioId}`,
+    }));
+    const finalResults = await runAllPetpoojaTestScenarios({ runner });
+    expect(petpoojaCopyListLines(finalResults).join('\n')).toBe(
+      formatPetpoojaIdsForCopy(finalResults),
+    );
+    expect(petpoojaCopyListLines(finalResults)).toHaveLength(5);
   });
 
   it('a whitespace-only id is treated as no id, not as a present id', async () => {
@@ -166,6 +196,7 @@ describe('defaultTestScenarioRunner — POS-accepted-without-id honesty contract
     } as never);
     await expect(defaultTestScenarioRunner('bulk-party-order')).resolves.toEqual({
       petpoojaOrderId: null,
+      clientOrderRef: null,
     });
   });
 
@@ -229,7 +260,85 @@ describe('defaultTestScenarioRunner — POS-accepted-without-id honesty contract
     expect(finalResults[1].status).toBe('Fulfilled');
     expect(finalResults[1].petpoojaOrderId).toBeNull();
     expect(formatPetpoojaIdsForCopy(finalResults)).toBe(
-      `${PETPOOJA_TEST_SCENARIOS[0].id}: PP-1`,
+      `${PETPOOJA_TEST_SCENARIOS[0].id}: POS order id PP-1`,
+    );
+  });
+
+  it('accepted-no-id relays echo OUR client reference in the support copy list', async () => {
+    // The vendor's Order No. column is our clientOrderID and no POS id is
+    // reachable via the API (ref §16.2/§16.8) — an accepted relay must not
+    // leave the copy list empty.
+    const runner = vi.fn(async (scenarioId: string) => ({
+      petpoojaOrderId: null,
+      clientOrderRef: `pp_test_${scenarioId}_1792168821493`,
+    }));
+    const finalResults = await runAllPetpoojaTestScenarios({ runner });
+    const text = formatPetpoojaIdsForCopy(finalResults);
+    expect(text).toContain(
+      `${PETPOOJA_TEST_SCENARIOS[0].id}: POS returned no order id — client reference pp_test_${PETPOOJA_TEST_SCENARIOS[0].id}_1792168821493`,
+    );
+    expect(text.split('\n')).toHaveLength(5);
+  });
+
+  it('a POS-issued id comes first and its client reference accompanies it', async () => {
+    const runner = vi.fn(async (scenarioId: string) => ({
+      petpoojaOrderId: `PP-${scenarioId}`,
+      clientOrderRef: `pp_test_${scenarioId}_1`,
+    }));
+    const finalResults = await runAllPetpoojaTestScenarios({ runner });
+    const lines = formatPetpoojaIdsForCopy(finalResults).split('\n');
+    expect(lines[0]).toBe(
+      `${PETPOOJA_TEST_SCENARIOS[0].id}: POS order id PP-${PETPOOJA_TEST_SCENARIOS[0].id} — client reference pp_test_${PETPOOJA_TEST_SCENARIOS[0].id}_1`,
+    );
+  });
+
+  it('a whitespace-only runner ref normalises to null and never prints a blank line', async () => {
+    const runner = vi.fn(async () => ({ petpoojaOrderId: null, clientOrderRef: '   ' }));
+    const finalResults = await runAllPetpoojaTestScenarios({ runner });
+    expect(finalResults.every((r) => r.clientOrderRef === null)).toBe(true);
+    expect(formatPetpoojaIdsForCopy(finalResults)).toBe('');
+  });
+
+  it('a failed scenario clears both the id and the client reference', async () => {
+    const runner = vi.fn(async (scenarioId: string) => {
+      if (scenarioId === PETPOOJA_TEST_SCENARIOS[0].id) {
+        throw new Error('POS timeout');
+      }
+      return { petpoojaOrderId: null, clientOrderRef: `pp_test_${scenarioId}_9` };
+    });
+    const finalResults = await runAllPetpoojaTestScenarios({ runner });
+    expect(finalResults[0].status).toBe('Failed');
+    expect(finalResults[0].petpoojaOrderId).toBeNull();
+    expect(finalResults[0].clientOrderRef).toBeNull();
+    // The failed scenario must not appear in the support reconciliation list.
+    expect(formatPetpoojaIdsForCopy(finalResults)).not.toContain(
+      PETPOOJA_TEST_SCENARIOS[0].id,
+    );
+  });
+
+  it("the default runner carries the server's client reference through to results", async () => {
+    runPetpoojaTestScenarioMock.mockResolvedValueOnce({
+      success: true,
+      scenarioId: 'dinein-basic-kot',
+      petpoojaOrderId: null,
+      clientOrderID: 'pp_test_dinein-basic-kot_1792168821493',
+    } as never);
+    const final = await runAllPetpoojaTestScenarios({
+      // Explicitly exercise BOTH layers: the runner contract AND the default
+      // runner's extraction from the live API body.
+      runner: defaultTestScenarioRunner, scenarios: [
+        {
+          id: 'dinein-basic-kot',
+          title: 'one',
+          description: 'one',
+        },
+      ],
+    });
+    expect(final[0].status).toBe('Fulfilled');
+    expect(final[0].petpoojaOrderId).toBeNull();
+    expect(final[0].clientOrderRef).toBe('pp_test_dinein-basic-kot_1792168821493');
+    expect(formatPetpoojaIdsForCopy(final)).toBe(
+      'dinein-basic-kot: POS returned no order id — client reference pp_test_dinein-basic-kot_1792168821493',
     );
   });
 
