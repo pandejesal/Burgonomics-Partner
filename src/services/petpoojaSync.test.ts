@@ -17,8 +17,13 @@
  *    answers "stale/empty/unknown" must have actually committed the sync
  *    batch, and every "fresh" path must not.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { checkAndAutoSyncMenu } from './petpoojaSync';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  BURGONOMICS_63_ITEMS as BURGONOMICS_ITEMS,
+  BURGONOMICS_DEFAULT_CATEGORIES as BURGONOMICS_CATEGORIES,
+  checkAndAutoSyncMenu,
+  syncPetpoojaMenuForBranch,
+} from './petpoojaSync';
 
 const firestoreState = vi.hoisted(() => ({
   getDocsImpl: vi.fn(),
@@ -162,5 +167,44 @@ describe('checkAndAutoSyncMenu — failure is surfaced, not read as fresh', () =
     firestoreState.getDocsImpl.mockResolvedValueOnce({ empty: true, docs: [] });
     firestoreState.commitImpl.mockRejectedValueOnce(new Error('batch commit failed'));
     await expect(checkAndAutoSyncMenu('branch-a')).rejects.toThrow(/batch commit failed/);
+  });
+});
+
+describe('syncPetpoojaMenuForBranch — zero-fabrication gate on the mock branch', () => {
+  // The built-in catalog is DEMO data: ids like prd_jr_hero carry invented
+  // PP-BRG-101-style petpoojaItemIds. A deployed partner build runs the mock
+  // branch by default (VITE_PETPOOJA_ENABLED unset), so an operator pressing
+  // sync would previously persist those 63 invented items into
+  // menu/{branchId}/… with merge:true — the same collection the LIVE
+  // ingestion writes once the outlet is linked. Dev keeps the offline demo;
+  // a production mock build must refuse instead of writing.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    firestoreState.commitImpl.mockClear();
+    vi.stubEnv('MODE', 'production');
+    vi.stubEnv('DEV', false);
+    vi.stubEnv('PROD', true);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('REFUSES to write demo catalog data in a production mock build', async () => {
+    await expect(syncPetpoojaMenuForBranch('demo')).rejects.toThrow(
+      /not live|refusing|demo/i,
+    );
+    // No fabricated docs reach Firestore in production.
+    expect(firestoreState.commitImpl).not.toHaveBeenCalled();
+  });
+
+  it('keeps the DEV offline demo writing the built-in catalog with true counts', async () => {
+    vi.stubEnv('MODE', 'test');
+    vi.stubEnv('DEV', true);
+    vi.stubEnv('PROD', false);
+    const res = await syncPetpoojaMenuForBranch('demo');
+    expect(res.itemsSynced).toBe(BURGONOMICS_ITEMS.length);
+    expect(res.categoriesSynced).toBe(BURGONOMICS_CATEGORIES.length);
+    expect(firestoreState.commitImpl).toHaveBeenCalledTimes(1);
   });
 });

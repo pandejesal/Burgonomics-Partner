@@ -811,7 +811,12 @@ export const BURGONOMICS_63_ITEMS: Omit<MenuItem, 'lastSyncedAt'>[] = [
  * stamping `lastSyncedAt` per doc. No seeds are written in live mode.
  *
  * MOCK (default): seeds the branch menu from the built-in catalog so the
- * app runs fully offline without credentials.
+ * app runs fully offline without credentials — DEV BUILDS ONLY. The built-in
+ * catalog is DEMO data (ids like prd_jr_hero carry invented PP-BRG-*
+ * petpoojaItemIds); a production mock build refuses instead of persisting it
+ * into `menu/{branchId}/…`, the very collection the live ingestion writes
+ * once the outlet is linked. Production mock builds never assume
+ * demonstration data was reality.
  */
 export async function syncPetpoojaMenuForBranch(branchId: string): Promise<{
   categoriesSynced: number;
@@ -833,6 +838,18 @@ export async function syncPetpoojaMenuForBranch(branchId: string): Promise<{
       itemsSynced: res.itemCount ?? 0,
       syncedAt: new Date(),
     };
+  }
+
+  // ZERO-FABRICATION gate: the mock branch is the DEFAULT in every build
+  // without the live gateway, including production ones. Writing the demo
+  // catalog would persist invented PP-BRG-* items into menu/{branchId}/…
+  // with merge:true. Production refuses (consumers are catch-safe:
+  // PetpoojaStatusBadge marks status error; useMenu falls through); dev
+  // keeps the offline demo.
+  if (!import.meta.env.DEV) {
+    throw new Error(
+      "Petpooja sync is not live in this build — refusing to write demo catalog data into Firestore. Enable the live gateway or sync from a dev build."
+    );
   }
 
   const batch = writeBatch(db);
