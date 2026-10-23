@@ -53,12 +53,15 @@ export function getRiderStatusMeta(order: Order): {
   className: string;
   isPorter: boolean;
   isInHouse: boolean;
+  isManualReview: boolean;
 } {
   const deliveryStatus = (order as any).deliveryStatus || (order as any).delivery?.status;
   const status = (order.status || '').toLowerCase();
-  const hasInHouseRider = (order as any).deliveryStatus === 'manually_assigned';
+  const dispatchType = (order as any).dispatchType as string | undefined;
+  const dispatchProvider = (order as any).dispatchProvider as string | undefined;
+  const rebookTrigger = (order as any).rebookTrigger as string | undefined;
 
-  // §4 No-Driver Rebook state: server flags needsRebook when a Porter driver
+  // §4 No-Driver Rebook state: server flags needsRebook when a driver
   // cancelled or no driver was found. Highest-priority pill so the alert card
   // reads urgent even if a stale riderName still lingers on the doc.
   const rebookNeeded =
@@ -72,24 +75,101 @@ export function getRiderStatusMeta(order: Order): {
       className: 'bg-rose-950/80 text-rose-300 border-rose-500/50 animate-pulse',
       isPorter: false,
       isInHouse: false,
+      isManualReview: false,
     };
   }
 
-  if (hasInHouseRider) {
+  // F6 containment (dispatch.webhooks): customer-cancelled / returned parcels
+  // are manual-review outcomes on the needs_review state (needsRebook=false).
+  // They are NOT automatic carrier rebooks and NOT kitchen cooking.
+  const manualReview =
+    deliveryStatus === 'needs_review' ||
+    rebookTrigger === 'customer_cancelled' ||
+    rebookTrigger === 'returned_to_seller';
+
+  if (manualReview) {
+    return {
+      statusText: 'Flagged — Manual Review',
+      className: 'bg-amber-950/80 text-amber-300 border-amber-500/40',
+      isPorter: false,
+      isInHouse: false,
+      isManualReview: true,
+    };
+  }
+
+  // REAL server manual-dispatch shape: POST /orders/manualDispatch writes
+  // dispatchType 'manual_branch_terminal' + deliveryStatus 'dispatched'
+  // (porter.service.ts). The legacy client shape used 'manually_assigned'.
+  // Either way the rider is the restaurant's OWN — never labelled Porter.
+  if (
+    deliveryStatus === 'manually_assigned' ||
+    dispatchType === 'manual_branch_terminal'
+  ) {
     return {
       statusText: 'In-House Staff Assigned',
       className: 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40',
       isPorter: false,
       isInHouse: true,
+      isManualReview: false,
+    };
+  }
+
+  // Terminal states (queue cards never get these from the feed, but the meta
+  // is public — a delivered/cancelled order is not "cooking").
+  if (deliveryStatus === 'delivered' || status === 'delivered') {
+    return {
+      statusText: 'Delivered',
+      className: 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40',
+      isPorter: false,
+      isInHouse: false,
+      isManualReview: false,
+    };
+  }
+  if (status === 'cancelled') {
+    return {
+      statusText: 'Cancelled',
+      className: 'bg-neutral-800 text-neutral-300 border-neutral-700',
+      isPorter: false,
+      isInHouse: false,
+      isManualReview: false,
     };
   }
 
   if (deliveryStatus === 'driver_allocated' || order.riderName) {
+    // Real provider labels: Borzo/Shadowfax bookings carry dispatchProvider;
+    // showing them as Porter fabricated a vendor that never ran this order.
+    if (dispatchProvider && dispatchProvider !== 'porter') {
+      return {
+        statusText: `${dispatchProviderLabel(dispatchProvider)} Courier Allocated`,
+        className: 'bg-blue-950/80 text-blue-300 border-blue-500/40',
+        isPorter: false,
+        isInHouse: false,
+        isManualReview: false,
+      };
+    }
+    // Porter only on EXPLICIT historical Porter evidence: the provider field
+    // itself, a pasted Porter order id, or the driver_allocated status —
+    // which was written solely by Porter-era webhooks. A bare riderName is
+    // NOT Porter evidence.
+    if (
+      dispatchProvider === 'porter' ||
+      (order as any).porterOrderId ||
+      deliveryStatus === 'driver_allocated'
+    ) {
+      return {
+        statusText: 'Porter Rider Allocated',
+        className: 'bg-blue-950/80 text-blue-300 border-blue-500/40',
+        isPorter: true,
+        isInHouse: false,
+        isManualReview: false,
+      };
+    }
     return {
-      statusText: 'Porter Rider Allocated',
+      statusText: 'Courier Rider Allocated',
       className: 'bg-blue-950/80 text-blue-300 border-blue-500/40',
-      isPorter: true,
+      isPorter: false,
       isInHouse: false,
+      isManualReview: false,
     };
   }
 
@@ -97,8 +177,11 @@ export function getRiderStatusMeta(order: Order): {
     return {
       statusText: 'Rider Arrived at Store',
       className: 'bg-indigo-950/80 text-indigo-300 border-indigo-500/40',
+      // Provider-webhook status without a provider field — the historical
+      // Porter gateway wrote it; not a rider-name inference.
       isPorter: true,
       isInHouse: false,
+      isManualReview: false,
     };
   }
 
@@ -106,8 +189,10 @@ export function getRiderStatusMeta(order: Order): {
     return {
       statusText: 'Out for Delivery (In-Transit)',
       className: 'bg-cyan-950/80 text-cyan-300 border-cyan-500/40',
-      isPorter: true,
+      // An order-status value alone is not evidence of WHICH carrier ran it.
+      isPorter: false,
       isInHouse: false,
+      isManualReview: false,
     };
   }
 
@@ -117,6 +202,7 @@ export function getRiderStatusMeta(order: Order): {
       className: 'bg-amber-950/80 text-amber-400 border-amber-500/40 animate-pulse',
       isPorter: false,
       isInHouse: false,
+      isManualReview: false,
     };
   }
 
@@ -125,6 +211,7 @@ export function getRiderStatusMeta(order: Order): {
     className: 'bg-neutral-800 text-neutral-300 border-neutral-700',
     isPorter: false,
     isInHouse: false,
+    isManualReview: false,
   };
 }
 
@@ -156,6 +243,12 @@ export function PorterDispatchCard({
   const [pastePorterOrderId, setPastePorterOrderId] = React.useState('');
   const [pasteTrackingUrl, setPasteTrackingUrl] = React.useState('');
   useEffect(() => {
+    const meta = getRiderStatusMeta(order);
+    const routeStatus = (order.status || '').toLowerCase();
+    // Quotes cost real provider calls: skip them for states that hide all
+    // booking actions anyway (manual review, cancelled-with-rebook, or a
+    // terminal delivered order).
+    if (meta.isManualReview || routeStatus === 'delivered') return;
     onFetchQuote(order);
   }, [order.id]);
 
@@ -176,6 +269,11 @@ export function PorterDispatchCard({
     (order as any).needsRebook === true ||
     deliveryStatus === 'rider_cancelled' ||
     deliveryStatus === 'no_riders_available';
+
+  // F6 containment mirrors the pill: customer-cancelled / returned parcels
+  // need a staff decision, not an automatic carrier rebook.
+  const manualReview = riderMeta.isManualReview && !needsRebook;
+  const rebookTriggerSource = (order as any).rebookTrigger as string | undefined;
 
   // §4 urgent audio notification — one-shot chime when the alert card appears,
   // guarded so re-renders of the same order never re-fire it.
@@ -232,13 +330,25 @@ export function PorterDispatchCard({
     quote && typeof quote.estimatedPickupMinutes === 'number'
       ? `${quote.estimatedPickupMinutes}m pickup`
       : null;
-  // Provider that owns the live booking (for cancel copy); legacy docs
-  // without dispatchProvider but with a rider were Porter bookings.
+  // Provider that owns the live booking (for cancel copy). Porter only on
+  // explicit Porter evidence: the provider field, a pasted Porter order id,
+  // or the driver_allocated status (Porter-era webhook only). A bare rider
+  // name is NOT evidence that Porter ran this order.
+  const hasExplicitPorterEvidence =
+    (order as any).dispatchProvider === 'porter' ||
+    !!(order as any).porterOrderId ||
+    deliveryStatus === 'driver_allocated';
   const activeProviderLabel = (order as any).dispatchProvider
     ? dispatchProviderLabel((order as any).dispatchProvider)
-    : order.riderName
+    : hasExplicitPorterEvidence
       ? 'Porter'
       : 'Courier';
+
+  // An in-house terminal assignment is not a live third-party booking —
+  // there is nothing to cancel and nothing being spent to undo.
+  const isInHouseTerminal =
+    (order as any).dispatchType === 'manual_branch_terminal' ||
+    deliveryStatus === 'manually_assigned';
 
   return (
     <div className="p-5 rounded-3xl bg-[#090909] border border-neutral-800 space-y-4 shadow-lg hover:border-neutral-700 transition-colors">
@@ -257,7 +367,17 @@ export function PorterDispatchCard({
           </div>
           <p className="text-xs text-neutral-400 flex items-center gap-1.5 mt-0.5">
             <Clock className="w-3.5 h-3.5 text-neutral-500" />
-            <span>Ready for dispatch</span>
+            <span>
+              {manualReview
+                ? 'Awaiting staff review'
+                : riderMeta.isInHouse
+                  ? 'In-house delivery — handover via order lifecycle'
+                  : deliveryStatus === 'delivered' || order.status === 'delivered'
+                    ? 'Delivery complete'
+                    : isDispatched
+                      ? 'With assigned courier'
+                      : 'Ready for dispatch'}
+            </span>
             <span>•</span>
             <span className="font-mono font-bold text-white">₹{order.total || order.subtotal}</span>
           </p>
@@ -312,14 +432,35 @@ export function PorterDispatchCard({
         </div>
       )}
 
-      {/* §4 No-Driver Alert Card: urgent — Porter rider cancelled or none found */}
+      {/* F6 manual-review containment: customer-cancelled / returned parcels
+          need a STAFF decision — no auto rebook, no refund, no redelivery. */}
+      {manualReview && (
+        <div className="p-4 rounded-2xl bg-amber-950/30 border border-amber-700/60 space-y-3">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-black text-amber-300 uppercase tracking-wide">
+                Flagged for Manual Review
+              </p>
+              <p className="text-xs text-amber-200/80 mt-0.5 leading-relaxed">
+                {rebookTriggerSource === 'returned_to_seller'
+                  ? 'The parcel was returned to the store — review this delivery with staff before taking any action. No automatic rebooking, refund or redelivery is applied.'
+                  : 'The customer cancelled this delivery — review the order with staff before taking any action. No automatic rebooking, refund or redelivery is applied.'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* §4 No-Driver Alert Card: urgent — the allocated driver cancelled or
+          none was found (any provider). */}
       {needsRebook && (
         <div className="p-4 rounded-2xl bg-rose-950/30 border border-rose-700/60 space-y-3">
           <div className="flex items-start gap-2.5">
             <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 animate-pulse" />
             <div className="min-w-0">
               <p className="text-sm font-black text-rose-300 uppercase tracking-wide">
-                Porter Rider Cancelled
+                Courier Cancelled
               </p>
               <p className="text-xs text-rose-200/80 mt-0.5 leading-relaxed">
                 {order.riderCancellationReason ||
@@ -355,7 +496,7 @@ export function PorterDispatchCard({
       )}
 
       {/* DR8 manual lane — Porter booked in the app, paste the ids back */}
-      {manualLane && !isDispatched && !needsRebook && (
+      {manualLane && !isDispatched && !needsRebook && !manualReview && (
         <div className="p-4 rounded-2xl bg-amber-950/30 border border-amber-700/60 space-y-2.5">
           <div className="flex items-start gap-2.5">
             <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
@@ -385,7 +526,14 @@ export function PorterDispatchCard({
           <button
             type="button"
             disabled={isPasting || !pastePorterOrderId.trim()}
-            onClick={() => onPastePorter?.(order, pastePorterOrderId, pasteTrackingUrl)}
+            onClick={() => {
+              // savePorterManual rethrows real failures so the paste lane
+              // stays open; keep that rejection from becoming unhandled
+              // noise here — the hook's toast already surfaced it.
+              void Promise.resolve(
+                onPastePorter?.(order, pastePorterOrderId, pasteTrackingUrl)
+              ).catch(() => undefined);
+            }}
             className="w-full py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50 min-h-[44px]"
           >
             <CheckCircle2 className="w-3.5 h-3.5" />
@@ -396,7 +544,7 @@ export function PorterDispatchCard({
 
       {/* DR7 fare-change confirm — opens automatically when the server gated
           the booking; staff must approve the NEW fare before anything books. */}
-      {fareConfirm && !isDispatched && !needsRebook && (
+      {fareConfirm && !isDispatched && !needsRebook && !manualReview && (
         <ConfirmDialog
           isOpen={true}
           onClose={() => onDismissFareConfirm?.(order)}
@@ -443,7 +591,7 @@ export function PorterDispatchCard({
       </div>
 
       {/* Assigned Rider Info (if dispatched) */}
-      {!needsRebook && (order.riderName || riderMeta.isInHouse) && (
+      {!needsRebook && !manualReview && (order.riderName || riderMeta.isInHouse) && (
         <div className="p-3 rounded-2xl bg-neutral-950 border border-neutral-800 space-y-1.5 text-xs">
           <div className="flex items-center justify-between">
             <span className="font-bold text-white flex items-center gap-1.5">
@@ -488,8 +636,9 @@ export function PorterDispatchCard({
         </div>
       )}
 
-      {/* Action Triggers (hidden while the §4 rebook alert card is active) */}
-      {!needsRebook && (
+      {/* Action Triggers (hidden while the §4 rebook or manual-review alert
+          card is active) */}
+      {!needsRebook && !manualReview && (
       <div className="flex items-center gap-2 pt-1">
         {!isDispatched ? (
           <>
@@ -537,6 +686,17 @@ export function PorterDispatchCard({
               <span>In-House</span>
             </button>
           </>
+        ) : isInHouseTerminal ? (
+          // An in-house rider was assigned from this branch terminal — there
+          // is NO live third-party booking here, so there is nothing to
+          // cancel and no money being spent. The order lifecycle (out for
+          // delivery on actual handover) stays server/app-owned; assignment
+          // alone is never claimed as pickup proof.
+          <p className="w-full text-[11px] font-semibold text-neutral-400 leading-relaxed">
+            In-house rider assigned from this terminal. Handover (out for
+            delivery) is recorded through the order lifecycle — nothing was
+            booked with a courier partner for this order.
+          </p>
         ) : (
           <>
           {/* Cancel / Re-dispatch button (confirmed — kills a live booking) */}

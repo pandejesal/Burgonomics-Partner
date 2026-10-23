@@ -22,9 +22,34 @@ export interface InHouseRiderInfo {
   vehicleNumber?: string;
 }
 
+/**
+ * What the queue page may claim about the delivery order feed. React Query
+ * keeps `isLoading` true only until the first read settles, so an errored
+ * feed is NOT loading — it is an error, and the page must say so instead of
+ * rendering "No Delivery Orders In Queue" over a feed it never read.
+ */
+export type DeliveryFeedState = 'loading' | 'error' | 'ready';
+
+export function deriveDeliveryFeedState(input: {
+  isLoading: boolean;
+  error: unknown;
+}): DeliveryFeedState {
+  if (input.isLoading) return 'loading';
+  if (input.error) return 'error';
+  return 'ready';
+}
+
 export function usePorterLogistics() {
   const { selectedBranchId } = useAppStore();
-  const { orders = [], isLoading, updateOrderStatus } = useOrders();
+  // error/refetch are propagated verbatim so the queue page can render a
+  // real failure panel with Retry instead of a false empty queue.
+  const {
+    orders = [],
+    isLoading,
+    error: ordersError,
+    refetch: refetchOrders,
+    updateOrderStatus,
+  } = useOrders();
   const { branches = [] } = useBranches();
   const staffName = useAuthStore((s) => s.user?.name || s.user?.email) || 'Branch Staff';
 
@@ -167,14 +192,12 @@ export function usePorterLogistics() {
       }
 
       // Booked (fresh booking or idempotent reuse of the stored summary).
-      if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
-        const expectedStatus = currentStatusOf(orderId);
-        await updateOrderStatus.mutateAsync({
-          orderId,
-          status: 'out_for_delivery',
-          ...(expectedStatus ? { expectedStatus } : {}),
-        });
-      }
+      // NOTE — no client-side out_for_delivery write here: the server owns
+      // the rider/dispatched fields (deliveryStatus 'dispatched') and a
+      // BOOKING IS NOT PICKUP PROOF. Out for delivery is claimed through the
+      // existing order lifecycle (actual handover), never inferred from a
+      // saved rider name. The card switches to its dispatched UI via
+      // riderName/deliveryStatus, so nothing is lost by not fabricating it.
       setFareConfirms((prev) => {
         const next = { ...prev };
         delete next[orderId];
@@ -195,7 +218,7 @@ export function usePorterLogistics() {
         description: `${shortCode} · ${res.providerOrderId || ''}${res.reused ? ' · existing booking reused' : ''}${failoverNote}`,
       });
     },
-    [updateOrderStatus, currentStatusOf],
+    [],
   );
 
   // Dispatch the cheapest serviceable provider (POST /dispatch/book).
@@ -290,14 +313,9 @@ export function usePorterLogistics() {
           delete next[orderId];
           return next;
         });
-        if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
-          const expectedStatus = currentStatusOf(orderId);
-          await updateOrderStatus.mutateAsync({
-            orderId,
-            status: 'out_for_delivery',
-            ...(expectedStatus ? { expectedStatus } : {}),
-          });
-        }
+        // No client-side out_for_delivery write: the server-pasted booking
+        // binds rider fields itself and is NOT pickup proof. Same rule as
+        // /dispatch/book — handover claims live in the order lifecycle.
         toast.success(`Porter booking saved: ${res.porterOrderId}`, {
           description: `Order #${orderId.slice(-6).toUpperCase()} now tracked via Porter${
             res.reused ? ' · already saved' : ''
@@ -307,6 +325,9 @@ export function usePorterLogistics() {
         toast.error('Failed to save Porter booking', {
           description: err instanceof Error ? err.message : 'Could not reach the dispatcher.',
         });
+        // Rethrow so the paste lane stays open for a retry — the server never
+        // confirmed the booking, so a silent close would read as saved.
+        throw err;
       } finally {
         setPastingOrderIds((prev) => {
           const next = { ...prev };
@@ -315,24 +336,41 @@ export function usePorterLogistics() {
         });
       }
     },
-    [staffName, updateOrderStatus],
+    [staffName],
   );
 
   // Assign In-House Rider. Persists rider identity server-side via
-  // POST /orders/manualDispatch (riderName/Phone, dispatched status) instead
-  // of a bare status flip that loses who is carrying the order. Guarded
-  // against double-assignment over a live courier booking.
+  // POST /orders/manualDispatch (rider/dispatched fields) instead of a bare
+  // status flip that loses who is carrying the order. Guarded against
+  // double-assignment over a live courier booking.
+  //
+  // ASSIGNMENT IS NOT PICKUP PROOF: the server owns the rider/dispatched
+  // fields (deliveryStatus 'dispatched', dispatchType 'manual_branch_terminal');
+  // this hook does NOT write out_for_delivery from a saved rider name. The
+  // in-house rider moves to out-for-delivery only through the existing order
+  // lifecycle (actual handover). NOTE: backend atomic assignment hardening
+  // (a UI check cannot atomically stop a concurrent courier booking) is a
+  // separate Main-owned packet — reported honestly here.
   const assignInHouseRider = useCallback(async (orderId: string, rider: InHouseRiderInfo) => {
     const existing = orders.find((o) => o.id === orderId) as any;
     const deliveryStatus = existing?.deliveryStatus as string | undefined;
+    // A riderName left on the doc by a CANCELLED courier (rider_cancelled /
+    // no_riders_available / needs_review) is a stale name, not a live
+    // assignment — switching to in-house must work there, or the card's own
+    // "Switch to In-House Delivery" fallback can never succeed.
+    const staleRider =
+      existing?.needsRebook === true ||
+      deliveryStatus === 'rider_cancelled' ||
+      deliveryStatus === 'no_riders_available' ||
+      deliveryStatus === 'needs_review';
     if (
-      existing?.riderName ||
+      (existing?.riderName && !staleRider) ||
       deliveryStatus === 'dispatched' ||
       deliveryStatus === 'driver_allocated' ||
       deliveryStatus === 'in_transit'
     ) {
       toast.error('A courier is already assigned — refresh before re-assigning.');
-      return;
+      throw new Error('A courier is already assigned — refresh before re-assigning.');
     }
     try {
       await manualBranchDispatch({
@@ -341,14 +379,6 @@ export function usePorterLogistics() {
         riderPhone: rider.phone,
         staffName,
       });
-      if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
-        const expectedStatus = currentStatusOf(orderId);
-        await updateOrderStatus.mutateAsync({
-          orderId,
-          status: 'out_for_delivery',
-          ...(expectedStatus ? { expectedStatus } : {}),
-        });
-      }
       toast.success(`Assigned in-house rider ${rider.name} to order #${orderId.slice(-6).toUpperCase()}`);
     } catch (err) {
       logger.warn('dispatch.inhouse_failed', {
@@ -356,8 +386,12 @@ export function usePorterLogistics() {
         message: err instanceof Error ? err.message : String(err),
       });
       toast.error('Failed to assign in-house rider');
+      // Rethrow so the assignment modal can stay open, retain the typed
+      // rider details and expose the real failure — a false close would read
+      // as a confirmed rider who does not exist on the order.
+      throw err;
     }
-  }, [orders, updateOrderStatus, staffName, currentStatusOf]);
+  }, [orders, staffName]);
 
   // Cancel the active dispatch (POST /dispatch/cancel): Porter bookings go
   // through the Porter cancel flow, Borzo/Shadowfax release locally with a
@@ -424,6 +458,8 @@ export function usePorterLogistics() {
   return {
     deliveryOrders: activeDeliveryOrders,
     isLoading,
+    error: ordersError,
+    refetch: refetchOrders,
     quotes,
     loadingQuotes,
     dispatchingOrderIds,
