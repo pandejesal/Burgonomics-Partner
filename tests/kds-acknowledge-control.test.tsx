@@ -138,6 +138,25 @@ describe('KDS Acknowledge control', () => {
     button!.props.onClick!();
 
     expect(audio.acknowledgeKDSAlarm).toHaveBeenCalledTimes(1);
+    expect(audio.acknowledgeKDSAlarm).toHaveBeenCalledWith(2);
+  });
+
+  it('passes the displayed pending count to the acknowledge handler', () => {
+    const onAcknowledge = vi.fn();
+
+    const tree = AcousticChimePlayer({
+      isMuted: false,
+      audioUnlocked: true,
+      onToggleMute: noop,
+      onUnlockAudio: noop,
+      pendingCount: 5,
+      onAcknowledge,
+    }) as React.ReactElement;
+
+    findButton(tree, 'Acknowledge')!.props.onClick!();
+
+    expect(onAcknowledge).toHaveBeenCalledTimes(1);
+    expect(onAcknowledge).toHaveBeenCalledWith(5);
   });
 
   it('KDSPage passes the live pending count so the control is reachable', () => {

@@ -178,7 +178,7 @@ describe('kdsAudio — two-tone doorbell chime', () => {
     syncKDSAlarmState(3);
     expect(isKDSAlarmRepeating()).toBe(true);
 
-    acknowledgeKDSAlarm();
+    acknowledgeKDSAlarm(3);
     expect(isKDSAlarmRepeating()).toBe(false);
 
     // Same count re-sync must NOT restart the alarm
@@ -193,6 +193,44 @@ describe('kdsAudio — two-tone doorbell chime', () => {
 
     // A count increase (new orders) resumes alarming
     syncKDSAlarmState(4);
+    expect(isKDSAlarmRepeating()).toBe(true);
+    expect(mockCtx.createOscillator).toHaveBeenCalledTimes(2);
+  });
+
+  it('latches the caller-supplied live count, not a stale module count', () => {
+    // Module counter 2 from an earlier snapshot; the page returns showing 5.
+    syncKDSAlarmState(2);
+    expect(isKDSAlarmRepeating()).toBe(true);
+
+    acknowledgeKDSAlarm(5);
+    expect(isKDSAlarmRepeating()).toBe(false);
+
+    // Next snapshot carries the displayed count: the latch must hold, or the
+    // acknowledge is silently discarded and the loop restarts.
+    mockCtx.createOscillator.mockClear();
+    syncKDSAlarmState(5);
+    expect(isKDSAlarmRepeating()).toBe(false);
+    expect(mockCtx.createOscillator).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(30000);
+    expect(mockCtx.createOscillator).not.toHaveBeenCalled();
+  });
+
+  it('latches the displayed count so a genuine increase still escalates', () => {
+    // Module counter 6 is stale; only 2 tickets are actually pending.
+    syncKDSAlarmState(6);
+    expect(isKDSAlarmRepeating()).toBe(true);
+
+    acknowledgeKDSAlarm(2);
+    expect(isKDSAlarmRepeating()).toBe(false);
+
+    mockCtx.createOscillator.mockClear();
+    syncKDSAlarmState(2);
+    expect(isKDSAlarmRepeating()).toBe(false);
+    expect(mockCtx.createOscillator).not.toHaveBeenCalled();
+
+    // A third ticket must escalate above the acknowledged 2, not the stale 6.
+    syncKDSAlarmState(3);
     expect(isKDSAlarmRepeating()).toBe(true);
     expect(mockCtx.createOscillator).toHaveBeenCalledTimes(2);
   });
@@ -264,7 +302,7 @@ describe('kdsAudio — arrival cue is heard exactly once', () => {
   it('an acknowledged kitchen still cues a new ticket that keeps the count at the acknowledged level', () => {
     // A + B pending, loop armed; staff acknowledge, which stops the loop at ack=2.
     syncKDSAlarmState(2);
-    acknowledgeKDSAlarm();
+    acknowledgeKDSAlarm(2);
     expect(isKDSAlarmRepeating()).toBe(false);
 
     // Kitchen bumps A to preparing: pending=1, still under the latch — silent.

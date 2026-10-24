@@ -9,8 +9,8 @@ interface AcousticChimePlayerProps {
   onUnlockAudio: () => void;
   /** Optional: live pending-order count. Shows the Acknowledge button when > 0. */
   pendingCount?: number;
-  /** Optional: parent callback fired after a staff acknowledge. */
-  onAcknowledge?: () => void;
+  /** Optional: parent callback fired after a staff acknowledge, with the live pending count. */
+  onAcknowledge?: (pendingCount: number) => void;
   className?: string;
 }
 
@@ -56,7 +56,7 @@ export function AcousticChimePlayer({
           {pendingCount > 0 && (
             <button
               type="button"
-              onClick={onAcknowledge}
+              onClick={() => onAcknowledge(pendingCount)}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 border border-amber-600/50 text-amber-300 text-xs font-bold transition-colors cursor-pointer"
               title="Acknowledge alarm — silence until new orders arrive"
             >

@@ -229,7 +229,7 @@ describe('useKDSRealtimeStream — one arrival cue after an acknowledge', () => 
     expect(createdOscillators).toHaveLength(2); // the alarm's own one chime
     expect(isKDSAlarmRepeating()).toBe(true);
 
-    acknowledgeKDSAlarm();
+    acknowledgeKDSAlarm(2);
     expect(isKDSAlarmRepeating()).toBe(false);
     createdOscillators.length = 0;
 

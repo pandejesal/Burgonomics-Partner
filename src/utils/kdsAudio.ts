@@ -186,11 +186,14 @@ export function playKDSArrivalCue(hasNewOrder: boolean, pendingCount: number): v
 
 /**
  * Staff acknowledge: stop the repeating alarm until the next pending count
- * increase (i.e. new orders arrive). The count at acknowledge time is
- * captured; syncKDSAlarmState() resumes only when pendingCount rises above it.
+ * increase (i.e. new orders arrive). The caller passes the live pending count
+ * it is displaying, so the latch can never drift from the visible makeline
+ * (the module's last synced count is stale after a route change or before the
+ * first post-mount sync). syncKDSAlarmState() resumes only when pendingCount
+ * rises above the acknowledged value.
  */
-export function acknowledgeKDSAlarm(): void {
-  acknowledgedPendingCount = currentPendingCount;
+export function acknowledgeKDSAlarm(pendingCount: number): void {
+  acknowledgedPendingCount = pendingCount;
   stopRepeatingKDSAlarm();
 }
 
