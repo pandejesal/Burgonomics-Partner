@@ -65,9 +65,9 @@ export function usePorterLogistics() {
   const [manualLanes, setManualLanes] = useState<Record<string, DispatchManualLane>>({});
   const [pastingOrderIds, setPastingOrderIds] = useState<Record<string, boolean>>({});
 
-  // Status this screen is currently showing for an order — carried as the
-  // expectedStatus precondition so a concurrent bump elsewhere is refused
-  // server-side instead of silently clobbered.
+  // Status this screen is currently showing for an order — sent as the
+  // expectedStatus precondition the backend lane may enforce; the client
+  // only carries the value, it does not enforce it.
   const currentStatusOf = useCallback(
     (orderId: string) => orders.find((o) => o.id === orderId)?.status,
     [orders]

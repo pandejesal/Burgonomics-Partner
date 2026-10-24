@@ -494,8 +494,9 @@ export function useKDSRealtimeStream() {
       if (bumpingRef.current.has(orderId)) return;
       bumpingRef.current.add(orderId);
       setBumpingIds((prev) => ({ ...prev, [orderId]: true }));
-      // Precondition: the status THIS card is showing. If another terminal
-      // already moved the order, the server refuses instead of clobbering.
+      // Precondition: the status THIS card is showing. The client sends
+      // expectedStatus as containment; transaction-side lost-update
+      // enforcement is owned by the backend lane.
       const currentStatus = liveOrders.find((o) => o.id === orderId)?.status;
       try {
         if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {

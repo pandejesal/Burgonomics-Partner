@@ -238,8 +238,9 @@ export function OrderDetailPage() {
       if (updateStatus && typeof updateStatus.mutateAsync === 'function') {
         await updateStatus.mutateAsync({
           status: nextStatus,
-          // Precondition: what this screen is showing — a concurrent bump on
-          // another terminal is refused server-side instead of clobbered.
+          // Precondition: what this screen is showing — sent as the
+          // expectedStatus precondition for the backend lane; the client
+          // only carries the value.
           ...(order ? { expectedStatus: order.status } : {}),
         });
       }

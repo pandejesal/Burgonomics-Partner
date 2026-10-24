@@ -20,14 +20,15 @@ export const USER_DATA_LOCALSTORAGE_KEYS = [
   'burg_mkt_push_logs',
 
   // KDS (KDSPage.tsx, useKDSRealtimeStream.ts)
-  'kds_checklist',
-  'kds_audio_enabled',
-  'kds_pending_bumps',
+  'kds-pending-bumps:v1',
+  'kds-checklist:v1',
+  'kds-audio-intro-seen:v1',
 
   // Printer settings (ThermalPrinterSettings.tsx)
   'burgonomics_printer_config',
 
   // Admin theme (ThemeContext.tsx) — device preference, NOT cleared
+  // KDS audio mute (kdsAudio.ts) — device preference, NOT cleared
 
   // Any future user-data keys should be added here
 ] as const;

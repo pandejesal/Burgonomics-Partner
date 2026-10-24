@@ -69,8 +69,9 @@ export function useOrder(orderId: string) {
       expectedStatus?: OrderStatus;
     }) => {
       // Server-side bump (POST /orders/bumpStatus): branch-checked write.
-      // expectedStatus carries what this screen believes the order is in, so
-      // the server can refuse a bump that would clobber a concurrent change.
+      // expectedStatus carries what this screen believes the order is in;
+      // transaction-side lost-update enforcement is owned by the backend
+      // lane — the client only sends the value.
       await partnerFunctionsApi.bumpOrderStatus({
         orderId,
         status,
