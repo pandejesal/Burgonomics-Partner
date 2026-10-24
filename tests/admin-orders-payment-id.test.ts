@@ -82,4 +82,32 @@ describe('Control Room order payment id mapping', () => {
 
     expect(order.payment.transactionId).toBeUndefined();
   });
+
+  it('falls through an empty razorpayPaymentId to a valid, trimmed transactionId', async () => {
+    h.docs = [
+      historyDoc('ord_board_3', {
+        method: 'razorpay',
+        razorpayPaymentId: '',
+        transactionId: '  pay_TXN  ',
+      }),
+    ];
+
+    const [order] = await adminOrdersService.getHistory(null, 10);
+
+    expect(order.payment.transactionId).toBe('pay_TXN');
+  });
+
+  it('prefers transactionId over paymentId, matching order detail', async () => {
+    h.docs = [
+      historyDoc('ord_board_4', {
+        method: 'razorpay',
+        transactionId: 'pay_TXN',
+        paymentId: 'pay_STALE',
+      }),
+    ];
+
+    const [order] = await adminOrdersService.getHistory(null, 10);
+
+    expect(order.payment.transactionId).toBe('pay_TXN');
+  });
 });

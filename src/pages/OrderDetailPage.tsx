@@ -29,19 +29,15 @@ import { toast } from 'sonner';
 import type { OrderStatus } from '@/types';
 import { ConfirmDialog } from '../admin/components/Utilities';
 import { DeliveryOtpModal } from '@/components/DeliveryOtpModal';
-import { useAuthStore } from '@/stores/authStore';
 import { useQueryClient } from '@tanstack/react-query';
 import { partnerFunctionsApi, dispatchProviderLabel } from '@/services/partnerFunctionsApi';
 import { buildCancelRefundRequest } from '@/utils/refundRequestIdentity';
-import { canReleaseRefund as canReleaseRefundForRole } from '@/admin/pages/refundRoles';
 import type { DispatchQuoteResult } from '@/services/partnerFunctionsApi';
 
 export function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuthStore();
   const queryClient = useQueryClient();
-  const canReleaseRefund = canReleaseRefundForRole(user?.role);
 
   const {
     order,
@@ -268,15 +264,6 @@ export function OrderDetailPage() {
     // is NOT.
     if (!shouldRefund) {
       toast.success(`Order cancelled (${reason}).`);
-      return;
-    }
-
-    if (!canReleaseRefund) {
-      // The server would 403 this caller anyway — say so honestly instead of
-      // firing a request we know is refused.
-      toast.info('Order cancelled — refund NOT issued by this screen.', {
-        description: `Refunds of ₹${order.total} are released by brand admins. Ask a brand admin to release it.`,
-      });
       return;
     }
 

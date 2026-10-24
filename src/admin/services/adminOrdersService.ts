@@ -31,6 +31,7 @@ import {
   fetchAliasedStoreOrders,
   orderDocTimeMs,
   createKdsIngestionGate,
+  resolveGatewayPaymentId,
 } from "@/utils/orderContract";
 import type { Order as NormalizedOrder } from "@/types";
 import { branchIdForDeliveryStore } from "@/utils/storeBranchRegistry";
@@ -147,12 +148,7 @@ function toPaymentMethod(rawMethod: unknown): OrderPaymentInfo["method"] {
 function toPaymentInfo(o: NormalizedOrder, raw: Record<string, any>): OrderPaymentInfo {
   const src = (raw.payment ?? {}) as Record<string, any>;
   const method = toPaymentMethod(strOf(src.method) || raw.paymentMethod);
-  const transactionId =
-    strOf(src.transactionId) ||
-    strOf(src.razorpayPaymentId) ||
-    strOf(raw.razorpayPaymentId) ||
-    strOf(src.paymentId) ||
-    strOf(raw.paymentId);
+  const transactionId = resolveGatewayPaymentId(raw);
   const paidAtRaw = src.paidAt ?? raw.paidAt;
   const paidAt = paidAtRaw ? isoTime(paidAtRaw, "") : "";
   return {

@@ -45,11 +45,15 @@ describe('OrderCancelRefundModal refund capability', () => {
     const allowed = renderModal();
     expect(shared.canReleaseRefund).toHaveBeenCalledWith('branch_owner');
     expect(allowed).toContain('Issue 100% Instant Refund');
+    expect(allowed).toContain('type="checkbox"');
 
     shared.canReleaseRefund.mockReturnValue(false);
     const denied = renderModal();
     expect(shared.canReleaseRefund).toHaveBeenCalledWith('branch_owner');
-    expect(denied).toContain('Request 100% Refund');
     expect(denied).not.toContain('Issue 100% Instant Refund');
+    expect(denied).not.toContain('Request 100% Refund');
+    expect(denied).not.toContain('type="checkbox"');
+    expect(denied).toContain('no refund is requested');
+    expect(denied).toContain('A brand admin must');
   });
 });

@@ -56,6 +56,23 @@ export function canRejectRefund(role: string | null | undefined): boolean {
   return includesRole(REFUND_REJECT_ROLES, role);
 }
 
+/**
+ * The Control Room's whole-order refund action. It is only offered for a
+ * Completed+Paid order, and only to a role the server accepts on
+ * POST /payments/refund — a regional_manager or branch_owner would 403.
+ */
+export function canTriggerBoardRefund(
+  role: string | null | undefined,
+  order: { orderStatus: string; paymentStatus: string } | null | undefined,
+): boolean {
+  return (
+    !!order &&
+    order.orderStatus === "Completed" &&
+    order.paymentStatus === "Paid" &&
+    canReleaseRefund(role)
+  );
+}
+
 function includesRole(allowed: readonly UserRole[], role: string | null | undefined): boolean {
   if (!role) return false; // absent role → deny
   return (allowed as readonly string[]).includes(role);

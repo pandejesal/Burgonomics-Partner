@@ -44,6 +44,7 @@ import { INITIAL_RICH_ORDERS, RichOrder, getThermalReceiptText } from "./ordersD
 import { adminOrdersService } from "../services/adminOrdersService";
 import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
 import { buildOpsRefundRequest } from "@/utils/refundRequestIdentity";
+import { canTriggerBoardRefund } from "./refundRoles";
 import { useAdmin } from "@/admin/hooks/useAdmin";
 import { useStores } from "@/admin/dashboard/hooks/useDashboardData";
 import { logger } from "@/core/logging/logger";
@@ -1448,17 +1449,16 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                   )}
 
                 {/* Refund route for completed orders */}
-                {selectedOrder.orderStatus === "Completed" &&
-                  selectedOrder.paymentStatus === "Paid" && (
-                    <button
-                      onClick={() =>
-                        setConfirmAction({ type: "refund", orderId: selectedOrder.id })
-                      }
-                      className="py-3 px-5 bg-purple-50 text-purple-600 hover:bg-purple-100 text-xs font-black uppercase rounded-2xl transition-all"
-                    >
-                      Trigger Gateway Refund
-                    </button>
-                  )}
+                {canTriggerBoardRefund(selectedRole, selectedOrder) && (
+                  <button
+                    onClick={() =>
+                      setConfirmAction({ type: "refund", orderId: selectedOrder.id })
+                    }
+                    className="py-3 px-5 bg-purple-50 text-purple-600 hover:bg-purple-100 text-xs font-black uppercase rounded-2xl transition-all"
+                  >
+                    Trigger Gateway Refund
+                  </button>
+                )}
               </div>
             </motion.div>
           </>
@@ -1507,20 +1507,27 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                 );
             } else if (confirmAction.type === "refund") {
               const target = orders.find((o) => o.id === confirmAction.orderId);
-              const request = target ? buildOpsRefundRequest(target) : null;
-              if (!request) {
-                toast.error("Refund NOT issued — no Razorpay payment id on this order.", {
+              if (!target || !canTriggerBoardRefund(selectedRole, target)) {
+                toast.error("Refund NOT issued — this account cannot release this refund.", {
                   description:
-                    "A brand admin must locate the capture in Payments and release the refund manually.",
+                    "Refunds are released by brand admins from a Completed, Paid order.",
                 });
               } else {
-                try {
-                  const res = await partnerFunctionsApi.releaseRefund(request);
-                  toast.success(`Refund released via Razorpay (ID: ${(res as any)?.id ?? "confirmed"}).`);
-                } catch (err) {
-                  toast.error("Refund NOT issued — no money moved.", {
-                    description: err instanceof Error ? err.message : String(err),
+                const request = buildOpsRefundRequest(target);
+                if (!request) {
+                  toast.error("Refund NOT issued — no Razorpay payment id on this order.", {
+                    description:
+                      "A brand admin must locate the capture in Payments and release the refund manually.",
                   });
+                } else {
+                  try {
+                    const res = await partnerFunctionsApi.releaseRefund(request);
+                    toast.success(`Refund released via Razorpay (ID: ${(res as any)?.id ?? "confirmed"}).`);
+                  } catch (err) {
+                    toast.error("Refund NOT issued — no money moved.", {
+                      description: err instanceof Error ? err.message : String(err),
+                    });
+                  }
                 }
               }
             } else if (confirmAction.type === "petpooja") {

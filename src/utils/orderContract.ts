@@ -152,6 +152,27 @@ function str(v: unknown, fallback = ''): string {
 }
 
 /**
+ * The gateway capture id for an order doc. Both screens that can refund
+ * (order detail and the Control Room board) resolve it here, so the same
+ * document can never send one id from one screen and a different (or empty)
+ * id from the other. Ranked by the board's documented order, and blank or
+ * whitespace-only fields fall through instead of stopping the chain.
+ */
+export function resolveGatewayPaymentId(data: Record<string, any>): string | undefined {
+  const payment = (data.payment ?? {}) as Record<string, any>;
+  for (const candidate of [
+    payment.transactionId,
+    payment.razorpayPaymentId,
+    data.razorpayPaymentId,
+    payment.paymentId,
+    data.paymentId,
+  ]) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
+  return undefined;
+}
+
+/**
  * Coerce one raw modifier/add-on/customization entry to a printable label.
  * Source docs disagree on shape (plain string, `{ name }`, `{ label }`,
  * Petpooja `{ addon_name }`, `{ name, price }`), and a non-string is what
@@ -354,13 +375,7 @@ export function normalizeOrderDoc(id: string, data: Record<string, any>): Order 
     ...(reasons.length > 0 ? { quarantineReason: reasons.join('; ') } : {}),
     paymentMethod: paymentMethod as Order['paymentMethod'],
     paymentStatus: paymentStatus as Order['paymentStatus'],
-    razorpayPaymentId:
-      str(
-        payment.razorpayPaymentId ??
-          data.razorpayPaymentId ??
-          data.paymentId ??
-          payment.transactionId
-      ) || undefined,
+    razorpayPaymentId: resolveGatewayPaymentId(data),
     petpoojaOrderId: data.petpoojaOrderId ?? petpoojaDetails.posOrderId,
     petpoojaSyncStatus: petpoojaSyncStatus as Order['petpoojaSyncStatus'],
     porterOrderId: data.porterOrderId,

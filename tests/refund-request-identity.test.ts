@@ -174,6 +174,39 @@ describe('refundRequestIdentity', () => {
       expect(buildCancelRefundRequest(order, 'OUT_OF_STOCK')).toBeNull();
     });
 
+    it('falls through an empty razorpayPaymentId to a valid, trimmed transactionId', () => {
+      const order = normalizeOrderDoc('ord_cancel_3', {
+        ...paidDoc,
+        payment: {
+          method: 'razorpay',
+          razorpayPaymentId: '',
+          transactionId: '  pay_TXN  ',
+        },
+      });
+
+      expect(order.razorpayPaymentId).toBe('pay_TXN');
+      expect(buildCancelRefundRequest(order, 'CUSTOMER_REQUEST')).toEqual({
+        refundRequestId: 'cancel_refund_ord_cancel_3',
+        orderId: 'ord_cancel_3',
+        razorpayPaymentId: 'pay_TXN',
+        amountRupees: 250,
+        reason: 'Cancelled (CUSTOMER_REQUEST)',
+      });
+    });
+
+    it('resolves transactionId ahead of paymentId so both screens send the same id', () => {
+      const order = normalizeOrderDoc('ord_cancel_4', {
+        ...paidDoc,
+        payment: {
+          method: 'razorpay',
+          transactionId: 'pay_TXN',
+          paymentId: 'pay_STALE',
+        },
+      });
+
+      expect(order.razorpayPaymentId).toBe('pay_TXN');
+    });
+
     it('builds the board ops refund from RichOrder payment.transactionId', () => {
       expect(
         buildOpsRefundRequest({
