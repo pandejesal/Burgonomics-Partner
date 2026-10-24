@@ -3,6 +3,7 @@ import {
   collection,
   query,
   where,
+  orderBy,
   limit,
   getDocs,
   onSnapshot,
@@ -33,7 +34,7 @@ import {
 import type { Order as NormalizedOrder } from "@/types";
 import { branchIdForDeliveryStore } from "@/utils/storeBranchRegistry";
 import { logger } from "@/core/logging/logger";
-import type { QueryConstraint } from "firebase/firestore";
+import type { QueryConstraint, QuerySnapshot } from "firebase/firestore";
 
 /**
  * Brand-wide reads are reserved for global roles (brand_owner, developer,
@@ -437,11 +438,11 @@ async function fetchScopedOrders(storeId: string | null): Promise<Array<{ id: st
   const queryBranches = [...wantedBranchIds].slice(0, FIRESTORE_IN_LIMIT);
 
   const merged = new Map<string, Record<string, any>>();
-  if (!global || storeId) {
+  if (!global || (storeId && storeId !== "all")) {
     // Scoped (or store-filtered) read: branch match first.
     if (queryBranches.length > 0) {
       const snap = await getDocs(
-        query(collection(db, "orders"), where("branchId", "in", queryBranches), limit(100))
+        query(collection(db, "orders"), where("branchId", "in", queryBranches), orderBy("createdAt", "desc"), limit(100))
       );
       snap.forEach((d) => merged.set(d.id, d.data() as Record<string, any>));
     }
@@ -454,9 +455,14 @@ async function fetchScopedOrders(storeId: string | null): Promise<Array<{ id: st
       if (!merged.has(doc.id)) merged.set(doc.id, doc.data);
     }
   } else {
-    // Global brand-wide read, bounded.
-    const snap = await getDocs(query(collection(db, "orders"), limit(100)));
-    snap.forEach((d) => merged.set(d.id, d.data() as Record<string, any>));
+    // Both order schemas need an ordered page: Delivery docs can lack createdAt.
+    const pages = await Promise.all(["createdAt", "placedAt"].map((field) =>
+      getDocs(query(collection(db, "orders"), orderBy(field, "desc"), limit(100)))
+    ));
+    for (const [index, snap] of pages.entries()) snap.forEach((d) => {
+      const data = d.data() as Record<string, any>;
+      if (index === 0 || data.createdAt === undefined) merged.set(d.id, data);
+    });
   }
 
   // Store filter applies to the merged set (covers both id shapes).
@@ -518,19 +524,26 @@ export const adminOrdersService = {
     const { selectedBranchId } = useAppStore.getState();
     const scopeIds = globalReadAllowed() ? [] : resolveScopedBranchIds(user, selectedBranchId);
     const constraints: QueryConstraint[] = [
-      ...(scopeIds.length > 0 || storeId
+      ...(scopeIds.length > 0 || (storeId && storeId !== "all")
         ? [where("branchId", "in", [...new Set([...scopeIds, ...(storeId && storeId !== "all" ? [storeId] : [])])].slice(0, FIRESTORE_IN_LIMIT))]
         : []),
+      orderBy("createdAt", "desc"),
       limit(100),
     ];
-    const unsub = onSnapshot(
-      query(collection(db, "orders"), ...constraints),
-      (snapshot) => {
+    const pages = new Map<string, Map<string, Record<string, any>>>();
+    const receivePage = (field: string) => (snapshot: QuerySnapshot) => {
         void (async () => {
           if (cancelled) return;
           try {
-            const merged = new Map<string, Record<string, any>>();
-            snapshot.forEach((d) => merged.set(d.id, d.data() as Record<string, any>));
+            const page = new Map<string, Record<string, any>>();
+            snapshot.forEach((d) => {
+              const data = d.data() as Record<string, any>;
+              // Keep primary-schema documents out of the fallback feed so a
+              // delayed duplicate cannot re-open a completed ticket.
+              if (field === "createdAt" || data.createdAt === undefined) page.set(d.id, data);
+            });
+            pages.set(field, page);
+            const merged = new Map([...pages.values()].flatMap((p) => [...p.entries()]));
             const aliasedScope =
               storeId && storeId !== "all"
                 ? [storeId]
@@ -567,12 +580,21 @@ export const adminOrdersService = {
             onError(err instanceof Error ? err : new Error(String(err)));
           }
         })();
-      },
+      };
+    const unsub = onSnapshot(
+      query(collection(db, "orders"), ...constraints),
+      receivePage("createdAt"),
       (error) => onError(error),
     );
+    const unsubDelivery = scopeIds.length === 0 && (!storeId || storeId === "all") ? onSnapshot(
+      query(collection(db, "orders"), orderBy("placedAt", "desc"), limit(100)),
+      receivePage("placedAt"),
+      (error) => onError(error),
+    ) : null;
     return () => {
       cancelled = true;
       unsub();
+      unsubDelivery?.();
     };
   },
 

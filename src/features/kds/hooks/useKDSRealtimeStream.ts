@@ -530,16 +530,14 @@ export function useKDSRealtimeStream() {
       return;
     }
 
-    // `in` + `orderBy('createdAt')` on different fields is exactly what
-    // forces a composite (compound) index — `FirebaseError: The query
-    // requires an index` whenever it is not deployed, and a dead listener.
-    // Scoped reads therefore pass only the `in` filter; the stream already
-    // sorts client-side at merge time (orderDocTimeMs below). The global
-    // branch-less read keeps the latest-first orderBy (single-field index).
+    // Select the newest page before applying the cap. The scoped composite
+    // is in the root index manifest; its deployment is an ops prerequisite.
+    // Client sorting alone cannot rescue tickets omitted by an unordered cap.
     const constraints: QueryConstraint[] = [
       ...(scopeBranchIds.length
         ? [where('branchId', 'in', scopeBranchIds.slice(0, FIRESTORE_IN_LIMIT))]
-        : [orderBy('createdAt', 'desc')]),
+        : []),
+      orderBy('createdAt', 'desc'),
       limit(100),
     ];
 
@@ -551,15 +549,41 @@ export function useKDSRealtimeStream() {
     const ingest = (rawDocs: Array<{ id: string; data: Record<string, any> }>): void => {
       if (!alive) return;
       streamHydratedRef.current = true;
-      // Latest-first is restored here, never in Firestore: ordering the
-      // scoped `in` read server-side would demand a composite index, and
-      // orderDocTimeMs compares Timestamps and ISO-string dates alike.
+      // Merge the fetched pages by normalized time. Legacy mixed value types
+      // still need migration; this sort cannot recover documents excluded by
+      // the server's type ordering, missing createdAt field, or page limit.
       const sorted = [...rawDocs].sort(
         (a, b) => orderDocTimeMs(b.data) - orderDocTimeMs(a.data)
       );
       setLiveOrders(sorted.map((d) => normalizeOrderDoc(d.id, d.data)));
       setLiveError(null);
       setLastRefreshAt(Date.now());
+    };
+
+    const globalPages = new Map<string, Array<{ id: string; data: Record<string, any> }>>();
+    const ingestGlobalPage = (field: string, page: Array<{ id: string; data: Record<string, any> }>) => {
+      if (!alive) return;
+      // The secondary date feed owns only documents missing createdAt; it
+      // must never overwrite the primary feed with a delayed older snapshot.
+      globalPages.set(field, field === 'placedAt'
+        ? page.filter((doc) => doc.data.createdAt === undefined)
+        : page);
+      const merged = new Map([...globalPages.values()].flat().map((doc) => [doc.id, doc]));
+      ingest([...merged.values()]);
+    };
+    const handleStreamError = (err: any) => {
+      // Preserve last-good data on an index deployment gap; a cold query
+      // failure remains visible through useOrders' error state.
+      if (!alive) return;
+      const kind = classifyKdsStreamFailure(err);
+      const code = (err as { code?: string } | null)?.code;
+      if (kind === 'missing_index') {
+        logger.warn('kds.stream_index_missing', { message: err?.message, code });
+        return;
+      }
+      logger.warn('kds.stream_error', { message: err?.message, code });
+      setLiveError(err instanceof Error ? err : new Error(String(err?.message ?? 'Live order stream failed')));
+      // lastRefreshAt tracks successful deliveries, never failed reads.
     };
 
     const unsubscribe = onSnapshot(
@@ -570,7 +594,7 @@ export function useKDSRealtimeStream() {
         // Branch-scoped reads can't see Delivery docs (they store store.id,
         // not branchId) — merge the aliased store orders like useOrders does.
         if (scopeBranchIds.length === 0) {
-          ingest(direct);
+          ingestGlobalPage('createdAt', direct);
           return;
         }
         // Gate the async merge: snapshot #5 must not be overwritten by
@@ -596,36 +620,20 @@ export function useKDSRealtimeStream() {
             ingest(direct);
           });
       },
-      (err) => {
-        // Missing composite index (`failed-precondition`, or a message that
-        // names the index requirement) is a deployment gap, not a data
-        // failure — warn and degrade gracefully instead of flipping the whole
-        // makeline into an error state (the one-shot useOrders read and any
-        // already-delivered snapshots stay usable).
-        if (!alive) return;
-        const kind = classifyKdsStreamFailure(err);
-        const code = (err as { code?: string } | null)?.code;
-        if (kind === 'missing_index') {
-          logger.warn('kds.stream_index_missing', { message: err?.message, code });
-          return;
-        }
-        logger.warn('kds.stream_error', { message: err?.message, code });
-        setLiveError(
-          err instanceof Error
-            ? err
-            : new Error(
-                String((err as { message?: unknown } | null)?.message ?? 'Live order stream failed')
-              )
-        );
-        // lastRefreshAt is deliberately NOT touched here: it tracks the last
-        // SUCCESSFUL data delivery, so the age label stays honest about how
-        // stale the on-screen (last good) data is.
-      }
+      handleStreamError
     );
+    // The global feed cannot use branch aliases. Listen to the Delivery date
+    // field too, otherwise orderBy(createdAt) hides that entire order schema.
+    const unsubscribeDelivery = scopeBranchIds.length === 0 ? onSnapshot(
+      query(collection(db, 'orders'), orderBy('placedAt', 'desc'), limit(100)),
+      (snap) => ingestGlobalPage('placedAt', snap.docs.map((d) => ({ id: d.id, data: d.data() }))),
+      handleStreamError
+    ) : null;
 
     return () => {
       alive = false;
       unsubscribe();
+      unsubscribeDelivery?.();
       // Resubscribing on user or branch change keeps the stream scoped to
       // the current RBAC decision; listenerEpoch lets refresh() force one.
     };
