@@ -43,6 +43,7 @@ import { toast } from "sonner";
 import { INITIAL_RICH_ORDERS, RichOrder, getThermalReceiptText } from "./ordersData";
 import { adminOrdersService } from "../services/adminOrdersService";
 import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
+import { buildOpsRefundKey } from "@/utils/refundRequestIdentity";
 import { useAdmin } from "@/admin/hooks/useAdmin";
 import { useStores } from "@/admin/dashboard/hooks/useDashboardData";
 import { logger } from "@/core/logging/logger";
@@ -1516,7 +1517,9 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                 Number((target as any)?.total) ||
                 0;
               try {
+                const refundRequestId = buildOpsRefundKey(confirmAction.orderId);
                 const res = await partnerFunctionsApi.releaseRefund({
+                  refundRequestId,
                   orderId: confirmAction.orderId,
                   razorpayPaymentId: paymentId,
                   ...(amountRupees > 0 ? { amountRupees } : {}),

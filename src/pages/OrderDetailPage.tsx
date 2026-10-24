@@ -32,6 +32,7 @@ import { DeliveryOtpModal } from '@/components/DeliveryOtpModal';
 import { useAuthStore } from '@/stores/authStore';
 import { useQueryClient } from '@tanstack/react-query';
 import { partnerFunctionsApi, dispatchProviderLabel } from '@/services/partnerFunctionsApi';
+import { buildCancelRefundKey } from '@/utils/refundRequestIdentity';
 import type { DispatchQuoteResult } from '@/services/partnerFunctionsApi';
 
 /**
@@ -298,7 +299,9 @@ export function OrderDetailPage() {
     }
 
     try {
+      const refundRequestId = buildCancelRefundKey(order.id);
       const res = await partnerFunctionsApi.releaseRefund({
+        refundRequestId,
         orderId: order.id,
         razorpayPaymentId: paymentId,
         amountRupees: order.total,

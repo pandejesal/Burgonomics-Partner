@@ -27,6 +27,7 @@ import { ConfirmDialog } from "../components/Utilities";
 import { RefundDetails, PaymentTransaction } from "./paymentsData";
 import { adminPaymentsService } from "../services/adminPaymentsService";
 import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
+import { buildAdminRefundKey } from "@/utils/refundRequestIdentity";
 import { useAdmin } from "../hooks/useAdmin";
 import { canReleaseRefund, canRejectRefund, canRetryRefund } from "./refundRoles";
 import { toast } from "sonner";
@@ -130,7 +131,9 @@ export const AdminRefundsPage: React.FC = () => {
   // while Razorpay + Firestore stayed untouched — never again.
   const releaseRefundServer = async (r: RefundDetails): Promise<boolean> => {
     try {
+      const refundRequestId = buildAdminRefundKey(r.id);
       const res = await partnerFunctionsApi.releaseRefund({
+        refundRequestId,
         orderId: r.orderId,
         razorpayPaymentId: r.paymentId,
         amountRupees: r.amountPaise / 100,
