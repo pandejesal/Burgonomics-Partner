@@ -202,11 +202,16 @@ export function isKDSAlarmRepeating(): boolean {
   return repeatIntervalId !== null;
 }
 
-/** Test-only reset of module state (alarm loop + acknowledge latch). */
-export function __resetKDSAudioStateForTests(): void {
+/** Reset the alarm loop plus the synced count and acknowledge latch for a new scope. */
+export function resetKDSAlarmState(): void {
   stopRepeatingKDSAlarm();
   currentPendingCount = 0;
   acknowledgedPendingCount = null;
+}
+
+/** Test-only alias kept for existing suites. */
+export function __resetKDSAudioStateForTests(): void {
+  resetKDSAlarmState();
 }
 
 async function triggerKDSHaptic(): Promise<void> {

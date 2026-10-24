@@ -15,7 +15,7 @@ import {
   createKdsIngestionGate,
 } from '@/utils/orderContract';
 import { FIRESTORE_IN_LIMIT, isGlobalRole, resolveScopedBranchIds } from '@/utils/branchScope';
-import { playKDSArrivalCue, stopRepeatingKDSAlarm, syncKDSAlarmState } from '@/utils/kdsAudio';
+import { playKDSArrivalCue, resetKDSAlarmState, syncKDSAlarmState } from '@/utils/kdsAudio';
 import type { Order, OrderStatus } from '@/types';
 
 export interface RecalledOrderHistory {
@@ -293,6 +293,11 @@ export function useKDSRealtimeStream() {
     (o) => o.status === 'ready' || (o.status as string) === 'ready_for_pickup'
   );
 
+  useEffect(() => {
+    resetKDSAlarmState();
+    return () => resetKDSAlarmState();
+  }, [user?.id, selectedBranchId]);
+
   // Audio chime alarm triggering on new pending orders
   useEffect(() => {
     // Arm the dedupe set only once the makeline has actually delivered data.
@@ -335,14 +340,6 @@ export function useKDSRealtimeStream() {
     // orders once their id scrolled out of the first 100 entries.
     pruneKdsSeenOrderIds(seenOrderIdsRef.current, pendingOrders.map((o) => o.id));
   }, [pendingOrders.length, activeOrders]);
-
-  // Leaving /kds must silence the 10s repeating alarm. It is module-level
-  // state, so without this unmount cleanup the loop kept chiming on every
-  // other screen (and in the background) until the pending count hit 0.
-  // pending-count-0 stop still happens inside syncKDSAlarmState above.
-  useEffect(() => {
-    return () => stopRepeatingKDSAlarm();
-  }, []);
 
   // Clean up timer on recall-stack expiration (60s) + 1s tick while any
   // recall is live: canRecall is computed during render, so without a

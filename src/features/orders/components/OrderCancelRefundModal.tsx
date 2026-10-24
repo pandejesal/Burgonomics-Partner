@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, AlertTriangle, RefreshCw, ShieldAlert, CheckCircle2 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
+import { canReleaseRefund } from '@/admin/pages/refundRoles';
 import type { Order } from '@/types';
 
 interface OrderCancelRefundModalProps {
@@ -60,7 +61,7 @@ export function OrderCancelRefundModal({
   // server-side — a branch_owner/branch_staff call is rejected 403. Never
   // offer a button the server will refuse, and never claim money moved when
   // it did not.
-  const canReleaseRefundDirectly = !!user?.role && ['brand_owner', 'developer', 'support'].includes(user.role);
+  const canReleaseRefundDirectly = canReleaseRefund(user?.role);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

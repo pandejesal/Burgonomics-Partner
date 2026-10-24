@@ -33,21 +33,15 @@ import { useAuthStore } from '@/stores/authStore';
 import { useQueryClient } from '@tanstack/react-query';
 import { partnerFunctionsApi, dispatchProviderLabel } from '@/services/partnerFunctionsApi';
 import { buildCancelRefundRequest } from '@/utils/refundRequestIdentity';
+import { canReleaseRefund as canReleaseRefundForRole } from '@/admin/pages/refundRoles';
 import type { DispatchQuoteResult } from '@/services/partnerFunctionsApi';
-
-/**
- * POST /payments/refund is requireRole(["brand_owner","developer","support"])
- * server-side — anyone else gets a 403. Mirrored here so branch staff get an
- * honest message instead of a guaranteed server rejection.
- */
-const REFUND_ROLES = ['brand_owner', 'developer', 'support'];
 
 export function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuthStore();
   const queryClient = useQueryClient();
-  const canReleaseRefund = !!user?.role && REFUND_ROLES.includes(user.role);
+  const canReleaseRefund = canReleaseRefundForRole(user?.role);
 
   const {
     order,

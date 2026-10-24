@@ -17,7 +17,8 @@ const h = vi.hoisted(() => ({
   dirty: false,
   snapshot: null as null | { next: (snap: any) => void; error: (err: any) => void },
   renderHook: null as null | (() => void),
-  user: { id: 'kds_staff', role: 'branch_staff', branchIds: ['branch_1'] } as any,
+  user: { id: 'kds_staff', role: 'branch_staff', branchIds: ['branch_1', 'branch_2'] } as any,
+  selectedBranchId: 'branch_1',
 }));
 
 vi.mock('react', async (original) => {
@@ -74,8 +75,8 @@ vi.mock('@/stores/authStore', () => ({
   }),
 }));
 vi.mock('@/stores/appStore', () => ({
-  useAppStore: Object.assign(() => ({ selectedBranchId: 'branch_1' }), {
-    getState: () => ({ selectedBranchId: 'branch_1' }),
+  useAppStore: Object.assign(() => ({ selectedBranchId: h.selectedBranchId }), {
+    getState: () => ({ selectedBranchId: h.selectedBranchId }),
   }),
 }));
 vi.mock('@/config/firebase', () => ({ db: {} }));
@@ -181,9 +182,9 @@ async function flush() {
   for (let i = 0; i < 5; i++) await Promise.resolve();
 }
 
-const order = (id: string, status: string) => ({
+const order = (id: string, status: string, branchId: string = h.selectedBranchId) => ({
   id,
-  branchId: 'branch_1',
+  branchId,
   status,
   items: [],
   total: 100,
@@ -196,6 +197,16 @@ async function emit(orders: any[]) {
   settle();
 }
 
+function unmount() {
+  for (const effect of h.effects) effect?.cleanup?.();
+  h.effects = [];
+  h.pending = [];
+  h.states = [];
+  h.initialized = [];
+  h.refs = [];
+  h.hookIndex = 0;
+}
+
 describe('useKDSRealtimeStream — one arrival cue after an acknowledge', () => {
   beforeEach(() => {
     h.hookIndex = 0;
@@ -206,6 +217,8 @@ describe('useKDSRealtimeStream — one arrival cue after an acknowledge', () => 
     h.pending = [];
     h.dirty = false;
     h.snapshot = null;
+    h.selectedBranchId = 'branch_1';
+    h.user = { id: 'kds_staff', role: 'branch_staff', branchIds: ['branch_1', 'branch_2'] };
     createdOscillators.length = 0;
     installAudioMock();
     __resetKDSAudioStateForTests();
@@ -249,5 +262,46 @@ describe('useKDSRealtimeStream — one arrival cue after an acknowledge', () => 
     await emit([order('A', 'preparing'), order('B', 'pending'), order('C', 'pending')]);
     expect(createdOscillators).toHaveLength(0);
     expect(isKDSAlarmRepeating()).toBe(false);
+  });
+
+  it('an outlet switch clears the acknowledge latch so the new outlet alarms', async () => {
+    await emit([order('A', 'pending'), order('B', 'pending'), order('C', 'pending')]);
+    settle();
+    expect(createdOscillators).toHaveLength(2);
+    expect(isKDSAlarmRepeating()).toBe(true);
+
+    acknowledgeKDSAlarm(3);
+    expect(isKDSAlarmRepeating()).toBe(false);
+    createdOscillators.length = 0;
+
+    // Switch outlet and deliver its makeline in the same commit, so the latch
+    // can only be cleared by the scope boundary — not by a transient 0 count.
+    h.selectedBranchId = 'branch_2';
+    await emit([
+      order('D', 'pending', 'branch_2'),
+      order('E', 'pending', 'branch_2'),
+      order('F', 'pending', 'branch_2'),
+    ]);
+
+    expect(createdOscillators).toHaveLength(2);
+    expect(isKDSAlarmRepeating()).toBe(true);
+  });
+
+  it('a new operator after unmount does not inherit the previous acknowledge', async () => {
+    await emit([order('A', 'pending'), order('B', 'pending'), order('C', 'pending')]);
+    settle();
+    acknowledgeKDSAlarm(3);
+    expect(isKDSAlarmRepeating()).toBe(false);
+    createdOscillators.length = 0;
+
+    unmount();
+    h.user = { id: 'kds_staff_2', role: 'branch_staff', branchIds: ['branch_2'] };
+    h.selectedBranchId = 'branch_2';
+    settle();
+
+    await emit([order('D', 'pending', 'branch_2'), order('E', 'pending', 'branch_2')]);
+
+    expect(createdOscillators).toHaveLength(2);
+    expect(isKDSAlarmRepeating()).toBe(true);
   });
 });

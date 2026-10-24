@@ -1,4 +1,5 @@
 import { queryClient } from '@/App';
+import { resetKDSAlarmState } from '@/utils/kdsAudio';
 
 /**
  * All user-data localStorage keys used by the partner app.
@@ -60,4 +61,11 @@ export function clearAppCaches(): void {
 
   // 3. KDS in-memory pending bumps are cleared by the hook's own cleanup
   //    when the component unmounts (useKDSRealtimeStream returns unsubscribe)
+
+  // 4. KDS alarm scope (module state)
+  try {
+    resetKDSAlarmState();
+  } catch (e) {
+    console.warn('[clearAppCaches] resetKDSAlarmState() failed:', e);
+  }
 }

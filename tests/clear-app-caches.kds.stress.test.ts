@@ -19,7 +19,13 @@ import {
   clearAppCaches,
   USER_DATA_LOCALSTORAGE_KEYS,
 } from '../src/core/session/clearAppCaches';
-import { isKDSAudioMuted } from '../src/utils/kdsAudio';
+import {
+  __resetKDSAudioStateForTests,
+  acknowledgeKDSAlarm,
+  isKDSAudioMuted,
+  isKDSAlarmRepeating,
+  syncKDSAlarmState,
+} from '../src/utils/kdsAudio';
 
 const KDS_OUTBOX_KEY = 'kds-pending-bumps:v1';
 const KDS_CHECKLIST_KEY = 'kds-checklist:v1';
@@ -82,6 +88,7 @@ describe('clearAppCaches — KDS signout cache wipe and device mute preservation
   });
 
   afterEach(() => {
+    __resetKDSAudioStateForTests();
     uninstallStorageMocks();
     vi.restoreAllMocks();
   });
@@ -212,5 +219,18 @@ describe('clearAppCaches — KDS signout cache wipe and device mute preservation
     }
     expect(localStorageMock.getItem(KDS_MUTE_KEY)).toBe('true');
     expect(localStorageMock.getItem('device_theme_mode')).toBe('dark');
+  });
+
+  it('clears the acknowledged KDS alarm latch so the next operator still alarms', () => {
+    syncKDSAlarmState(3);
+    expect(isKDSAlarmRepeating()).toBe(true);
+
+    acknowledgeKDSAlarm(3);
+    expect(isKDSAlarmRepeating()).toBe(false);
+
+    clearAppCaches();
+
+    syncKDSAlarmState(3);
+    expect(isKDSAlarmRepeating()).toBe(true);
   });
 });
