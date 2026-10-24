@@ -509,7 +509,19 @@ export const adminOrdersService = {
     onUpdate: (orders: RichOrder[]) => void,
     onError: (err: Error) => void,
   ) {
-    if (!storeId && !globalReadAllowed()) {
+    let cancelled = false;
+    // Live snapshot on the branch query; the aliased merge refreshes
+    // alongside. Snapshot errors surface via onError (never silent-empty).
+    const user = useAuthStore.getState().user;
+    const { selectedBranchId } = useAppStore.getState();
+    const global = globalReadAllowed();
+    const scopeIds = global ? [] : resolveScopedBranchIds(user, selectedBranchId);
+    const storeFilter = !!storeId && storeId !== "all";
+
+    // A scoped role with no assigned branch must never fall through to a
+    // brand-wide query. The `"all"` sentinel is not a scope grant: without an
+    // assignment there is nothing to read, so deny before any listener starts.
+    if (!global && !storeFilter && scopeIds.length === 0) {
       logger.warn("adminOrdersService.global_read_denied", {
         reason: "scoped_role_without_store",
       });
@@ -517,15 +529,9 @@ export const adminOrdersService = {
       return () => {};
     }
 
-    let cancelled = false;
-    // Live snapshot on the branch query; the aliased merge refreshes
-    // alongside. Snapshot errors surface via onError (never silent-empty).
-    const user = useAuthStore.getState().user;
-    const { selectedBranchId } = useAppStore.getState();
-    const scopeIds = globalReadAllowed() ? [] : resolveScopedBranchIds(user, selectedBranchId);
     const constraints: QueryConstraint[] = [
-      ...(scopeIds.length > 0 || (storeId && storeId !== "all")
-        ? [where("branchId", "in", [...new Set([...scopeIds, ...(storeId && storeId !== "all" ? [storeId] : [])])].slice(0, FIRESTORE_IN_LIMIT))]
+      ...(scopeIds.length > 0 || storeFilter
+        ? [where("branchId", "in", [...new Set([...scopeIds, ...(storeFilter ? [storeId as string] : [])])].slice(0, FIRESTORE_IN_LIMIT))]
         : []),
       orderBy("createdAt", "desc"),
       limit(100),
@@ -545,8 +551,8 @@ export const adminOrdersService = {
             pages.set(field, page);
             const merged = new Map([...pages.values()].flatMap((p) => [...p.entries()]));
             const aliasedScope =
-              storeId && storeId !== "all"
-                ? [storeId]
+              storeFilter
+                ? [storeId as string]
                 : scopeIds.length > 0
                   ? scopeIds
                   : [];
@@ -558,7 +564,7 @@ export const adminOrdersService = {
             for (const [id, data] of merged) {
               const rich = toRichOrder(id, data);
               if (!LIVE_STATUSES.has(rich.orderStatus)) continue;
-              if (storeId && storeId !== "all") {
+              if (storeFilter) {
                 const sid = typeof data.store?.id === "string" ? data.store.id : data.storeId;
                 const bid = typeof data.branchId === "string" ? data.branchId : null;
                 if (sid !== storeId && bid !== storeId) continue;

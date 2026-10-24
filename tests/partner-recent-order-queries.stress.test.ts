@@ -262,4 +262,37 @@ describe.each(['iso', 'timestamp'] as const)('bounded recent-order queries (%s)'
       }
     }
   );
+
+  it.each(['all', 'null'])(
+    'a scoped user with no assigned branches cannot read brand-wide via storeId %s',
+    (kind) => {
+      h.user = { id: 'staff_no_branch', role: 'branch_owner', branchIds: [] };
+      h.selectedBranchId = null;
+      seed('pending', shape);
+      const next = vi.fn();
+      const error = vi.fn();
+      const storeId = kind === 'all' ? 'all' : null;
+      const cleanup = adminOrdersService.listenLiveOrders(storeId as any, next, error);
+
+      expect(next).toHaveBeenCalledWith([]);
+      expect(h.queries).toHaveLength(0);
+      expect(error).not.toHaveBeenCalled();
+      cleanup();
+    }
+  );
+
+  it('the all sentinel still clamps a scoped user to assigned branches', async () => {
+    seed('pending', shape);
+    const next = vi.fn();
+    const cleanup = adminOrdersService.listenLiveOrders('all', next, vi.fn());
+
+    await vi.waitFor(() => expect(next).toHaveBeenCalled());
+    // Only the scoped createdAt feed: no brand-wide placedAt listener.
+    expect(h.queries).toHaveLength(1);
+    expect(h.queries[0].constraints).toContainEqual({
+      kind: 'where', field: 'branchId', op: 'in', value: ['branch_recent'],
+    });
+    expect(next.mock.calls.at(-1)![0].map((o: any) => o.id)).not.toContain('foreign_newest');
+    cleanup();
+  });
 });
