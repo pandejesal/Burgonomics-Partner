@@ -166,6 +166,19 @@ export function syncKDSAlarmState(pendingCount: number): void {
 }
 
 /**
+ * Exactly one immediate cue for a ticket that arrives while the 10s repeat
+ * loop is already sounding: syncKDSAlarmState plays nothing in that case, so
+ * without this the next audible cue would be the loop's next tick. When the
+ * loop is NOT armed, syncKDSAlarmState's own immediate chime is the single
+ * cue and this is a no-op — playing both was the 0→N double-fire.
+ */
+export function playKDSArrivalCue(hasNewOrder: boolean): void {
+  if (hasNewOrder && isKDSAlarmRepeating()) {
+    playKDSChime();
+  }
+}
+
+/**
  * Staff acknowledge: stop the repeating alarm until the next pending count
  * increase (i.e. new orders arrive). The count at acknowledge time is
  * captured; syncKDSAlarmState() resumes only when pendingCount rises above it.

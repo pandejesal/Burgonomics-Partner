@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   playKDSChime,
+  playKDSArrivalCue,
   syncKDSAlarmState,
   stopRepeatingKDSAlarm,
   acknowledgeKDSAlarm,
@@ -204,5 +205,68 @@ describe('kdsAudio — two-tone doorbell chime', () => {
     expect(isKDSAlarmRepeating()).toBe(false);
 
     stopRepeatingKDSAlarm();
+  });
+});
+
+describe('kdsAudio — arrival cue is heard exactly once', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    createdOscillators.length = 0;
+    createdGains.length = 0;
+    mockCtx.createOscillator.mockClear();
+    mockCtx.createGain.mockClear();
+    mockCtx.state = 'running';
+    installBrowserMocks();
+    __resetKDSAudioStateForTests();
+  });
+
+  afterEach(() => {
+    __resetKDSAudioStateForTests();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    delete (globalThis as unknown as Record<string, unknown>).window;
+    delete (globalThis as unknown as Record<string, unknown>).localStorage;
+  });
+
+  it('initial 0→N load: the alarm is the only cue, no manual arrival chime', () => {
+    // The hook's priming pass marks existing tickets as seen, so no arrival.
+    playKDSArrivalCue(false);
+    expect(mockCtx.createOscillator).not.toHaveBeenCalled();
+
+    syncKDSAlarmState(2);
+    // One chime == two oscillators (A5 + D6).
+    expect(mockCtx.createOscillator).toHaveBeenCalledTimes(2);
+    expect(isKDSAlarmRepeating()).toBe(true);
+  });
+
+  it('a growth from a nonzero pending count while the loop is armed produces exactly one cue', () => {
+    syncKDSAlarmState(2);
+    expect(isKDSAlarmRepeating()).toBe(true);
+    mockCtx.createOscillator.mockClear();
+
+    playKDSArrivalCue(true);
+    expect(mockCtx.createOscillator).toHaveBeenCalledTimes(2);
+
+    // The same effect then syncs the new count; the armed loop must not
+    // chime again on that call.
+    syncKDSAlarmState(3);
+    expect(mockCtx.createOscillator).toHaveBeenCalledTimes(2);
+  });
+
+  it('a first arrival while the loop is not armed is cued once by the alarm, not twice', () => {
+    playKDSArrivalCue(true);
+    expect(mockCtx.createOscillator).not.toHaveBeenCalled();
+
+    syncKDSAlarmState(1);
+    expect(mockCtx.createOscillator).toHaveBeenCalledTimes(2);
+  });
+
+  it('an unchanged snapshot produces no cue', () => {
+    syncKDSAlarmState(3);
+    mockCtx.createOscillator.mockClear();
+
+    playKDSArrivalCue(false);
+    syncKDSAlarmState(3);
+    expect(mockCtx.createOscillator).not.toHaveBeenCalled();
   });
 });

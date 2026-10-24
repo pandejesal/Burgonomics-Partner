@@ -14,7 +14,7 @@ import {
   orderDocTimeMs,
 } from '@/utils/orderContract';
 import { FIRESTORE_IN_LIMIT, isGlobalRole, resolveScopedBranchIds } from '@/utils/branchScope';
-import { stopRepeatingKDSAlarm, syncKDSAlarmState } from '@/utils/kdsAudio';
+import { playKDSArrivalCue, stopRepeatingKDSAlarm, syncKDSAlarmState } from '@/utils/kdsAudio';
 import type { Order, OrderStatus } from '@/types';
 
 export interface RecalledOrderHistory {
@@ -91,8 +91,8 @@ export function writePendingKdsBumps(queue: PendingKdsBump[]): void {
 
 /**
  * Why the live onSnapshot listener stopped delivering. A missing composite
- * index is a deployment gap, not a data failure — but the operator-facing
- * consequence is identical, so the feed is not live either way.
+ * index is a deployment gap, not a data failure: it degrades to the last good
+ * snapshot / one-shot read instead of a hard error.
  */
 export type KdsStreamFailureKind = 'missing_index' | 'listener_error';
 
@@ -155,92 +155,6 @@ export function classifyKdsStreamFailure(err: unknown): KdsStreamFailureKind {
     : 'listener_error';
 }
 
-/**
- * Operator-readable error for the index-gap degradation. A module-level
- * instance keeps identity stable, so a repeatedly failing listener does not
- * re-render (or re-announce) the page on every identical rejection.
- */
-export const KDS_STREAM_INDEX_ERROR: Error = Object.assign(
-  new Error(
-    'Live makeline stream unavailable — the Firestore index for this branch view is not deployed. Last good data stays on screen.'
-  ),
-  { name: 'KdsStreamIndexError' }
-);
-
-/** What the KDS header may honestly claim about the makeline feed. */
-export type KdsStreamStatus = 'connecting' | 'live' | 'live_unavailable';
-
-export interface KdsFeedStateInput {
-  /** The branch-scoped onSnapshot listener has delivered ≥1 snapshot. */
-  streamHydrated: boolean;
-  /** The listener fired its error callback and no snapshot has arrived since. */
-  listenerFailed: boolean;
-  /** The one-shot useOrders query (seed/fallback) is still in flight. */
-  oneShotLoading: boolean;
-  /** The one-shot useOrders query rejected — fallback data is unavailable. */
-  oneShotError: unknown;
-}
-
-/**
- * Header-badge state for the makeline feed. A failed listener must NEVER
- * read as live, and "live" is claimed only once some source has actually
- * delivered data — never from an unverified, silently-stalled stream.
- */
-export function deriveKdsStreamStatus(input: KdsFeedStateInput): KdsStreamStatus {
-  if (input.listenerFailed) return 'live_unavailable';
-  if (input.streamHydrated) return 'live';
-  if (input.oneShotError) return 'live_unavailable';
-  if (input.oneShotLoading) return 'connecting';
-  return 'connecting';
-}
-
-/**
- * Whether the data on screen was ever verified by the live stream or by a
- * successful one-shot read. Without this the columns would present an
- * unreadable feed as an empty kitchen ("grill is clear").
- */
-export function kdsDataVerified(input: {
-  streamHydrated: boolean;
-  oneShotLoading: boolean;
-  oneShotError: unknown;
-}): boolean {
-  return input.streamHydrated || (!input.oneShotLoading && !input.oneShotError);
-}
-
-/** Column body state — one source of truth for all three KDS columns. */
-export type KdsColumnState = 'loading' | 'error' | 'empty' | 'orders';
-
-/**
- * Decide what a makeline column renders. `error` requires that NO verified
- * data exists (dead listener AND unusable fallback); when the listener died
- * after data was verified the last good orders keep rendering instead of
- * being replaced by an error panel.
- */
-export function deriveKdsColumnState(input: {
-  isLoading: boolean;
-  dataVerified: boolean;
-  itemCount: number;
-}): KdsColumnState {
-  if (input.isLoading) return 'loading';
-  if (!input.dataVerified) return 'error';
-  return input.itemCount === 0 ? 'empty' : 'orders';
-}
-
-/**
- * Freshness label for the data-age chip. When the live feed is down the age
- * describes the LAST GOOD read, so a stale makeline can never masquerade as
- * fresh data.
- */
-export function formatKdsDataAge(
-  nowMs: number,
-  lastRefreshAtMs: number,
-  streamLive: boolean
-): string {
-  const ageSec = Math.max(0, Math.round((nowMs - lastRefreshAtMs) / 1000));
-  const value = ageSec < 60 ? `${ageSec}s` : `${Math.floor(ageSec / 60)}m`;
-  return streamLive ? `data ${value} old` : `last good data ${value} old`;
-}
-
 export function useKDSRealtimeStream() {
   const { user } = useAuthStore();
   const { selectedBranchId } = useAppStore();
@@ -261,10 +175,6 @@ export function useKDSRealtimeStream() {
   const [liveError, setLiveError] = useState<Error | null>(null);
   const [listenerEpoch, setListenerEpoch] = useState(0);
   const streamHydratedRef = useRef<boolean>(false);
-  // Render-time mirror of streamHydratedRef: the header badge and the
-  // column state must re-render the moment the listener's first snapshot
-  // lands (or its failure proves no snapshot is coming).
-  const [streamHydrated, setStreamHydrated] = useState<boolean>(false);
 
   // Surface the live-stream error when present, else the one-shot query error.
   const streamError = liveError ?? ordersError ?? null;
@@ -423,17 +333,20 @@ export function useKDSRealtimeStream() {
     }
 
     // Check for genuinely new orders (the seen-set still tracks them)
+    let hasNewOrder = false;
     pendingOrders.forEach((o) => {
       if (!seenOrderIdsRef.current.has(o.id)) {
         seenOrderIdsRef.current.add(o.id);
+        hasNewOrder = true;
       }
     });
 
-    // H2 sweep fix: the explicit chime here DOUBLE-FIRED with
-    // syncKDSAlarmState's own immediate chime on a 0→N transition (two
-    // oscillator clusters on the same audio tick = phase clipping). The alarm
-    // module is the single acoustic entrypoint; it already plays immediately
-    // when the loop starts, and it honors mute/acknowledge state.
+    // A ticket that arrives while the repeating loop is already sounding has
+    // no immediate cue of its own (syncKDSAlarmState plays nothing when the
+    // loop is armed), so play exactly one here. When the loop is NOT armed,
+    // syncKDSAlarmState's own immediate chime is the single 0→N cue — playing
+    // both was the H2 double-fire.
+    playKDSArrivalCue(hasNewOrder);
     syncKDSAlarmState(pendingOrders.length);
 
     // Cap the chime dedupe set — bounded (no slow leak), and ACTIVE tickets
@@ -638,7 +551,6 @@ export function useKDSRealtimeStream() {
     const ingest = (rawDocs: Array<{ id: string; data: Record<string, any> }>): void => {
       if (!alive) return;
       streamHydratedRef.current = true;
-      setStreamHydrated(true);
       // Latest-first is restored here, never in Firestore: ordering the
       // scoped `in` read server-side would demand a composite index, and
       // orderDocTimeMs compares Timestamps and ISO-string dates alike.
@@ -685,20 +597,16 @@ export function useKDSRealtimeStream() {
           });
       },
       (err) => {
-        // A failed listener must NEVER render as a live makeline. A missing
-        // composite index (`failed-precondition`) is a deployment gap rather
-        // than a data failure, but the operator-facing consequence is the
-        // same: no new tickets will ever arrive. Both kinds therefore set
-        // liveError, which flips the header badge to "Live Unavailable" and
-        // the columns into the degraded state — last good snapshots and the
-        // one-shot fallback stay on screen (nothing is cleared), and the
-        // page can never claim an empty kitchen on an unreadable feed.
+        // Missing composite index (`failed-precondition`, or a message that
+        // names the index requirement) is a deployment gap, not a data
+        // failure — warn and degrade gracefully instead of flipping the whole
+        // makeline into an error state (the one-shot useOrders read and any
+        // already-delivered snapshots stay usable).
         if (!alive) return;
         const kind = classifyKdsStreamFailure(err);
         const code = (err as { code?: string } | null)?.code;
         if (kind === 'missing_index') {
           logger.warn('kds.stream_index_missing', { message: err?.message, code });
-          setLiveError(KDS_STREAM_INDEX_ERROR);
           return;
         }
         logger.warn('kds.stream_error', { message: err?.message, code });
@@ -723,27 +631,10 @@ export function useKDSRealtimeStream() {
     };
   }, [user, selectedBranchId, listenerEpoch]);
 
-  // Derived feed honesty for the header/columns: what the makeline may
-  // claim about liveness, and whether the data on screen was ever verified
-  // by the stream or by a successful one-shot read.
-  const streamStatus = deriveKdsStreamStatus({
-    streamHydrated,
-    listenerFailed: liveError !== null,
-    oneShotLoading: isLoading,
-    oneShotError: ordersError,
-  });
-  const dataVerified = kdsDataVerified({
-    streamHydrated,
-    oneShotLoading: isLoading,
-    oneShotError: ordersError,
-  });
-
   return {
     isOnline,
     isLoading,
     streamError,
-    streamStatus,
-    dataVerified,
     activeOrders,
     pendingOrders,
     preparingOrders,
