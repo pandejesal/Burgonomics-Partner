@@ -148,7 +148,11 @@ function toPaymentInfo(o: NormalizedOrder, raw: Record<string, any>): OrderPayme
   const src = (raw.payment ?? {}) as Record<string, any>;
   const method = toPaymentMethod(strOf(src.method) || raw.paymentMethod);
   const transactionId =
-    strOf(src.transactionId) || strOf(raw.razorpayPaymentId) || strOf(raw.paymentId);
+    strOf(src.transactionId) ||
+    strOf(src.razorpayPaymentId) ||
+    strOf(raw.razorpayPaymentId) ||
+    strOf(src.paymentId) ||
+    strOf(raw.paymentId);
   const paidAtRaw = src.paidAt ?? raw.paidAt;
   const paidAt = paidAtRaw ? isoTime(paidAtRaw, "") : "";
   return {

@@ -354,6 +354,13 @@ export function normalizeOrderDoc(id: string, data: Record<string, any>): Order 
     ...(reasons.length > 0 ? { quarantineReason: reasons.join('; ') } : {}),
     paymentMethod: paymentMethod as Order['paymentMethod'],
     paymentStatus: paymentStatus as Order['paymentStatus'],
+    razorpayPaymentId:
+      str(
+        payment.razorpayPaymentId ??
+          data.razorpayPaymentId ??
+          data.paymentId ??
+          payment.transactionId
+      ) || undefined,
     petpoojaOrderId: data.petpoojaOrderId ?? petpoojaDetails.posOrderId,
     petpoojaSyncStatus: petpoojaSyncStatus as Order['petpoojaSyncStatus'],
     porterOrderId: data.porterOrderId,

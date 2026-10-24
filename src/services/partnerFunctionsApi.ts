@@ -634,6 +634,11 @@ export const partnerFunctionsApi = {
     reason?: string;
   }): Promise<{ id?: string; status?: string; reused?: boolean }> {
     validateRefundRequestId(params?.refundRequestId);
+    if (typeof params?.razorpayPaymentId !== 'string' || !params.razorpayPaymentId.trim()) {
+      throw new Error(
+        'No gateway payment id recorded — refund not attempted. A brand admin must locate the capture in Payments.'
+      );
+    }
     return await apiRequest('/payments/refund', params, {
       idempotencyKey: params.refundRequestId,
     });

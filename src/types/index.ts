@@ -119,6 +119,12 @@ export interface Order {
   status: OrderStatus;
   paymentMethod: 'razorpay' | 'cod' | 'upi';
   paymentStatus: 'pending' | 'completed' | 'failed';
+  /**
+   * Gateway payment id (Razorpay `pay_…`) carried through normalization.
+   * Refund release needs this id; dropping it during normalization made the
+   * cancel-and-refund action unable to ever call the refund API.
+   */
+  razorpayPaymentId?: string;
   petpoojaOrderId?: string;
   petpoojaStatus?: 'synced' | 'failed' | 'pending' | 'pending_retry' | 'not_applicable';
   petpoojaSyncStatus?: 'synced' | 'failed' | 'pending' | 'not_applicable';

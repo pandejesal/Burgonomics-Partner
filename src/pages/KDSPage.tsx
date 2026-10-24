@@ -15,6 +15,7 @@ import {
   setKDSAudioMuted,
   unlockKDSAudio,
   isKDSAudioUnlocked,
+  acknowledgeKDSAlarm,
 } from '@/utils/kdsAudio';
 import {
   Flame,
@@ -369,6 +370,8 @@ export function KDSPage() {
             audioUnlocked={audioUnlocked}
             onToggleMute={toggleMute}
             onUnlockAudio={handleUnlockAudio}
+            pendingCount={pendingOrders.length}
+            onAcknowledge={acknowledgeKDSAlarm}
           />
 
           <button

@@ -32,7 +32,7 @@ import { DeliveryOtpModal } from '@/components/DeliveryOtpModal';
 import { useAuthStore } from '@/stores/authStore';
 import { useQueryClient } from '@tanstack/react-query';
 import { partnerFunctionsApi, dispatchProviderLabel } from '@/services/partnerFunctionsApi';
-import { buildCancelRefundKey } from '@/utils/refundRequestIdentity';
+import { buildCancelRefundRequest } from '@/utils/refundRequestIdentity';
 import type { DispatchQuoteResult } from '@/services/partnerFunctionsApi';
 
 /**
@@ -286,11 +286,8 @@ export function OrderDetailPage() {
       return;
     }
 
-    const paymentId =
-      (order as any)?.payment?.razorpayPaymentId ||
-      (order as any)?.razorpayPaymentId ||
-      '';
-    if (!paymentId) {
+    const request = buildCancelRefundRequest(order, reason);
+    if (!request) {
       toast.error('Order cancelled, but NO refund was issued.', {
         description:
           'No Razorpay payment id is recorded on this order — a brand admin must locate the capture and release the refund manually.',
@@ -299,14 +296,7 @@ export function OrderDetailPage() {
     }
 
     try {
-      const refundRequestId = buildCancelRefundKey(order.id);
-      const res = await partnerFunctionsApi.releaseRefund({
-        refundRequestId,
-        orderId: order.id,
-        razorpayPaymentId: paymentId,
-        amountRupees: order.total,
-        reason: `Cancelled (${reason})`,
-      });
+      const res = await partnerFunctionsApi.releaseRefund(request);
       toast.success(
         `Order cancelled and refund released via Razorpay${
           (res as any)?.reused ? ' (already processed — idempotent replay)' : ''

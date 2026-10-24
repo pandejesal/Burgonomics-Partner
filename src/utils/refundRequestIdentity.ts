@@ -3,6 +3,8 @@
  * Ensures durable, deterministic request keys across client calls and retries.
  */
 
+import type { Order } from '@/types';
+
 const REFUND_REQUEST_ID_REGEX = /^[A-Za-z0-9_-]{8,128}$/;
 
 /**
@@ -107,4 +109,58 @@ export function buildOpsRefundKey(orderId: string): string {
   }
   const key = `ops_refund_${orderId}`;
   return validateRefundRequestId(key);
+}
+
+export interface CancelRefundRequest {
+  refundRequestId: string;
+  orderId: string;
+  razorpayPaymentId: string;
+  amountRupees?: number;
+  reason: string;
+}
+
+/**
+ * Builds the whole-order cancel-and-refund payload from the normalized order
+ * contract. Returns null when the order never recorded a gateway payment id —
+ * nothing can be refunded, and the caller must say so instead of sending an
+ * empty id to the gateway.
+ */
+export function buildCancelRefundRequest(
+  order: Pick<Order, 'id' | 'total' | 'razorpayPaymentId'>,
+  reason: string,
+): CancelRefundRequest | null {
+  const paymentId = order.razorpayPaymentId?.trim();
+  if (!paymentId) return null;
+  return {
+    refundRequestId: buildCancelRefundKey(order.id),
+    orderId: order.id,
+    razorpayPaymentId: paymentId,
+    amountRupees: order.total,
+    reason: `Cancelled (${reason})`,
+  };
+}
+
+export interface OpsRefundOrder {
+  id: string;
+  totals: { grandTotal: number };
+  payment?: { transactionId?: string };
+}
+
+/**
+ * Builds the Control Room whole-order refund payload from a normalized board
+ * order (`payment.transactionId` is where the board carries the gateway id).
+ * Returns null when the board has no gateway id, so an empty id never reaches
+ * the refund API.
+ */
+export function buildOpsRefundRequest(order: OpsRefundOrder): CancelRefundRequest | null {
+  const paymentId = order.payment?.transactionId?.trim();
+  if (!paymentId) return null;
+  const amountRupees = Number(order.totals?.grandTotal) || 0;
+  return {
+    refundRequestId: buildOpsRefundKey(order.id),
+    orderId: order.id,
+    razorpayPaymentId: paymentId,
+    ...(amountRupees > 0 ? { amountRupees } : {}),
+    reason: 'Partner ops refund from order board',
+  };
 }

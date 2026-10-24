@@ -43,7 +43,7 @@ import { toast } from "sonner";
 import { INITIAL_RICH_ORDERS, RichOrder, getThermalReceiptText } from "./ordersData";
 import { adminOrdersService } from "../services/adminOrdersService";
 import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
-import { buildOpsRefundKey } from "@/utils/refundRequestIdentity";
+import { buildOpsRefundRequest } from "@/utils/refundRequestIdentity";
 import { useAdmin } from "@/admin/hooks/useAdmin";
 import { useStores } from "@/admin/dashboard/hooks/useDashboardData";
 import { logger } from "@/core/logging/logger";
@@ -1507,28 +1507,21 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                 );
             } else if (confirmAction.type === "refund") {
               const target = orders.find((o) => o.id === confirmAction.orderId);
-              const paymentId =
-                (target as any)?.payment?.razorpayPaymentId ||
-                (target as any)?.razorpayPaymentId ||
-                "";
-              const amountRupees =
-                Number((target as any)?.totals?.grandTotal) ||
-                Number((target as any)?.total) ||
-                0;
-              try {
-                const refundRequestId = buildOpsRefundKey(confirmAction.orderId);
-                const res = await partnerFunctionsApi.releaseRefund({
-                  refundRequestId,
-                  orderId: confirmAction.orderId,
-                  razorpayPaymentId: paymentId,
-                  ...(amountRupees > 0 ? { amountRupees } : {}),
-                  reason: "Partner ops refund from order board",
+              const request = target ? buildOpsRefundRequest(target) : null;
+              if (!request) {
+                toast.error("Refund NOT issued — no Razorpay payment id on this order.", {
+                  description:
+                    "A brand admin must locate the capture in Payments and release the refund manually.",
                 });
-                toast.success(`Refund released via Razorpay (ID: ${(res as any)?.id ?? "confirmed"}).`);
-              } catch (err) {
-                toast.error("Refund NOT issued — no money moved.", {
-                  description: err instanceof Error ? err.message : String(err),
-                });
+              } else {
+                try {
+                  const res = await partnerFunctionsApi.releaseRefund(request);
+                  toast.success(`Refund released via Razorpay (ID: ${(res as any)?.id ?? "confirmed"}).`);
+                } catch (err) {
+                  toast.error("Refund NOT issued — no money moved.", {
+                    description: err instanceof Error ? err.message : String(err),
+                  });
+                }
               }
             } else if (confirmAction.type === "petpooja") {
               try {

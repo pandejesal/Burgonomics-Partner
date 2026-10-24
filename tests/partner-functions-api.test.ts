@@ -242,6 +242,29 @@ describe('partnerFunctionsApi gateway (real client, mocked transport)', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it('blocks network fetch locally when no gateway payment id is recorded', async () => {
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy as any;
+
+    await expect(
+      partnerFunctionsApi.releaseRefund({
+        refundRequestId: 'refundreq_fixture_valid',
+        orderId: 'ord_inv',
+        razorpayPaymentId: '   ',
+      })
+    ).rejects.toThrow(/payment id/i);
+
+    await expect(
+      partnerFunctionsApi.releaseRefund({
+        refundRequestId: 'refundreq_fixture_valid',
+        orderId: 'ord_inv',
+        razorpayPaymentId: undefined as any,
+      })
+    ).rejects.toThrow(/payment id/i);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it('POSTs refund dispositions with id/reason and surfaces 409 conflicts', async () => {
     const seen: { url?: string; init?: RequestInit } = {};
     globalThis.fetch = (async (url: any, init: any) => {

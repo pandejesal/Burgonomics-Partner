@@ -5,7 +5,10 @@ import {
   buildAdminRefundKey,
   buildCancelRefundKey,
   buildOpsRefundKey,
+  buildCancelRefundRequest,
+  buildOpsRefundRequest,
 } from '../src/utils/refundRequestIdentity';
+import { normalizeOrderDoc } from '../src/utils/orderContract';
 
 describe('refundRequestIdentity', () => {
   describe('validateRefundRequestId & isValidRefundRequestId', () => {
@@ -135,6 +138,66 @@ describe('refundRequestIdentity', () => {
       expect(() => buildOpsRefundKey('')).toThrow();
       expect(() => buildOpsRefundKey(undefined as any)).toThrow();
       expect(() => buildOpsRefundKey('undefined')).toThrow();
+    });
+  });
+
+  describe('refund request payloads from real order docs', () => {
+    const paidDoc = {
+      items: [{ itemId: 'itm_1', name: 'Hero Burger', quantity: 1, price: 250 }],
+      status: 'pending',
+      total: 250,
+      paymentStatus: 'completed',
+      payment: { method: 'razorpay', razorpayPaymentId: 'pay_ABC123' },
+    };
+
+    it('carries payment.razorpayPaymentId through normalization and releases with the cancel key', () => {
+      const order = normalizeOrderDoc('ord_cancel_1', paidDoc);
+
+      expect(order.razorpayPaymentId).toBe('pay_ABC123');
+
+      expect(buildCancelRefundRequest(order, 'CUSTOMER_REQUEST')).toEqual({
+        refundRequestId: 'cancel_refund_ord_cancel_1',
+        orderId: 'ord_cancel_1',
+        razorpayPaymentId: 'pay_ABC123',
+        amountRupees: 250,
+        reason: 'Cancelled (CUSTOMER_REQUEST)',
+      });
+    });
+
+    it('refuses to build a cancel refund when the order has no gateway payment id', () => {
+      const order = normalizeOrderDoc('ord_cancel_2', {
+        ...paidDoc,
+        payment: { method: 'cod' },
+      });
+
+      expect(order.razorpayPaymentId).toBeUndefined();
+      expect(buildCancelRefundRequest(order, 'OUT_OF_STOCK')).toBeNull();
+    });
+
+    it('builds the board ops refund from RichOrder payment.transactionId', () => {
+      expect(
+        buildOpsRefundRequest({
+          id: 'ord_board_1',
+          totals: { grandTotal: 480 },
+          payment: { transactionId: 'pay_BOARD1' },
+        }),
+      ).toEqual({
+        refundRequestId: 'ops_refund_ord_board_1',
+        orderId: 'ord_board_1',
+        razorpayPaymentId: 'pay_BOARD1',
+        amountRupees: 480,
+        reason: 'Partner ops refund from order board',
+      });
+    });
+
+    it('refuses to build a board refund when the payment block has no gateway id', () => {
+      expect(
+        buildOpsRefundRequest({
+          id: 'ord_board_2',
+          totals: { grandTotal: 480 },
+          payment: {},
+        }),
+      ).toBeNull();
     });
   });
 });
