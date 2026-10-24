@@ -252,16 +252,9 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
       try {
         // Loop 51/120: bounded — a year view must not pull unbounded history.
         const ORDER_CAP = 2000;
-        const scopedOrdersQuery = () =>
-          query(
-            collection(db, 'orders'),
-            where('branchId', 'in', branchIds.slice(0, FIRESTORE_IN_LIMIT)),
-            limit(ORDER_CAP)
-          );
-        // `in` + `createdAt >=` + `orderBy createdAt` is exactly the
-        // composite-index trap: undeployed index = failed-precondition and a
-        // dead analytics view. The fallback re-reads with the automatic
-        // single-field indexes only and narrows dates in memory below.
+        // `in` + `createdAt >=` + `orderBy createdAt` needs the composite
+        // index. An undeployed index is a query error, never an unordered
+        // page: arbitrary documents must not be presented as period totals.
         const ordersQuery =
           branchIds.length > 0
             ? query(
@@ -279,28 +272,11 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
               );
 
         let rawDocs: Array<{ id: string; data: Record<string, any> }>;
-        try {
-          const ordersSnap = await getDocs(ordersQuery);
-          rawDocs = ordersSnap.docs.map((d) => ({
-            id: d.id,
-            data: d.data() as Record<string, any>,
-          }));
-        } catch (orderErr: any) {
-          const code = orderErr?.code;
-          const missingIndex =
-            code === 'failed-precondition' ||
-            /failed[- ]precondition|\bindex\b/i.test(orderErr?.message || '');
-          if (!missingIndex || branchIds.length === 0) throw orderErr;
-          console.warn(
-            'Analytics composite index missing — falling back to unordered scoped read:',
-            orderErr
-          );
-          const fallbackSnap = await getDocs(scopedOrdersQuery());
-          rawDocs = fallbackSnap.docs.map((d) => ({
-            id: d.id,
-            data: d.data() as Record<string, any>,
-          }));
-        }
+        const ordersSnap = await getDocs(ordersQuery);
+        rawDocs = ordersSnap.docs.map((d) => ({
+          id: d.id,
+          data: d.data() as Record<string, any>,
+        }));
 
         // Linked Delivery stores (registry; no extra reads when unmapped).
         if (branchIds.length > 0) {
@@ -318,16 +294,16 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
             warnings.push('Linked delivery stores could not be loaded.');
           }
         }
-        // The fallback (and the aliased merge) carries pre-range docs —
-        // narrow to the period in memory, where Timestamp and ISO-string
-        // createdAt both compare correctly.
+        // The aliased merge carries pre-range docs — narrow to the period in
+        // memory, where Timestamp and ISO-string createdAt both compare
+        // correctly. An unparseable date is excluded, never counted.
         orders = rawDocs
           .map((d) => normalizeOrderDoc(d.id, d.data))
           .filter((o: any) => !branchIds.length || (o.branchId && branchIds.includes(o.branchId)))
           .filter((o: any) => {
             const c = (o as any).createdAt;
             const ms = c?.toMillis?.() ?? (c?.toDate ? c.toDate().getTime() : new Date(c ?? 0).getTime());
-            return Number.isFinite(ms) ? ms >= startDate.getTime() : true;
+            return Number.isFinite(ms) ? ms >= startDate.getTime() : false;
           });
       } catch (err) {
         console.warn('Error querying orders for analytics:', err);

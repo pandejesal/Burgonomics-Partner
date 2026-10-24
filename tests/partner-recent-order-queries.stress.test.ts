@@ -212,6 +212,34 @@ describe.each(['iso', 'timestamp'] as const)('bounded recent-order queries (%s)'
     cleanup();
   });
 
+  it('Control Room live board: a superseded alias read rejecting does not report a disconnect', async () => {
+    seed('pending', shape);
+    let rejectFirst!: (err: Error) => void;
+    const firstBlocked = new Promise<Array<{ id: string; data: Record<string, any> }>>(
+      (_, reject) => { rejectFirst = reject; },
+    );
+    vi.mocked(fetchAliasedStoreOrders)
+      // Snapshot A is still waiting on its alias read …
+      .mockImplementationOnce(() => firstBlocked)
+      // … snapshot B resolves normally and paints the board.
+      .mockImplementation(async () => []);
+
+    const next = vi.fn();
+    const error = vi.fn();
+    const cleanup = adminOrdersService.listenLiveOrders('branch_recent', next, error);
+    expect(next).not.toHaveBeenCalled();
+
+    h.snapshots.at(-1)!.emit();
+    await vi.waitFor(() => expect(next).toHaveBeenCalled());
+
+    // Snapshot A's alias read then fails. It is no longer the current
+    // generation, so its failure must not paint a disconnect over B's board.
+    rejectFirst(new Error('alias read unavailable'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(error).not.toHaveBeenCalled();
+    cleanup();
+  });
+
   it('KDS branch listener receives the newest ticket, not the smallest 100 document names', async () => {
     seed('pending', shape);
     useKDSRealtimeStream();

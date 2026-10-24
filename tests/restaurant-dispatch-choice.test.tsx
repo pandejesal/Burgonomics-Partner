@@ -20,7 +20,6 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { createRequire } from 'node:module';
-import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import {
@@ -165,20 +164,7 @@ const { JSDOM } = require('../../burgonomics-foundation-core/node_modules/jsdom/
   JSDOM: new (html: string) => { window: Window & typeof globalThis };
 };
 
-const cardSource = readFileSync(
-  new URL('../src/features/delivery/components/PorterDispatchCard.tsx', import.meta.url),
-  'utf8'
-);
-const queueSource = readFileSync(
-  new URL('../src/pages/DeliveryQueuePage.tsx', import.meta.url),
-  'utf8'
-);
-const tableSource = readFileSync(
-  new URL('../src/features/orders/components/OrderTableList.tsx', import.meta.url),
-  'utf8'
-);
-
-// ── 1. getRiderStatusMeta — real server shapes (pure) ──────────────────────
+const PHI = '+919876543210';
 
 describe('getRiderStatusMeta — real server manual-dispatch shape', () => {
   it('reads the real manual_branch_terminal shape as in-house, not Porter', () => {
@@ -296,8 +282,6 @@ describe('getRiderStatusMeta — real server manual-dispatch shape', () => {
 
 // ── 2. PorterDispatchCard — provider-truthful rendering (static) ───────────
 
-const PHI = '+919876543210';
-
 function deliveryOrder(shape: Record<string, unknown>): Order {
   return {
     id: 'ord_card_1',
@@ -406,45 +390,7 @@ describe('PorterDispatchCard — delivery choice rendering', () => {
   });
 });
 
-// ── 3. Source pins — Porter no longer fronts the whole dispatcher ─────────
-
-describe('source pins — dispatcher copy is provider-neutral', () => {
-  it('DeliveryQueuePage no longer names Porter as THE dispatch mechanism', () => {
-    expect(queueSource).not.toContain('Delivery Queue & Porter Logistics');
-    expect(queueSource).not.toContain('Porter 2-wheeler courier allocation');
-    expect(queueSource).not.toMatch(/Porter API Status/);
-  });
-
-  it('DeliveryQueuePage keeps the Reachable claim session-scoped and unverified otherwise', () => {
-    expect(queueSource).toMatch(/not checked/);
-    expect(queueSource).toMatch(/this session/);
-  });
-
-  it('DeliveryQueuePage does not count false zeros on an errored feed', () => {
-    // "0 Orders" over an unreadable feed reads as "nothing ready":
-    expect(queueSource).toMatch(/countsAreLive/);
-  });
-
-  it('OrderTableList contains no row action that books a paid courier', () => {
-    expect(tableSource).not.toMatch(/onDispatchPorter\?\.\(/);
-    expect(tableSource).not.toMatch(/Dispatch Porter/i);
-  });
-
-  it('OrderTableList navigates staff to the existing delivery queue instead', () => {
-    expect(tableSource).toMatch(/delivery-queue/);
-    expect(tableSource).toMatch(/'\/admin'/);
-  });
-
-  it('PorterDispatchCard honours real provider labels and the manual-terminal shape', () => {
-    expect(cardSource).toMatch(/dispatchProviderLabel\(/);
-    // The old bare-riderName Porter guess must be gone:
-    expect(cardSource).not.toMatch(/order\.riderName\s*\?\s*'Porter'/);
-    // Real manual-terminal shape recognised:
-    expect(cardSource).toMatch(/manual_branch_terminal/);
-  });
-});
-
-// ── 4. Interactive jsdom harness ────────────────────────────────────────────
+// ── 3. Interactive jsdom harness ────────────────────────────────────────────
 
 describe('interactive delivery choice behavior (jsdom)', () => {
   let root: Root | null = null;

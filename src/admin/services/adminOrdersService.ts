@@ -591,6 +591,7 @@ export const adminOrdersService = {
               onUpdate(live);
             }
           } catch (err) {
+            if (cancelled || !ingestionGate.isCurrent(mergeToken)) return;
             onError(err instanceof Error ? err : new Error(String(err)));
           }
         })();

@@ -164,8 +164,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
 }) => {
   // Single sign-in: role comes from the unified partner session.
   const { admin } = useAdmin();
-  const selectedRole =
-    (admin?.role?.name as "Developer" | "Operations" | "Store Manager" | "Finance") || "Developer";
+  const selectedRole = admin?.role?.name ?? "";
 
   // M4: real authorized store directory (brand-readable admin_stores), never a
   // hardcoded outlet list.
@@ -198,7 +197,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
 
     // If user is Store Manager, restrict to their store. Otherwise, follow the filterStore UI selection.
     const effectiveStoreFilter =
-      selectedRole === "Store Manager"
+      selectedRole === "branch_owner"
         ? managerAssignedStoreId
         : filterStore === "all"
           ? null
@@ -222,7 +221,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
     if (viewMode !== "history") return;
 
     const effectiveStoreFilter =
-      selectedRole === "Store Manager"
+      selectedRole === "branch_owner"
         ? managerAssignedStoreId
         : filterStore === "all"
           ? null

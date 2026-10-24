@@ -70,7 +70,7 @@ export const AdminPaymentsPage: React.FC = () => {
   const [pulseLive, setPulseLive] = useState(false);
 
   // Filter Store Managers to only see their store
-  const isStoreManager = role === "Store Manager";
+  const isStoreManager = role === "branch_owner";
   const managerStoreId = "str_001"; // Burgonomics Navrangpura
   const managerStoreName = "Burgonomics Navrangpura";
 

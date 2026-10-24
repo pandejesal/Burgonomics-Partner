@@ -13,7 +13,7 @@
  */
 import React, { isValidElement, type ReactElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
   role: 'brand_owner' as string,
@@ -234,6 +234,10 @@ beforeEach(() => {
   state.toastErrors = [];
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe('M4 — regional-manager scope fails closed', () => {
   it('useTickets: a manager with no cities gets no foreign-city query and no tickets', async () => {
     state.role = 'regional_manager';
@@ -370,6 +374,81 @@ describe('M4 — regional-manager scope fails closed', () => {
     expect(result.totalOrders).toBe(0);
     expect(result.warnings.join(' ')).toMatch(/no outlets were found/i);
     expect(state.queries.filter((q) => q.__collection === 'orders')).toHaveLength(0);
+  });
+
+  it('useAnalytics: a missing composite index reports incomplete data, never unordered totals', async () => {
+    vi.stubEnv('DEV', false as unknown as string);
+    state.role = 'brand_owner';
+    state.selectedBranchId = 'branch_surat_01';
+    state.docs = {
+      orders: [
+        {
+          id: 'ord_1',
+          data: () => ({
+            branchId: 'branch_surat_01',
+            total: 500,
+            orderType: 'delivery',
+            deliveryFee: 30,
+            createdAt: { toMillis: () => Date.now() },
+          }),
+        },
+      ],
+    };
+    vi.mocked(getDocs).mockImplementationOnce(async (q: any) => {
+      state.queries.push(q);
+      throw Object.assign(new Error('The query requires an index.'), {
+        code: 'failed-precondition',
+      });
+    });
+
+    useAnalytics('month');
+    const result = await state.capturedQuery.queryFn();
+
+    expect(result.totalOrders).toBe(0);
+    expect(result.totalRevenue).toBe(0);
+    expect(result.warnings.join(' ')).toMatch(/incomplete/i);
+    const orderQueries = state.queries.filter((q) => q.__collection === 'orders');
+    expect(orderQueries).toHaveLength(1);
+    expect(
+      orderQueries[0].constraints.some((c: any) => c.__orderBy?.field === 'createdAt')
+    ).toBe(true);
+  });
+
+  it('useAnalytics: rows with an unparseable createdAt never inflate period totals', async () => {
+    vi.stubEnv('DEV', false as unknown as string);
+    state.role = 'brand_owner';
+    state.selectedBranchId = 'branch_surat_01';
+    const now = Date.now();
+    state.docs = {
+      orders: [
+        {
+          id: 'ord_valid',
+          data: () => ({
+            branchId: 'branch_surat_01',
+            total: 500,
+            orderType: 'delivery',
+            deliveryFee: 30,
+            createdAt: { toMillis: () => now },
+          }),
+        },
+        {
+          id: 'ord_bad_date',
+          data: () => ({
+            branchId: 'branch_surat_01',
+            total: 900,
+            orderType: 'delivery',
+            deliveryFee: 30,
+            createdAt: 'not-a-date',
+          }),
+        },
+      ],
+    };
+
+    useAnalytics('month');
+    const result = await state.capturedQuery.queryFn();
+
+    expect(result.totalOrders).toBe(1);
+    expect(result.totalRevenue).toBe(500);
   });
 });
 

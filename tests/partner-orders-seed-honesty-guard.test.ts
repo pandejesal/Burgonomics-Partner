@@ -1,24 +1,24 @@
-// Static fixture-marker checks only. Failed-read rejection is exercised through
-// the real hook/query function in partner-recent-order-queries.stress.test.ts;
-// counting catch blocks does not establish that failed reads never return seeds.
-import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
+import { describe, it, expect, vi } from 'vitest';
 
-const src = readFileSync(
-  path.resolve(import.meta.dirname, '../src/hooks/useOrders.ts'),
-  'utf8',
-);
+vi.mock('@/config/firebase', () => ({ db: {}, auth: {}, app: {}, messaging: null }));
+
+import { demoSeedOrders } from '../src/hooks/useOrders';
 
 describe('useOrders demo-seed honesty guard', () => {
-  it('the fabricated seed docs have exactly ONE source (deduped via demoSeedOrders)', () => {
-    expect(src).toContain('export function demoSeedOrders');
-    expect(src.split("id: 'ord_901'").length - 1).toBe(1);
+  const seeds = demoSeedOrders();
+
+  it('exposes each fabricated seed exactly once', () => {
+    const ids = seeds.map((order) => order.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids.filter((id) => id === 'ord_901')).toHaveLength(1);
   });
 
-  it('seeds carry honesty markers and no invented claims at the source level', () => {
-    expect(src).toContain("'[DEMO] ");
-    expect(src).not.toContain("paymentStatus: 'completed',\n      petpoojaSyncStatus: 'synced'");
-    expect(src).not.toContain('kotPrinted: true');
+  it('seeds carry honesty markers and no invented backend-state claims', () => {
+    for (const order of seeds) {
+      expect(order.customerName.startsWith('[DEMO]')).toBe(true);
+      expect(order.paymentStatus).toBe('pending');
+      expect(order.petpoojaSyncStatus).toBe('pending');
+      expect(order.kotPrinted).toBe(false);
+    }
   });
 });

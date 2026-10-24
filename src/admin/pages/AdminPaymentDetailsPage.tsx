@@ -29,6 +29,7 @@ import { AdminButton } from "../components/Buttons";
 import { StatusBadge } from "../components/Badges";
 import { paymentStorage, PaymentTransaction } from "./paymentsData";
 import { useAdmin } from "../hooks/useAdmin";
+import { canReleaseRefund } from "./refundRoles";
 import { toast } from "sonner";
 
 export const AdminPaymentDetailsPage: React.FC = () => {
@@ -59,7 +60,7 @@ export const AdminPaymentDetailsPage: React.FC = () => {
   }, [id]);
 
   // RBAC checks
-  const canPerformWriteActions = role === "Developer" || role === "Finance";
+  const canPerformWriteActions = canReleaseRefund(role);
 
   // Actions
   const handleRetryVerification = () => {
@@ -221,7 +222,7 @@ export const AdminPaymentDetailsPage: React.FC = () => {
             onClick={() => {
               if (!canPerformWriteActions) {
                 toast.error(
-                  `Access Denied: Store Managers & Operations cannot process refunds. Role authorized: Finance/Developer.`,
+                  `Access Denied: Your role cannot process refunds. Refund release requires brand_owner, developer or support.`,
                 );
                 return;
               }

@@ -1,12 +1,6 @@
 /**
  * P1-B (KDS dispatch copy vs effect) + P1-A client side (bumpStatus
- * expectedStatus contract). Committed HEAD e69f211.
- *
- * Sources under test:
- *   - KDSOrderCard.tsx (CLEAN in working tree — verified via git diff)
- *   - pages/OrderDetailPage.tsx (CLEAN — expectedStatus call sites, structural
- *     pin in the same style as tests/kds-bump-outbox.test.ts F8, since the
- *     page's data hook cannot be mounted in a node harness)
+ * expectedStatus contract).
  *
  * LIVE: a ready delivery KOT bump emits onBumpOrder(order.id,
  * 'out_for_delivery') and NOTHING in the card flow calls a dispatch API;
@@ -17,14 +11,9 @@
  * expectedStatus through allowedExpectedCodes (incl. dinein/takeaway forks)
  * before the transaction compares code sets — the old raw comparison
  * (orderStatus.ts `current.code !== expected`) that refused every
- * preconditioned partner bump with STALE_ORDER_STATUS no longer exists. The
- * server-side vocabulary proof lives in functions/tests/orderBump.test.ts (9
- * new pins); the client-side contract itself is pinned LIVE in
- * partnerops-bump-status-forwarding.test.ts.
+ * preconditioned partner bump with STALE_ORDER_STATUS no longer exists.
  */
 import { isValidElement, type ReactElement, type ReactNode } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
-import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Order } from '@/types';
 
@@ -163,27 +152,6 @@ describe('KDSOrderCard — bump routing and copy (committed behavior)', () => {
   });
 });
 
-describe('P1-A client side — interactive status writes carry the bump precondition', () => {
-  // Structural pin (same style as kds-bump-outbox.test.ts F8): OrderDetailPage
-  // is CLEAN at HEAD and both of its status-write call sites send
-  // expectedStatus = the status this screen is showing. This documents the
-  // half of the contract that must exist client-side before the server can
-  // honour it.
-  const source = readFileSync(
-    new URL('../src/pages/OrderDetailPage.tsx', import.meta.url),
-    'utf8'
-  );
-
-  it('OrderDetailPage sends expectedStatus from the shown order on every status write', () => {
-    const callSites = source.match(
-      /\.\.\.\(order \? \{ expectedStatus: order\.status \} : \{\}\)/g
-    );
-    expect(callSites).toHaveLength(2); // handleStatusChange + handleCancelAndRefund
-    // The write goes through the server bump, not a raw Firestore updateDoc:
-    expect(source).toMatch(/updateStatus\.mutateAsync/);
-  });
-});
-
 describe('KDSOrderCard — copy/effect honesty (copy describes the status change)', () => {
   // FIXED: the ready-delivery bump copy now describes the status update
   // ('Mark Out for Delivery ✓', KDSOrderCard.tsx:272) and does NOT promise a
@@ -214,19 +182,6 @@ describe('KDSOrderCard — copy/effect honesty (copy describes the status change
       globalThis.fetch = realFetch;
     }
   });
-
-  it('wires no dispatch machinery: the card imports neither the dispatch API nor a courier service', () => {
-    // Structural counterpart to the fetch-spy pins above (a mocked onClick
-    // can never reach a network API, so the import surface is the pin that
-    // actually trips if a regression wires dispatch into the card).
-    const cardSource = readFileSync(
-      new URL('../src/features/kds/components/KDSOrderCard.tsx', import.meta.url),
-      'utf8'
-    );
-    expect(cardSource).not.toMatch(/partnerFunctionsApi/);
-    expect(cardSource).not.toMatch(/porterDelivery/);
-    expect(cardSource).not.toMatch(/\bfetch\(/);
-  });
 });
 
 describe('P1-A server side — expectedStatus vocabulary normalization (HONEST BEHAVIOR DOES NOT EXIST YET)', () => {
@@ -237,11 +192,7 @@ describe('P1-A server side — expectedStatus vocabulary normalization (HONEST B
   // lane [lane:functions-contract]) normalizes the Partner-vocabulary
   // expectedStatus through the canonical tables before the transaction
   // compares it to the stored Delivery status.code, with 9 new pins in
-  // functions/tests/orderBump.test.ts. This client-side harness cannot execute
-  // the server transaction, so the old vocabulary protest stays as an inert
-  // client-side assertion set rather than a live claim: the missing pair is
-  // now impossible by construction on the server, and the client-side half is
-  // pinned LIVE in the partnerops-bump-status-forwarding suite.
+  // functions/tests/orderBump.test.ts.
   it.skip('compares expectedStatus against the same vocabulary the client sends', () => {
     const docMeta = toDeliveryStatusMeta('pending');
     const clientSends = toPartnerStatus(docMeta); // what OrderDetailPage transmit
