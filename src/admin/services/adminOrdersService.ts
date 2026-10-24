@@ -618,7 +618,7 @@ export const adminOrdersService = {
     orderId: string,
     status: RichOrder["orderStatus"],
     timelineUpdate?: { title: string; actor: string; description: string },
-  ): Promise<boolean> {
+  ): Promise<void> {
     const toPartner: Record<Exclude<RichOrder["orderStatus"], "Refunded" | "Needs Review">, string> = {
       New: "pending",
       Accepted: "accepted",
@@ -653,13 +653,12 @@ export const adminOrdersService = {
             }
           : {}),
       });
-      return true;
     } catch (e) {
       logger.warn("adminOrdersService.updateOrderStatus_failed", {
         orderIdSuffix: orderId.slice(-6),
         message: e instanceof Error ? e.message : String(e),
       });
-      return false;
+      throw e instanceof Error ? e : new Error(String(e));
     }
   },
 };
