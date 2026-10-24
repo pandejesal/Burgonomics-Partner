@@ -376,6 +376,29 @@ export interface RawOrderDoc {
   data: Record<string, any>;
 }
 
+export interface KdsIngestionGate {
+  /** Issue the next generation token for a started read/fetch. */
+  next: () => number;
+  /** Whether a generation token is still the newest one (stale merges drop). */
+  isCurrent: (token: number) => boolean;
+}
+
+/**
+ * STRESS SWEEP 2026-10-24 (H1): order views that merge an async alias fetch
+ * into a live snapshot ran unsequenced — a SLOWER earlier fetch could resolve
+ * AFTER a newer snapshot and clobber the view with stale order states (a
+ * bumped ticket reappearing in 'pending' during a rush). The gate is the
+ * latest-wins seam shared by the KDS makeline and the Control Room board:
+ * every merge checks in before touching state.
+ */
+export const createKdsIngestionGate = (): KdsIngestionGate => {
+  let latest = 0;
+  return {
+    next: () => ++latest,
+    isCurrent: (token: number) => token === latest,
+  };
+};
+
 /**
  * Fetch Delivery-shaped docs for branch-scoped views.
  *

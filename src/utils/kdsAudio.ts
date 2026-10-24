@@ -166,14 +166,20 @@ export function syncKDSAlarmState(pendingCount: number): void {
 }
 
 /**
- * Exactly one immediate cue for a ticket that arrives while the 10s repeat
- * loop is already sounding: syncKDSAlarmState plays nothing in that case, so
- * without this the next audible cue would be the loop's next tick. When the
- * loop is NOT armed, syncKDSAlarmState's own immediate chime is the single
- * cue and this is a no-op — playing both was the 0→N double-fire.
+ * Exactly one immediate cue for a ticket that arrives while syncKDSAlarmState
+ * stays silent: either the 10s repeat loop is already sounding (so it plays
+ * nothing), or an acknowledge latch suppresses the alarm because the count is
+ * at or below the acknowledged level. In both cases without this the next
+ * audible cue would be the loop's next tick — or, after an acknowledge, no cue
+ * at all until a third ticket arrives. When syncKDSAlarmState does play its own
+ * immediate chime (loop starting from rest, or the count rising past the
+ * acknowledged level) this is a no-op — playing both was the 0→N double-fire.
  */
-export function playKDSArrivalCue(hasNewOrder: boolean): void {
-  if (hasNewOrder && isKDSAlarmRepeating()) {
+export function playKDSArrivalCue(hasNewOrder: boolean, pendingCount: number): void {
+  if (!hasNewOrder) return;
+  const silencedByAcknowledge =
+    acknowledgedPendingCount !== null && pendingCount <= acknowledgedPendingCount;
+  if (isKDSAlarmRepeating() || silencedByAcknowledge) {
     playKDSChime();
   }
 }

@@ -12,6 +12,7 @@ import {
   fetchAliasedStoreOrders,
   normalizeOrderDoc,
   orderDocTimeMs,
+  createKdsIngestionGate,
 } from '@/utils/orderContract';
 import { FIRESTORE_IN_LIMIT, isGlobalRole, resolveScopedBranchIds } from '@/utils/branchScope';
 import { playKDSArrivalCue, stopRepeatingKDSAlarm, syncKDSAlarmState } from '@/utils/kdsAudio';
@@ -96,28 +97,8 @@ export function writePendingKdsBumps(queue: PendingKdsBump[]): void {
  */
 export type KdsStreamFailureKind = 'missing_index' | 'listener_error';
 
-export interface KdsIngestionGate {
-  /** Issue the next generation token for a started read/fetch. */
-  next: () => number;
-  /** Whether a generation token is still the newest one (stale merges drop). */
-  isCurrent: (token: number) => boolean;
-}
-
-/**
- * STRESS SWEEP 2026-10-24 (H1): the branch-scoped onSnapshot merge
- * (`fetchAliasedStoreOrders`) ran unsequenced — a SLOWER earlier fetch could
- * resolve AFTER a newer snapshot and clobber the makeline with stale order
- * states (a bumped ticket reappearing in 'pending' during a rush). The gate
- * is the extracted latest-wins seam: every merge checks in before touching
- * state.
- */
-export const createKdsIngestionGate = (): KdsIngestionGate => {
-  let latest = 0;
-  return {
-    next: () => ++latest,
-    isCurrent: (token: number) => token === latest,
-  };
-};
+export { createKdsIngestionGate } from '@/utils/orderContract';
+export type { KdsIngestionGate } from '@/utils/orderContract';
 
 /**
  * STRESS SWEEP 2026-10-24 (H3): eviction for the chime-dedupe set must not
@@ -341,12 +322,12 @@ export function useKDSRealtimeStream() {
       }
     });
 
-    // A ticket that arrives while the repeating loop is already sounding has
-    // no immediate cue of its own (syncKDSAlarmState plays nothing when the
-    // loop is armed), so play exactly one here. When the loop is NOT armed,
-    // syncKDSAlarmState's own immediate chime is the single 0→N cue — playing
-    // both was the H2 double-fire.
-    playKDSArrivalCue(hasNewOrder);
+    // A ticket that arrives while the repeating loop is already sounding — or
+    // while an acknowledge latch keeps it silent — has no immediate cue of its
+    // own (syncKDSAlarmState plays nothing in either case), so play exactly
+    // one here. When the alarm is about to chime on its own, playing both was
+    // the H2 double-fire.
+    playKDSArrivalCue(hasNewOrder, pendingOrders.length);
     syncKDSAlarmState(pendingOrders.length);
 
     // Cap the chime dedupe set — bounded (no slow leak), and ACTIVE tickets

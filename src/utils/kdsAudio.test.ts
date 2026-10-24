@@ -230,7 +230,7 @@ describe('kdsAudio — arrival cue is heard exactly once', () => {
 
   it('initial 0→N load: the alarm is the only cue, no manual arrival chime', () => {
     // The hook's priming pass marks existing tickets as seen, so no arrival.
-    playKDSArrivalCue(false);
+    playKDSArrivalCue(false, 2);
     expect(mockCtx.createOscillator).not.toHaveBeenCalled();
 
     syncKDSAlarmState(2);
@@ -244,7 +244,7 @@ describe('kdsAudio — arrival cue is heard exactly once', () => {
     expect(isKDSAlarmRepeating()).toBe(true);
     mockCtx.createOscillator.mockClear();
 
-    playKDSArrivalCue(true);
+    playKDSArrivalCue(true, 3);
     expect(mockCtx.createOscillator).toHaveBeenCalledTimes(2);
 
     // The same effect then syncs the new count; the armed loop must not
@@ -254,18 +254,42 @@ describe('kdsAudio — arrival cue is heard exactly once', () => {
   });
 
   it('a first arrival while the loop is not armed is cued once by the alarm, not twice', () => {
-    playKDSArrivalCue(true);
+    playKDSArrivalCue(true, 1);
     expect(mockCtx.createOscillator).not.toHaveBeenCalled();
 
     syncKDSAlarmState(1);
     expect(mockCtx.createOscillator).toHaveBeenCalledTimes(2);
   });
 
+  it('an acknowledged kitchen still cues a new ticket that keeps the count at the acknowledged level', () => {
+    // A + B pending, loop armed; staff acknowledge, which stops the loop at ack=2.
+    syncKDSAlarmState(2);
+    acknowledgeKDSAlarm();
+    expect(isKDSAlarmRepeating()).toBe(false);
+
+    // Kitchen bumps A to preparing: pending=1, still under the latch — silent.
+    mockCtx.createOscillator.mockClear();
+    syncKDSAlarmState(1);
+    expect(mockCtx.createOscillator).not.toHaveBeenCalled();
+
+    // C arrives: pending is back at 2, not ABOVE ack=2, so sync stays silent.
+    playKDSArrivalCue(true, 2);
+    syncKDSAlarmState(2);
+    expect(mockCtx.createOscillator).toHaveBeenCalledTimes(2);
+    expect(isKDSAlarmRepeating()).toBe(false);
+
+    // The next snapshot of the same count must not cue again.
+    mockCtx.createOscillator.mockClear();
+    playKDSArrivalCue(false, 2);
+    syncKDSAlarmState(2);
+    expect(mockCtx.createOscillator).not.toHaveBeenCalled();
+  });
+
   it('an unchanged snapshot produces no cue', () => {
     syncKDSAlarmState(3);
     mockCtx.createOscillator.mockClear();
 
-    playKDSArrivalCue(false);
+    playKDSArrivalCue(false, 3);
     syncKDSAlarmState(3);
     expect(mockCtx.createOscillator).not.toHaveBeenCalled();
   });

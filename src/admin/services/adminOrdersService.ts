@@ -30,6 +30,7 @@ import {
   normalizeOrderDoc,
   fetchAliasedStoreOrders,
   orderDocTimeMs,
+  createKdsIngestionGate,
 } from "@/utils/orderContract";
 import type { Order as NormalizedOrder } from "@/types";
 import { branchIdForDeliveryStore } from "@/utils/storeBranchRegistry";
@@ -537,9 +538,13 @@ export const adminOrdersService = {
       limit(100),
     ];
     const pages = new Map<string, Map<string, Record<string, any>>>();
+    // The alias merge is an async read: a slower snapshot must never repaint
+    // the board after a newer snapshot already dropped a completed order.
+    const ingestionGate = createKdsIngestionGate();
     const receivePage = (field: string) => (snapshot: QuerySnapshot) => {
         void (async () => {
           if (cancelled) return;
+          const mergeToken = ingestionGate.next();
           try {
             const page = new Map<string, Record<string, any>>();
             snapshot.forEach((d) => {
@@ -549,17 +554,20 @@ export const adminOrdersService = {
               if (field === "createdAt" || data.createdAt === undefined) page.set(d.id, data);
             });
             pages.set(field, page);
-            const merged = new Map([...pages.values()].flatMap((p) => [...p.entries()]));
             const aliasedScope =
               storeFilter
                 ? [storeId as string]
                 : scopeIds.length > 0
                   ? scopeIds
                   : [];
-            for (const doc of await fetchAliasedStoreOrders(db, aliasedScope)) {
+            const aliased = await fetchAliasedStoreOrders(db, aliasedScope);
+            // Drop a stale generation: a newer snapshot has already started
+            // (and may have painted), so this merge must not write state.
+            if (cancelled || !ingestionGate.isCurrent(mergeToken)) return;
+            const merged = new Map([...pages.values()].flatMap((p) => [...p.entries()]));
+            for (const doc of aliased) {
               if (!merged.has(doc.id)) merged.set(doc.id, doc.data);
             }
-            if (cancelled) return;
             const live: RichOrder[] = [];
             for (const [id, data] of merged) {
               const rich = toRichOrder(id, data);

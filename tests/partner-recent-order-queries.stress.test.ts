@@ -10,6 +10,7 @@ const h = vi.hoisted(() => ({
   rejectOrdered: false,
   stalePlacedAtRow: null as { id: string; data: Record<string, any> } | null,
   queries: [] as any[],
+  snapshots: [] as Array<{ emit: () => void }>,
 }));
 
 vi.mock('react', async (original) => ({
@@ -80,7 +81,11 @@ vi.mock('firebase/firestore', async (original) => {
     query: (ref: any, ...constraints: any[]) => ({ ref, constraints }),
     getDocs: vi.fn(async (q: any) => evaluate(q)),
     onSnapshot: vi.fn((q: any, next: any, error: any) => {
-      try { next(evaluate(q)); } catch (e) { error(e); }
+      const emit = () => {
+        try { next(evaluate(q)); } catch (e) { error(e); }
+      };
+      h.snapshots.push({ emit });
+      emit();
       return vi.fn();
     }),
   };
@@ -90,6 +95,7 @@ import { Timestamp } from 'firebase/firestore';
 import { adminOrdersService } from '../src/admin/services/adminOrdersService';
 import { useOrders } from '../src/hooks/useOrders';
 import { useKDSRealtimeStream } from '../src/features/kds/hooks/useKDSRealtimeStream';
+import { fetchAliasedStoreOrders } from '../src/utils/orderContract';
 
 const newestId = 'order_479';
 
@@ -122,9 +128,12 @@ describe.each(['iso', 'timestamp'] as const)('bounded recent-order queries (%s)'
     h.effects.length = 0;
     h.stateWrites.length = 0;
     h.queries.length = 0;
+    h.snapshots.length = 0;
     h.queryOptions = null;
     h.rejectOrdered = false;
     h.stalePlacedAtRow = null;
+    vi.mocked(fetchAliasedStoreOrders).mockReset();
+    vi.mocked(fetchAliasedStoreOrders).mockImplementation(async () => []);
   });
 
   it.each(['scoped', 'global'])('useOrders includes newest from 480 documents (%s)', async (scope) => {
@@ -156,6 +165,51 @@ describe.each(['iso', 'timestamp'] as const)('bounded recent-order queries (%s)'
     if (scope === 'scoped') expect(next.mock.calls.at(-1)![0].map((o: any) => o.id)).not.toContain('foreign_newest');
     expect(error).not.toHaveBeenCalled();
     unsubscribe();
+  });
+
+  it('Control Room live board: a late alias merge cannot repaint a completed order', async () => {
+    seed('pending', shape);
+    const dateMs = Date.UTC(2026, 9, 24, 12);
+    const date = shape === 'iso' ? new Date(dateMs).toISOString() : Timestamp.fromMillis(dateMs);
+    const aliasedOrder = { id: 'aliased_order', data: {
+      store: { id: 'store_fixture' },
+      branchId: 'branch_recent',
+      status: 'pending',
+      items: [],
+      total: 100,
+      createdAt: date,
+    } };
+
+    let releaseFirstAlias!: () => void;
+    const firstAliasBlocked = new Promise<void>((resolve) => { releaseFirstAlias = resolve; });
+    vi.mocked(fetchAliasedStoreOrders)
+      // Snapshot A read the linked-store order as still pending …
+      .mockImplementationOnce(async () => {
+        await firstAliasBlocked;
+        return [aliasedOrder];
+      })
+      // … snapshot B reads it after the kitchen completed it.
+      .mockImplementation(async () => [
+        { id: aliasedOrder.id, data: { ...aliasedOrder.data, status: 'delivered' } },
+      ]);
+
+    const next = vi.fn();
+    const error = vi.fn();
+    const cleanup = adminOrdersService.listenLiveOrders('branch_recent', next, error);
+    // Snapshot A is waiting on its slower alias read.
+    expect(next).not.toHaveBeenCalled();
+
+    // Snapshot B resolves first and paints the board without the completed order.
+    h.snapshots.at(-1)!.emit();
+    await vi.waitFor(() => expect(next).toHaveBeenCalled());
+    expect(next.mock.calls.at(-1)![0].map((o: any) => o.id)).not.toContain(aliasedOrder.id);
+
+    // Snapshot A's stale alias read finally resolves — it must not resurrect it.
+    releaseFirstAlias();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(next.mock.calls.at(-1)![0].map((o: any) => o.id)).not.toContain(aliasedOrder.id);
+    expect(error).not.toHaveBeenCalled();
+    cleanup();
   });
 
   it('KDS branch listener receives the newest ticket, not the smallest 100 document names', async () => {
