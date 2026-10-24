@@ -85,6 +85,29 @@ const PARTNER_TO_DELIVERY: Record<OrderStatus, DeliveryStatusMeta> = {
   quarantine: { code: 'QUARANTINED', label: 'Needs review', kind: 'unknown', terminal: false },
 };
 
+/**
+ * STRESS SWEEP 2026-10-24 (K) — canonical forward-transition matrix, exported
+ * as a pure helper for future UI gating. NOT wired into any live call path:
+ * the 60-second Recall (`recallLastOrder`) and the module's own
+ * `toPartnerStatus` semantics treat BACKWARD moves as deliberate operator
+ * corrections, and the server's transactional freeze (functions
+ * orderStatus.ts) plus the offline-queue TTL already bound the harmful
+ * replays. Enabling the matrix as a hard gate is a product decision.
+ */
+const ALLOWED_TRANSITIONS: Record<OrderStatus, readonly OrderStatus[]> = {
+  pending: ['accepted', 'preparing', 'cancelled'],
+  accepted: ['preparing', 'cancelled'],
+  preparing: ['ready', 'cancelled'],
+  ready: ['out_for_delivery', 'delivered', 'cancelled'],
+  out_for_delivery: ['delivered', 'cancelled'],
+  delivered: [],
+  cancelled: [],
+  quarantine: ['cancelled'],
+};
+
+export const canTransitionStatus = (from: OrderStatus, to: OrderStatus): boolean =>
+  (ALLOWED_TRANSITIONS[from] ?? []).includes(to);
+
 /** Normalize any status shape (object, UPPER, lower) to Partner status.
  * Unknown codes fail CLOSED to 'quarantine' — never to 'pending', which would
  * surface a corrupt doc as fresh kitchen/dispatch work. */
