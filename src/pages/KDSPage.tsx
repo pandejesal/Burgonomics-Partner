@@ -230,7 +230,7 @@ export function KDSPage() {
   }, [readyOrders, channelFilter]);
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white flex flex-col font-sans select-none">
+    <div className="min-h-screen bg-[#050505] text-white flex flex-col font-sans select-none pt-safe">
       {/* Offline Loss Alert Banner */}
       {!isOnline && (
         <div

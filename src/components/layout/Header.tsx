@@ -14,7 +14,7 @@ export function Header() {
     selectedBranchId && selectedBranchId !== 'all' ? selectedBranchId : user?.branchIds?.[0];
 
   return (
-    <header className="h-16 bg-bg border-b border-[#1E3A24] flex items-center justify-between px-3 sm:px-4 lg:px-6 sticky top-0 z-30 shadow-md">
+    <header className="h-16 bg-bg border-b border-[#1E3A24] flex items-center justify-between px-3 sm:px-4 lg:px-6 sticky top-0 z-30 shadow-md pt-safe">
       {/* Left: Mobile menu + Outlet Switcher + Welcome */}
       <div className="flex min-w-0 flex-1 items-center gap-1 sm:gap-4">
         <button
