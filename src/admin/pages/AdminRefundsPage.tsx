@@ -27,11 +27,13 @@ import { ConfirmDialog } from "../components/Utilities";
 import { RefundDetails, PaymentTransaction } from "./paymentsData";
 import { adminPaymentsService } from "../services/adminPaymentsService";
 import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
+import { buildAdminRefundKey } from "@/utils/refundRequestIdentity";
 import { useAdmin } from "../hooks/useAdmin";
+import { canReleaseRefund, canRejectRefund, canRetryRefund } from "./refundRoles";
 import { toast } from "sonner";
 
 export const AdminRefundsPage: React.FC = () => {
-  const { role, isDeveloper } = useAdmin();
+  const { role } = useAdmin();
 
   // Real-time state subscription
   const [refunds, setRefunds] = useState<RefundDetails[]>([]);
@@ -60,21 +62,17 @@ export const AdminRefundsPage: React.FC = () => {
   const [isReleasing, setIsReleasing] = useState(false);
   const [isSubmittingRejection, setIsSubmittingRejection] = useState(false);
 
-  // Store Managers restriction: only see their store
-  const isStoreManager = role === "Store Manager";
-  const managerStoreName = "Burgonomics Navrangpura";
-
-  // RBAC checks
-  const canPerformRefundActions = role === "Developer" || role === "Finance";
+  // RBAC checks — canonical Firestore roles only, matching the server gates
+  // (functions/src/index.ts: /payments/refund + /refunds/dispose). The previous
+  // comparisons used display strings ("Developer"/"Finance") that never equal a
+  // canonical role, so every action was denied. Both predicates fail closed.
+  const canRelease = canReleaseRefund(role);
+  const canRetry = canRetryRefund(role);
+  const canReject = canRejectRefund(role);
 
   // Filter Refunds
   const filteredRefunds = useMemo(() => {
     return refunds.filter((r) => {
-      // Store Manager filter
-      if (isStoreManager && r.storeName !== managerStoreName) {
-        return false;
-      }
-
       // Tab filter
       if (activeTab !== "ALL" && r.status !== activeTab) {
         return false;
@@ -94,11 +92,11 @@ export const AdminRefundsPage: React.FC = () => {
 
       return true;
     });
-  }, [refunds, searchQuery, activeTab, isStoreManager]);
+  }, [refunds, searchQuery, activeTab]);
 
   // Aggregate Metrics
   const metrics = useMemo(() => {
-    const list = isStoreManager ? refunds.filter((r) => r.storeName === managerStoreName) : refunds;
+    const list = refunds;
 
     const totalCount = list.length;
     const totalVolume = list.reduce((sum, r) => sum + r.amountPaise, 0) / 100;
@@ -125,7 +123,7 @@ export const AdminRefundsPage: React.FC = () => {
       failedCount,
       failedVolume,
     };
-  }, [refunds, isStoreManager]);
+  }, [refunds]);
 
   // Handlers
   // Loop 5/120: approve = REAL server release (POST /payments/refund,
@@ -133,7 +131,9 @@ export const AdminRefundsPage: React.FC = () => {
   // while Razorpay + Firestore stayed untouched — never again.
   const releaseRefundServer = async (r: RefundDetails): Promise<boolean> => {
     try {
+      const refundRequestId = buildAdminRefundKey(r.id);
       const res = await partnerFunctionsApi.releaseRefund({
+        refundRequestId,
         orderId: r.orderId,
         razorpayPaymentId: r.paymentId,
         amountRupees: r.amountPaise / 100,
@@ -155,7 +155,7 @@ export const AdminRefundsPage: React.FC = () => {
   const handleApproveRelease = async () => {
     if (!approvingRefund || isReleasing) return;
 
-    if (!canPerformRefundActions) {
+    if (!canRelease) {
       toast.error(
         "Access Denied: Your administrative role is unauthorized to release refund payouts.",
       );
@@ -176,7 +176,7 @@ export const AdminRefundsPage: React.FC = () => {
     e.preventDefault();
     if (!rejectingRefund) return;
 
-    if (!canPerformRefundActions) {
+    if (!canReject) {
       toast.error("Access Denied: Your administrative role is unauthorized to reject refunds.");
       setRejectingRefund(null);
       return;
@@ -211,7 +211,7 @@ export const AdminRefundsPage: React.FC = () => {
   // Loop 5/120: retry = re-attempt the REAL server release (idempotent —
   // an already-processed order replays the stored refund instead of double-paying).
   const handleRetryRefund = async (refundId: string) => {
-    if (!canPerformRefundActions) {
+    if (!canRetry) {
       toast.error(
         "Access Denied: Your administrative role is unauthorized to retry refund payouts.",
       );
@@ -264,9 +264,9 @@ export const AdminRefundsPage: React.FC = () => {
         <PageHeader
           title="Refund Clearance Terminal"
           description={
-            isStoreManager
-              ? `Review customer escalations, log cancellations, and monitor refund requests for ${managerStoreName}.`
-              : "Enterprise Refund Control Console. Authorize manager-release payouts, auditing reasons such as duplicate transactions or delivery disputes."
+            canRelease
+              ? "Enterprise Refund Control Console. Authorize manager-release payouts, auditing reasons such as duplicate transactions or delivery disputes."
+              : "Refund Control Console. Review refund requests — your role has read-only access to payout release and rejection."
           }
           breadcrumbs={[{ label: "Refunds Center" }]}
         />
@@ -460,13 +460,14 @@ export const AdminRefundsPage: React.FC = () => {
                       <AlertCircle size={14} className="shrink-0 mt-0.5" />
                       <div>
                         <span className="font-bold block text-[10px]">
-                          Gateway Failure Code: insufficient_merchant_balance
+                          Gateway status: {r.gatewayStatus || "Failure reason unavailable — inspect the gateway record"}
                         </span>
-                        <span className="text-[9px] block mt-0.5 leading-normal">
-                          The payout API failed. Razorpay balance pool contains insufficient
-                          capital. Please refill your merchant wallet escrow, then re-trigger
-                          release.
-                        </span>
+                        {r.gatewayStatus === "insufficient_merchant_balance" && (
+                          <span className="text-[9px] block mt-0.5 leading-normal">
+                            The gateway reported insufficient merchant balance. Please refill
+                            your merchant balance before retrying release.
+                          </span>
+                        )}
                       </div>
                     </div>
                   )}
@@ -485,9 +486,9 @@ export const AdminRefundsPage: React.FC = () => {
                         <>
                           <button
                             onClick={() => {
-                              if (!canPerformRefundActions) {
+                              if (!canReject) {
                                 toast.error(
-                                  "Access Denied: Store Managers & Operations cannot reject refunds.",
+                                  "Access Denied: Your administrative role is unauthorized to reject refunds.",
                                 );
                                 return;
                               }
@@ -500,9 +501,9 @@ export const AdminRefundsPage: React.FC = () => {
 
                           <button
                             onClick={() => {
-                              if (!canPerformRefundActions) {
+                              if (!canRelease) {
                                 toast.error(
-                                  "Access Denied: Store Managers & Operations cannot release refunds.",
+                                  "Access Denied: Your administrative role is unauthorized to release refunds.",
                                 );
                                 return;
                               }

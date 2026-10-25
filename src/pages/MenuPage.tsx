@@ -16,9 +16,14 @@ import {
   Sparkles,
   ShieldCheck,
   AlertTriangle,
+  CircleAlert,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import { useSyncHealth } from '@/admin/dashboard/hooks/useDashboardData';
+import { petpoojaBadgeMeta, type PetpoojaBadgeStatus } from '@/components/ui/PetpoojaStatusBadge';
 import type { MenuItem } from '@/types';
+
+type MenuFeedback = { message: string; severity: 'success' | 'warning' | 'error' };
 
 export function MenuPage() {
   const { user } = useAuthStore();
@@ -42,27 +47,44 @@ export function MenuPage() {
   const [syncSuccess, setSyncSuccess] = useState(false);
   const [eightSixTargetItem, setEightSixTargetItem] = useState<MenuItem | null>(null);
   const [showComboDrawer, setShowComboDrawer] = useState(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<MenuFeedback | null>(null);
+
+  // Header chip binds to real state: dashboard sync-health probe (defaults
+  // to standby/not-connected) unless this session's manual sync proved
+  // otherwise. Keeps the page chip and the header badge from disagreeing.
+  const { data: syncHealth } = useSyncHealth();
+  const [syncOutcome, setSyncOutcome] = useState<'ok' | 'failed' | null>(null);
+  const petpoojaStatus: PetpoojaBadgeStatus =
+    syncOutcome === 'ok'
+      ? 'online'
+      : syncOutcome === 'failed'
+      ? 'error'
+      : syncHealth?.connected
+      ? 'online'
+      : 'unknown';
+  const petpoojaChip = petpoojaBadgeMeta(petpoojaStatus);
 
   const canEdit =
     user?.role === 'brand_owner' ||
     user?.role === 'developer' ||
     user?.role === 'branch_owner';
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 4000);
+  const showToast = (message: string, severity: MenuFeedback['severity'] = 'success') => {
+    setFeedback({ message, severity });
+    setTimeout(() => setFeedback(null), 4000);
   };
 
   const handleManualSync = async () => {
     try {
       await syncPetpooja.mutateAsync();
+      setSyncOutcome('ok');
       setSyncSuccess(true);
       showToast('Catalog refreshed from Petpooja POS bridge');
       setTimeout(() => setSyncSuccess(false), 3000);
     } catch (err) {
+      setSyncOutcome('failed');
       console.error('Petpooja sync failed:', err);
-      showToast('Menu sync failed — catalog unchanged. Check connection and retry.');
+      showToast('Menu sync failed — catalog unchanged. Check connection and retry.', 'error');
     }
   };
 
@@ -74,22 +96,30 @@ export function MenuPage() {
       return;
     }
     // Re-enable item immediately — toast only after the write lands.
+    setFeedback(null);
     try {
-      await toggleAvailability.mutateAsync({ itemId: item.id, isAvailable: true });
-      showToast(`${item.name} is now back IN STOCK on customer app & POS`);
+      const { posStatus } = await toggleAvailability.mutateAsync({ itemId: item.id, isAvailable: true, notifyError: false });
+      // The hook already announces app success / POS failure via Sonner.
+      if (posStatus === 'failed') return;
+      showToast(
+        posStatus === 'synced'
+          ? `${item.name} is now back IN STOCK on customer app & POS`
+          : `${item.name} is now back IN STOCK on customer app only — POS sync skipped.`,
+        posStatus === 'synced' ? 'success' : 'warning'
+      );
     } catch (err) {
       console.error('Re-enable failed:', err);
-      showToast(`Could not re-enable ${item.name} — no changes were made.`);
+      showToast(`Could not re-enable ${item.name} — no changes were made.`, 'error');
     }
   };
 
   const handleConfirm86 = async (itemId: string, duration: EightSixDuration, reason: string) => {
     let res: { posSynced: boolean } | undefined;
     try {
-      res = await markItem86.mutateAsync({ itemId, duration, reason });
+      res = await markItem86.mutateAsync({ itemId, duration, reason, notifyError: false });
     } catch (err) {
       console.error('86-ing failed:', err);
-      showToast('Could not update stock — no changes were made.');
+      showToast('Could not update stock — no changes were made.', 'error');
       return;
     }
     // Loop 6: success toast ONLY on success — the old fall-through toasted
@@ -99,7 +129,8 @@ export function MenuPage() {
     showToast(
       res?.posSynced
         ? `${item?.name || 'Item'} marked 86ed (${duration.replace('_', ' ')}) — customer app & POS`
-        : `${item?.name || 'Item'} marked 86ed on customer app — POS sync pending, retry from menu if it lingers`
+        : `${item?.name || 'Item'} marked 86ed on customer app — POS sync pending, retry from menu if it lingers`,
+      res?.posSynced ? 'success' : 'warning'
     );
   };
 
@@ -138,10 +169,17 @@ export function MenuPage() {
   return (
     <div className="space-y-6 select-none text-white">
       {/* Toast Notification */}
-      {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 px-4 py-3 bg-[#0E4825] border border-[#4ADE80] text-white rounded-xl shadow-2xl flex items-center gap-2.5 animate-in slide-in-from-bottom duration-200">
-          <CheckCircle2 className="w-4 h-4 text-[#4ADE80]" />
-          <span className="text-xs font-bold">{toastMessage}</span>
+      {feedback && (
+        <div
+          role={feedback.severity === 'error' ? 'alert' : 'status'}
+          className={`fixed bottom-24 right-6 z-[1000] px-4 py-3 bg-surface border text-white rounded-xl shadow-2xl flex items-center gap-2.5 animate-in slide-in-from-bottom duration-200 ${
+            feedback.severity === 'error' ? 'border-error' : feedback.severity === 'warning' ? 'border-warning' : 'border-success'
+          }`}
+        >
+          {feedback.severity === 'error' ? <CircleAlert aria-hidden="true" className="w-4 h-4 text-error" />
+            : feedback.severity === 'warning' ? <AlertTriangle aria-hidden="true" className="w-4 h-4 text-warning" />
+            : <CheckCircle2 aria-hidden="true" className="w-4 h-4 text-success" />}
+          <span className="text-xs font-bold">{feedback.message}</span>
         </div>
       )}
 
@@ -152,12 +190,20 @@ export function MenuPage() {
             <h1 className="text-2xl font-black text-white tracking-wide">
               Menu & Catalog Management
             </h1>
-            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#0E4825] text-[#4ADE80] border border-[#4ADE80]/40 font-mono uppercase">
-              Petpooja Live
+            <span
+              className={`px-2 py-0.5 rounded text-[10px] font-bold border font-mono uppercase ${
+                petpoojaStatus === 'online'
+                  ? 'bg-[#0E4825] text-[#4ADE80] border-[#4ADE80]/40'
+                  : 'bg-neutral-800 text-neutral-400 border-neutral-600'
+              }`}
+            >
+              Petpooja POS: {petpoojaChip.label}
             </span>
           </div>
           <p className="text-xs text-zinc-400 mt-0.5">
-            100% Pure Veg catalog synced with POS. Manage instant 86ing, category switches & combo meals.
+            {petpoojaStatus === 'online'
+              ? '100% Pure Veg catalog synced with POS. Manage instant 86ing, category switches & combo meals.'
+              : '100% Pure Veg catalog from Burgonomics — POS link not verified. Manage instant 86ing, category switches & combo meals.'}
           </p>
         </div>
 
@@ -287,6 +333,7 @@ export function MenuPage() {
               onClick={() => {
                 setSearchQuery('');
                 setSelectedCategory('all');
+                setOnlyJainFilter(false);
               }}
               className="mt-3 px-4 py-2 rounded-xl bg-[#0E4825] hover:bg-[#135d30] text-emerald-300 text-xs font-bold transition-colors cursor-pointer min-h-[44px]"
             >

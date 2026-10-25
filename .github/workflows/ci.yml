@@ -2,8 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # Default branch is feat/partner-device-smoke — CI must fire there too,
+    # otherwise the gate never runs on the branch we actually ship from.
+    branches: [main, master, "feat/**", "fix/**", "release/**"]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   web:
@@ -20,6 +23,13 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run test
+        env:
+          VITE_FIREBASE_API_KEY: test-api-key
+          VITE_FIREBASE_AUTH_DOMAIN: test.firebaseapp.com
+          VITE_FIREBASE_PROJECT_ID: test-project
+          VITE_FIREBASE_STORAGE_BUCKET: test.appspot.com
+          VITE_FIREBASE_MESSAGING_SENDER_ID: "1234567890"
+          VITE_FIREBASE_APP_ID: "1:1234567890:web:test"
 
   secret-scan:
     name: Secret scan (gitleaks)
@@ -44,8 +54,10 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
       - run: npm ci
+      - run: npm run build:mobile
+      - run: npx cap sync android
       - run: ./gradlew assembleDebug
         working-directory: android
 
@@ -59,6 +71,85 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run build:mobile
       - run: npx cap sync ios
       - run: xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release -destination "generic/platform=iOS Simulator" -derivedDataPath build/DerivedData build
         working-directory: .
+
+  release-aab:
+    name: Release AAB (signed)
+    # Manual only — must not burn minutes on regular pushes.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:mobile
+      - run: npx cap sync android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Neutralize Windows-only org.gradle.java.home
+        run: sed -i '/^org.gradle.java.home=/d' android/gradle.properties
+      - name: Decode release keystore
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > android/release.keystore
+      - name: Fail closed if release secrets missing
+        # android/app/build.gradle:50-52 silently falls back to DEBUG signing
+        # when storePass/keyPass are falsy — an empty secret must abort here
+        # instead of uploading a debug-signed AAB as a release artifact.
+        env:
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+        run: |
+          test -s android/release.keystore || { echo "::error::RELEASE_KEYSTORE_BASE64 missing or empty"; exit 1; }
+          test -n "$RELEASE_STORE_PASSWORD" || { echo "::error::RELEASE_STORE_PASSWORD secret is empty"; exit 1; }
+          test -n "$RELEASE_KEY_PASSWORD" || { echo "::error::RELEASE_KEY_PASSWORD secret is empty"; exit 1; }
+          test -n "$RELEASE_KEY_ALIAS" || { echo "::error::RELEASE_KEY_ALIAS secret is empty"; exit 1; }
+      - name: Build signed release AAB
+        working-directory: android
+        env:
+          # android/app/build.gradle resolves this via file() relative to
+          # android/app/, so "../release.keystore" == android/release.keystore.
+          RELEASE_STORE_FILE: "../release.keystore"
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+        run: |
+          chmod +x gradlew
+          ./gradlew bundleRelease --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: partner-release-aab
+          path: android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+
+  ios-archive:
+    name: iOS Archive (unsigned scaffold)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:mobile
+      - run: npx cap sync ios
+      - name: Show Xcode version (macos-15 default)
+        run: xcodebuild -version
+      - name: Archive unsigned iOS build
+        run: xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release -destination 'generic/platform=iOS' -archivePath build/App.xcarchive CODE_SIGNING_ALLOWED=NO archive
+      - uses: actions/upload-artifact@v4
+        with:
+          name: partner-unsigned-xcarchive
+          path: build/App.xcarchive
+          if-no-files-found: error

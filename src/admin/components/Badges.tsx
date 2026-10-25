@@ -54,7 +54,7 @@ export const StatusBadge: React.FC<{
 // Health Badge
 export const HealthBadge: React.FC<{
   system: "api" | "database" | "redis" | "petpooja" | string;
-  status: "healthy" | "degraded" | "down";
+  status: "healthy" | "degraded" | "down" | "not connected";
 }> = ({ system, status }) => {
   let colorClass = "text-[#16A34A] bg-emerald-50 dark:bg-emerald-950/20";
   let icon = <Server size={12} />;
@@ -67,6 +67,9 @@ export const HealthBadge: React.FC<{
     colorClass = "text-[#F59E0B] bg-amber-50 dark:bg-amber-950/20";
   } else if (status === "down") {
     colorClass = "text-[#DC2626] bg-red-50 dark:bg-red-950/20";
+  } else if (status === "not connected") {
+    // P0-3: neutral, never green — the link simply has not been made yet.
+    colorClass = "text-gray-500 bg-gray-50 dark:bg-gray-900 dark:text-gray-400";
   }
 
   return (
@@ -93,7 +96,7 @@ export const PermissionChip: React.FC<{ permission: string }> = ({ permission })
 
 // Role Chip
 export const RoleChip: React.FC<{ role: string }> = ({ role }) => {
-  const isDev = role === "Developer";
+  const isDev = role === "developer" || role === "brand_owner";
   const colorClass = isDev
     ? "bg-amber-50 text-accent dark:text-accent-light border-amber-200/50 dark:bg-amber-950/20 dark:text-accent-light"
     : "bg-primary/5 text-primary border-primary/10 dark:bg-primary/10 dark:text-emerald-400";

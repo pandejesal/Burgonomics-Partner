@@ -9,7 +9,7 @@ import {
   setDoc,
   Timestamp,
 } from 'firebase/firestore';
-import type { Branch, FutureStoreInput } from '@/types';
+import type { Branch } from '@/types';
 
 export interface CreateBranchInput {
   name: string;
@@ -115,6 +115,13 @@ export function useBranches() {
 
   const createBranch = useMutation({
     mutationFn: async (branchInput: CreateBranchInput) => {
+      // Fail loud: a branch without caller-supplied coordinates must never
+      // be written to a default/fabricated location.
+      if (!branchInput.coordinates) {
+        throw new Error(
+          'createBranch requires caller-supplied coordinates — no default location exists.',
+        );
+      }
       const branchRef = collection(db, 'branches');
       return addDoc(branchRef, {
         name: branchInput.name,
@@ -136,35 +143,9 @@ export function useBranches() {
         operatingHours: branchInput.operatingHours || { open: '11:00 AM', close: '11:30 PM' },
         allowComingSoonSubscribers: branchInput.allowComingSoonSubscribers ?? true,
         subscribersCount: 0,
-        coordinates: branchInput.coordinates || {
-          lat: 21.1702,
-          lng: 72.8311,
-        },
+        coordinates: branchInput.coordinates,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['branches'] });
-    },
-  });
-
-  const createFutureStore = useMutation({
-    mutationFn: async (storeInput: FutureStoreInput) => {
-      return createBranch.mutateAsync({
-        name: storeInput.name,
-        city: storeInput.city,
-        address: storeInput.address,
-        phone: storeInput.phone || '',
-        status: 'coming_soon',
-        expectedLaunchDate: storeInput.expectedLaunchDate,
-        bannerImage: storeInput.bannerImage,
-        petpoojaStoreId: storeInput.petpoojaStoreId,
-        allowComingSoonSubscribers: storeInput.allowComingSoonSubscribers,
-        coordinates: {
-          lat: storeInput.lat || 21.1702,
-          lng: storeInput.lng || 72.8311,
-        },
       });
     },
     onSuccess: () => {
@@ -276,7 +257,6 @@ export function useBranches() {
     branches,
     isLoading,
     createBranch,
-    createFutureStore,
     broadcastLaunchAlert,
     activateStore,
     updateBranchSettings,

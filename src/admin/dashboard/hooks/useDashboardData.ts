@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { dashboardService } from "../services/dashboardService";
 import type { AuditLogEntry, QueueStats, SystemHealthResponse } from "../types";
 
@@ -33,12 +33,15 @@ export function useDashboardSnapshot(
 export function useSystemHealth(enabled = true) {
   return useQuery({
     queryKey: ["admin", "dashboard", "health"],
-    queryFn: async (): Promise<SystemHealthResponse> => ({
-      status: "standby",
-      info: {},
-      details: {},
-    }),
-    refetchInterval: 15000,
+    // Standby stub — return ONLY the status. Never add `info: {}` /
+    // `details: {}` empty-object placeholders: `!!{}` is truthy, so
+    // empty objects are what made the standby guard in SystemHealth.tsx
+    // (`!!(health?.details ?? health?.info)`) always pass and render
+    // fabricated telemetry. Presence must be tested by key count, and
+    // the stub must not fake any keys either.
+    // No refetchInterval: polling a constant implies a live probe. The
+    // stub never changes, so refetch on mount/reconnect only (enabled/retry).
+    queryFn: async (): Promise<SystemHealthResponse> => ({ status: "standby" }),
     enabled,
     retry: 2,
   });
@@ -101,53 +104,10 @@ export function useQueueStats(enabled = true) {
   return useQuery({
     queryKey: ["admin", "ops", "queues"],
     queryFn: async (): Promise<QueueStats[]> => [],
-    refetchInterval: 15000,
+    // stub never changes; constant polling implies a live probe (P0-5 precedent).
     enabled,
     retry: 1,
   });
-}
-
-export function useQueueMutations() {
-  const queryClient = useQueryClient();
-
-  const pauseMutation = useMutation({
-    mutationFn: async (_name: string) => ({ ok: true }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "ops", "queues"] });
-    },
-  });
-
-  const resumeMutation = useMutation({
-    mutationFn: async (_name: string) => ({ ok: true }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "ops", "queues"] });
-    },
-  });
-
-  const retryFailedMutation = useMutation({
-    mutationFn: async (_payload: { name: string; jobIds?: string[] }) => ({ retried: 0 }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "ops", "queues"] });
-    },
-  });
-
-  const replayDlqMutation = useMutation({
-    mutationFn: async (_name: string) => ({ replayed: 0 }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "ops", "queues"] });
-    },
-  });
-
-  return {
-    pause: pauseMutation.mutateAsync,
-    isPausing: pauseMutation.isPending,
-    resume: resumeMutation.mutateAsync,
-    isResuming: resumeMutation.isPending,
-    retryFailed: retryFailedMutation.mutateAsync,
-    isRetrying: retryFailedMutation.isPending,
-    replayDlq: replayDlqMutation.mutateAsync,
-    isReplaying: replayDlqMutation.isPending,
-  };
 }
 
 export function useDuplicatePayments(windowMinutes = 60, enabled = true) {
@@ -200,30 +160,24 @@ export function useSyncHealth(enabled = true) {
   });
 }
 
+// F12: none of these four actions has a client-callable server route, yet each
+// mutation resolved `{ ok: true }` — so the widget toasted "Menu sync
+// enqueued" / "Catalog cache refreshed" / "Webhook replayed" after doing no
+// I/O at all. They now reject with the reason instead of reporting work that
+// never happened, and PetpoojaStatus renders the buttons disabled with the
+// same wording. Point a mutationFn at a real endpoint when one exists.
+export const SYNC_NOT_WIRED_MESSAGE =
+  "Not wired to a server route yet — this action has no backend endpoint, so nothing was run.";
+
 export function useSyncMutations() {
-  const queryClient = useQueryClient();
+  const notWired = async (_payload?: unknown): Promise<never> => {
+    throw new Error(SYNC_NOT_WIRED_MESSAGE);
+  };
 
-  const triggerMutation = useMutation({
-    mutationFn: async (_payload: { scope: string; storeId?: string }) => ({ ok: true }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "catalog", "sync", "history"] });
-    },
-  });
-
-  const cacheRefreshMutation = useMutation({
-    mutationFn: async (_storeId?: string) => ({ ok: true }),
-  });
-
-  const petpoojaSyncMutation = useMutation({
-    mutationFn: async (_storeId?: string) => ({ ok: true }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["admin", "catalog", "sync", "history"] });
-    },
-  });
-
-  const replayWebhookMutation = useMutation({
-    mutationFn: async (_payload: { gateway: string; id: string }) => ({ ok: true }),
-  });
+  const triggerMutation = useMutation({ mutationFn: notWired });
+  const cacheRefreshMutation = useMutation({ mutationFn: notWired });
+  const petpoojaSyncMutation = useMutation({ mutationFn: notWired });
+  const replayWebhookMutation = useMutation({ mutationFn: notWired });
 
   return {
     triggerSync: triggerMutation.mutateAsync,

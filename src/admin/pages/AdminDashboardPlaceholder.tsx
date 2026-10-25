@@ -1,8 +1,9 @@
 import React, { Suspense, lazy, useState, useEffect, useMemo } from "react";
+import { useQueryClient, useIsFetching } from "@tanstack/react-query";
 import { useAdmin } from "../hooks/useAdmin";
 import { RoleChip } from "../components/Badges";
 import { PageHeader } from "../components/Headers";
-import { KpiSection } from "../dashboard/components/widgets/KpiSection";
+import { KpiSection, formatFreshness } from "../dashboard/components/widgets/KpiSection";
 import { LiveOperations } from "../dashboard/components/widgets/LiveOperations";
 import { StoreOverview } from "../dashboard/components/widgets/StoreOverview";
 import { PetpoojaStatus } from "../dashboard/components/widgets/PetpoojaStatus";
@@ -17,7 +18,7 @@ const DashboardCharts = lazy(() =>
   }))
 );
 import { Store, MapPin, RefreshCw, Download, CheckCircle, Info } from "lucide-react";
-import { useStores } from "../dashboard/hooks/useDashboardData";
+import { useStores, useAnalyticsSummary } from "../dashboard/hooks/useDashboardData";
 
 export const AdminDashboardPlaceholder: React.FC = () => {
   const { role } = useAdmin();
@@ -83,11 +84,30 @@ export const AdminDashboardPlaceholder: React.FC = () => {
     to: "",
   });
 
-  const [lastUpdated, setLastUpdated] = useState<string>("");
+  // 10d: freshness is derived from the real summary query — the same
+  // query key KpiSection already runs, so this shares the cache entry
+  // instead of keeping a hand-written clock.
+  const {
+    data: summaryData,
+    dataUpdatedAt: summaryUpdatedAt,
+    isFetching: summaryFetching,
+  } = useAnalyticsSummary(dateRange);
+
+  // 10b: clock tick. Advances the window's `to` bound once a minute, which
+  // changes the query key and therefore triggers a real refetch of the
+  // shifted window (the old 15s poll reassigned state to itself and did
+  // nothing).
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const queryClient = useQueryClient();
 
   // Re-compute dates on range change
   useEffect(() => {
-    const now = new Date();
+    const now = new Date(nowTick);
     const fromDate = new Date();
     let toDate = new Date();
 
@@ -113,45 +133,65 @@ export const AdminDashboardPlaceholder: React.FC = () => {
       from: fromDate.toISOString(),
       to: toDate.toISOString(),
     });
+  }, [selectedRange, nowTick]);
 
-    setLastUpdated(
-      new Date().toLocaleTimeString(undefined, {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      }),
-    );
-  }, [selectedRange]);
-
-  // Handle 15 seconds continuous polling and update trigger
-  useEffect(() => {
-    const interval = setInterval(() => {
-      // Re-trigger calculation which updates dates
-      setSelectedRange((prev) => prev);
-    }, 15000);
-
-    return () => clearInterval(interval);
-  }, []);
-
-  const handleManualTrigger = () => {
-    setSelectedRange((prev) => prev);
-    alert("Operations dashboard metrics refetched from main ledger!");
+  // 10c: a real refresh = invalidate every admin/store query; the active
+  // widgets refetch through their own react-query hooks. Feedback is the
+  // freshness chip + the spinning refresh icon, no modal.
+  const handleManualTrigger = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["admin"] });
+    await queryClient.invalidateQueries({ queryKey: ["stores"] });
   };
 
+  // 10g: real CSV export of the loaded summary metrics (never form state).
   const handleExportData = () => {
-    const dataToExport = {
-      timestamp: new Date().toISOString(),
-      filters: { selectedRange, selectedStore, selectedCity, dateRange },
-      operatorRole: role,
+    if (!summaryData) return;
+
+    const cell = (value: unknown): string => {
+      const s = String(value ?? "");
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: "application/json" });
+
+    const header = [
+      "window_from",
+      "window_to",
+      "store_filter",
+      "city_filter",
+      "operatorRole",
+      "revenue_total_paise",
+      "order_count",
+      "aov_paise",
+      "new_customers",
+    ];
+    const metricsRow = [
+      dateRange.from,
+      dateRange.to,
+      selectedStore,
+      selectedCity,
+      role,
+      summaryData.revenue.totalRevenuePaise,
+      summaryData.revenue.orderCount,
+      summaryData.revenue.aov,
+      summaryData.customers.newCustomers,
+    ];
+    const statusRows = summaryData.statusBreakdown.map((entry) => [
+      `orders_${entry.status.toLowerCase()}`,
+      entry.count,
+    ]);
+    const csv = [header, metricsRow, ...statusRows]
+      .map((row) => row.map(cell).join(","))
+      .join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `burgonomics-ops-export-${selectedRange}-${new Date().getTime()}.json`;
+    a.download = `burgonomics-ops-export-${selectedRange}-${new Date().getTime()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  const adminFetching = useIsFetching({ queryKey: ["admin"] }) > 0;
 
   return (
     <div className="space-y-6 font-sans">
@@ -248,20 +288,22 @@ export const AdminDashboardPlaceholder: React.FC = () => {
         {/* Toolbar action buttons */}
         <div className="flex items-center gap-3 self-end md:self-auto">
           <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-            Last Updated: {lastUpdated || "Loading..."}
+            Last Updated: {summaryFetching ? "refreshing…" : formatFreshness(summaryUpdatedAt)}
           </span>
 
           <button
             onClick={handleManualTrigger}
             className="p-2.5 rounded-xl border border-gray-100 dark:border-gray-800 hover:border-primary dark:hover:border-emerald-800 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-all cursor-pointer bg-gray-50/50 dark:bg-gray-900/30"
-            title="Force refresh all modules"
+            title="Refetch dashboard and store queries"
           >
-            <RefreshCw size={13} />
+            <RefreshCw size={13} className={adminFetching ? "animate-spin" : ""} />
           </button>
 
           <button
             onClick={handleExportData}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-primary hover:bg-primary/90 text-white font-bold text-xs shadow-sm cursor-pointer transition-all"
+            disabled={!summaryData}
+            title="Export loaded dashboard metrics as CSV"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-primary hover:bg-primary/90 text-white font-bold text-xs shadow-sm cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Download size={13} />
             <span>Export CSV</span>
@@ -273,7 +315,6 @@ export const AdminDashboardPlaceholder: React.FC = () => {
       <KpiSection
         dateRange={dateRange}
         storeId={selectedStore !== "all" ? selectedStore : undefined}
-        lastUpdatedTime={lastUpdated ? lastUpdated.split(" ")[0] : "just now"}
       />
 
       {/* Main split: Analytics & Live pipeline grids */}

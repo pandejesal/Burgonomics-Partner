@@ -10,10 +10,13 @@ export function Header() {
   const { toggleSidebar, selectedBranchId } = useAppStore();
   const { signOut, user } = useAuthStore();
 
+  const badgeBranchId =
+    selectedBranchId && selectedBranchId !== 'all' ? selectedBranchId : user?.branchIds?.[0];
+
   return (
-    <header className="h-16 bg-bg border-b border-[#1E3A24] flex items-center justify-between px-4 lg:px-6 sticky top-0 z-30 shadow-md">
+    <header className="h-16 bg-bg border-b border-[#1E3A24] flex items-center justify-between px-3 sm:px-4 lg:px-6 sticky top-0 z-30 shadow-md pt-safe">
       {/* Left: Mobile menu + Outlet Switcher + Welcome */}
-      <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-4">
+      <div className="flex min-w-0 flex-1 items-center gap-1 sm:gap-4">
         <button
           onClick={toggleSidebar}
           className="lg:hidden p-2 hover:bg-surface rounded-xl text-zinc-300 hover:text-white cursor-pointer shrink-0"
@@ -34,17 +37,24 @@ export function Header() {
       </div>
 
       {/* Right: KDS Quick Link + Petpooja POS Badge + Notification Bell + Logout */}
-      <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
+      <div className="flex shrink-0 items-center gap-1 sm:gap-3">
         <Link
           to="/kds"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-surface-hover hover:bg-[#284f30] text-accent-light hover:text-[#ff7a26] border border-[#2e5e39] text-xs font-black shadow-sm transition-colors cursor-pointer"
+          className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-surface-hover hover:bg-[#284f30] text-accent-light hover:text-[#ff7a26] border border-[#2e5e39] text-xs font-black shadow-sm transition-colors cursor-pointer"
           title="Open Fullscreen Kitchen Display System"
+          aria-label="Open Fullscreen Kitchen Display System"
         >
           <ChefHat className="w-4 h-4 text-accent-light" />
-          <span className="hidden md:inline">Kitchen KDS</span>
+          <span className="hidden lg:inline">Kitchen KDS</span>
         </Link>
 
-        <PetpoojaStatusBadge branchId={selectedBranchId || user?.branchIds?.[0] || 'branch_surat_01'} />
+        {badgeBranchId ? (
+          <PetpoojaStatusBadge branchId={badgeBranchId} />
+        ) : (
+          <span className="flex shrink-0 items-center bg-surface/80 border border-border px-2 sm:px-2.5 py-1.5 rounded-full text-xs text-zinc-400">
+            Petpooja POS: select an outlet
+          </span>
+        )}
 
         <NotificationBell />
 

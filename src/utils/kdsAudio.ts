@@ -7,6 +7,10 @@ let audioCtx: AudioContext | null = null;
 let repeatIntervalId: ReturnType<typeof setInterval> | null = null;
 let isAudioUnlocked = false;
 let currentPendingCount = 0;
+let acknowledgedPendingCount: number | null = null;
+
+/** Repeating alarm interval — pending orders chime every 10 seconds. */
+export const KDS_ALARM_REPEAT_MS = 10000;
 
 /**
  * Initialize or get active AudioContext
@@ -68,8 +72,10 @@ export function setKDSAudioMuted(muted: boolean): void {
 }
 
 /**
- * Synthesize a 3-tone QSR Kitchen Bell Chime
- * Notes: E5 (659Hz) -> G#5 (830Hz) -> B5 (987Hz) with warm harmonics
+ * Synthesize a two-tone doorbell chime (A5 -> D6)
+ * Tone 1: 880.00 Hz (A5), ~0.35s, gain 0.30
+ * Tone 2: 1174.66 Hz (D6), starts at +0.18s, ~0.65s, gain 0.35
+ * Uses Web Audio API sine oscillator with exponential decay envelope.
  */
 export function playKDSChime(): void {
   if (isKDSAudioMuted()) return;
@@ -85,16 +91,15 @@ export function playKDSChime(): void {
 
   const now = ctx.currentTime;
   const notes = [
-    { freq: 659.25, time: 0.00, duration: 0.35, gain: 0.28 }, // E5
-    { freq: 830.61, time: 0.12, duration: 0.40, gain: 0.32 }, // G#5
-    { freq: 987.77, time: 0.26, duration: 0.65, gain: 0.38 }, // B5
+    { freq: 880.0, time: 0.0, duration: 0.35, gain: 0.3 }, // A5
+    { freq: 1174.66, time: 0.18, duration: 0.65, gain: 0.35 }, // D6
   ];
 
   notes.forEach(({ freq, time, duration, gain }) => {
     const osc = ctx.createOscillator();
     const gainNode = ctx.createGain();
 
-    // Warm sine + subtle triangle blend
+    // Sine oscillator with exponential decay envelope
     osc.type = 'sine';
     osc.frequency.setValueAtTime(freq, now + time);
 
@@ -112,33 +117,123 @@ export function playKDSChime(): void {
 }
 
 /**
- * Start or stop repeating alarm (every 15s) when pending orders exist — with native haptics for Kitchen urgency
+ * Start or stop repeating alarm (every 10s) when pending orders exist — with native haptics for Kitchen urgency.
+ * A staff acknowledge (see acknowledgeKDSAlarm) silences the loop until the
+ * pending count rises above the acknowledged level (i.e. new orders arrive).
  */
 export function syncKDSAlarmState(pendingCount: number): void {
   // Keep the latest backend truth so the alarm loop follows Firestore, not a
   // standalone front-end clock.
   currentPendingCount = pendingCount;
 
-  if (isKDSAudioMuted() || pendingCount <= 0) {
+  if (pendingCount <= 0) {
+    acknowledgedPendingCount = null;
     stopRepeatingKDSAlarm();
     return;
+  }
+
+  if (isKDSAudioMuted()) {
+    stopRepeatingKDSAlarm();
+    return;
+  }
+
+  // An acknowledged kitchen stays silent until NEW orders push the count
+  // above the acknowledged level.
+  if (acknowledgedPendingCount !== null) {
+    if (pendingCount <= acknowledgedPendingCount) {
+      stopRepeatingKDSAlarm();
+      return;
+    }
+    // New orders arrived — clear the acknowledge and resume alarming.
+    acknowledgedPendingCount = null;
   }
 
   // If not already looping, play immediately and start interval
   if (!repeatIntervalId) {
     playKDSChime();
     void triggerKDSHaptic();
-    repeatIntervalId = setInterval(() => {
-      // Tick against the live pending count captured at the last sync — the
-      // loop self-stops the moment the kitchen clears the makeline.
-      if (!isKDSAudioMuted() && currentPendingCount > 0) {
-        playKDSChime();
-        void triggerKDSHaptic();
-      } else {
-        stopRepeatingKDSAlarm();
-      }
-    }, 15000); // 15 seconds repeat
+    startRepeatingAlarmLoop();
   }
+}
+
+/**
+ * Arm the 10s repeat loop WITHOUT an immediate cue. Used when the arrival cue
+ * already supplied the audible signal for this ticket (see
+ * playKDSArrivalCue) — starting the loop with its own chime would double-fire.
+ */
+function startRepeatingAlarmLoop(): void {
+  if (repeatIntervalId) return;
+  repeatIntervalId = setInterval(() => {
+    // Tick against the live pending count captured at the last sync — the
+    // loop self-stops the moment the kitchen clears the makeline.
+    if (!isKDSAudioMuted() && currentPendingCount > 0) {
+      playKDSChime();
+      void triggerKDSHaptic();
+    } else {
+      stopRepeatingKDSAlarm();
+    }
+  }, KDS_ALARM_REPEAT_MS); // 10 seconds repeat
+}
+
+/**
+ * Exactly one immediate cue for a ticket that arrives while syncKDSAlarmState
+ * stays silent: either the 10s repeat loop is already sounding (so it plays
+ * nothing), or an acknowledge latch suppresses the alarm because the count is
+ * at or below the acknowledged level. In both cases without this the next
+ * audible cue would be the loop's next tick — or, after an acknowledge, no cue
+ * at all until a third ticket arrives. When syncKDSAlarmState does play its own
+ * immediate chime (loop starting from rest, or the count rising past the
+ * acknowledged level) this is a no-op — playing both was the 0→N double-fire.
+ *
+ * F3: a new ticket that only REFILLS the acknowledged count (A+B acknowledged,
+ * A bumped to preparing, C arrives → 2 again) must do more than chime once.
+ * Clearing the latch here and arming the repeat loop means the kitchen keeps
+ * being reminded while C is still pending; previously the count-based latch
+ * stayed set and the 10s loop never re-armed.
+ */
+export function playKDSArrivalCue(hasNewOrder: boolean, pendingCount: number): void {
+  if (!hasNewOrder) return;
+  const silencedByAcknowledge =
+    acknowledgedPendingCount !== null && pendingCount <= acknowledgedPendingCount;
+  if (isKDSAlarmRepeating() || silencedByAcknowledge) {
+    playKDSChime();
+  }
+  if (silencedByAcknowledge) {
+    acknowledgedPendingCount = null;
+    // Arm silently: the cue above is this ticket's immediate signal, and the
+    // follow-up syncKDSAlarmState must not chime again.
+    startRepeatingAlarmLoop();
+  }
+}
+
+/**
+ * Staff acknowledge: stop the repeating alarm until the next pending count
+ * increase (i.e. new orders arrive). The caller passes the live pending count
+ * it is displaying, so the latch can never drift from the visible makeline
+ * (the module's last synced count is stale after a route change or before the
+ * first post-mount sync). syncKDSAlarmState() resumes only when pendingCount
+ * rises above the acknowledged value.
+ */
+export function acknowledgeKDSAlarm(pendingCount: number): void {
+  acknowledgedPendingCount = pendingCount;
+  stopRepeatingKDSAlarm();
+}
+
+/** True while the 10s repeating alarm loop is armed. */
+export function isKDSAlarmRepeating(): boolean {
+  return repeatIntervalId !== null;
+}
+
+/** Reset the alarm loop plus the synced count and acknowledge latch for a new scope. */
+export function resetKDSAlarmState(): void {
+  stopRepeatingKDSAlarm();
+  currentPendingCount = 0;
+  acknowledgedPendingCount = null;
+}
+
+/** Test-only alias kept for existing suites. */
+export function __resetKDSAudioStateForTests(): void {
+  resetKDSAlarmState();
 }
 
 async function triggerKDSHaptic(): Promise<void> {

@@ -38,7 +38,12 @@ export function PetpoojaQueuesPage() {
   } | null>(null);
 
   useEffect(() => {
-    void petpoojaGateway.getQueues().then(setQueueOverview);
+    // P0-2: defer the Proxy access; on failure keep the honest standby
+    // defaults already in state rather than inventing numbers.
+    void Promise.resolve()
+      .then(() => petpoojaGateway.getQueues())
+      .then(setQueueOverview)
+      .catch(() => undefined);
   }, []);
 
   const queues = [

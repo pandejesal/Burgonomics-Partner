@@ -1,11 +1,78 @@
-import { useAdminAuthStore } from "../store/adminAuthStore";
+import { useMemo } from "react";
+import { useAuthStore } from "@/stores/authStore";
+import type { AdminUser } from "../services/adminAuthService";
+
+/**
+ * Unified admin bridge — SINGLE SIGN-IN.
+ *
+ * The Partner app is the replacement for the legacy standalone admin portal,
+ * so there is exactly one Firebase session (useAuthStore). This hook derives
+ * the legacy `AdminUser` shape from that single session instead of a second
+ * `useAdminAuthStore` login.
+ *
+ * - brand_owner / developer → full control-room access (`admin.developer`).
+ * - regional_manager → full operational menus (dashboard/orders/stores/menu/
+ *   customers/settings + petpooja/system read paths).
+ * - Any other operator role that somehow reaches /admin → no menu perms
+ *   (route gates deny first; this is defense-in-depth).
+ */
+const FULL_CONTROL_ROOM_PERMS = ["admin.developer"];
+
+const REGIONAL_MANAGER_PERMS = [
+  "admin.dashboard.view",
+  "admin.orders.view",
+  "admin.petpooja.sync",
+  "admin.stores.view",
+  "admin.menu.sync",
+  "admin.coupons.manage",
+  "admin.customer.view",
+  "admin.settings.manage",
+];
+
+function permissionsForRole(roleName: string): string[] {
+  if (roleName === "brand_owner" || roleName === "developer") return FULL_CONTROL_ROOM_PERMS;
+  if (roleName === "regional_manager") return REGIONAL_MANAGER_PERMS;
+  return [];
+}
 
 export function useAdmin() {
-  const { admin, accessToken, isLoading } = useAdminAuthStore();
+  const { user, firebaseUser, loading } = useAuthStore();
 
-  const permissions = admin?.role?.permissions || [];
-  const roleName = admin?.role?.name || "";
-  const isDeveloper = admin?.role?.name === "Developer" || permissions.includes("admin.developer");
+  const { admin, permissions, roleName, isDeveloper, assignedStoreIds } = useMemo(() => {
+    if (!user) {
+      return {
+        admin: null as AdminUser | null,
+        permissions: [] as string[],
+        roleName: "",
+        isDeveloper: false,
+        assignedStoreIds: [] as string[],
+      };
+    }
+    const role = user.role;
+    const permissions = permissionsForRole(role);
+    const isDeveloper = role === "brand_owner" || role === "developer";
+    const admin: AdminUser = {
+      id: user.id,
+      email: user.email,
+      fullName: user.name,
+      avatar: user.avatar ?? null,
+      role: { name: role, permissions },
+      // Legacy single-outlet field kept for callers that still expect one id.
+      assignedStoreId: user.branchIds?.[0],
+    };
+    // A branch_owner can own several outlets: the single `assignedStoreId` was
+    // never the whole truth and clamping boards to it made their outlet filter
+    // inert. Expose the full assigned scope alongside the legacy field.
+    const assignedStoreIds = [...(user.branchIds ?? [])];
+    return { admin, permissions, roleName: role, isDeveloper, assignedStoreIds };
+  }, [user]);
+
+  // Legacy `accessToken` field: the old admin store minted it on its own
+  // login. Under single sign-in the Firebase ID token is the credential —
+  // callers that need it should call `firebaseUser.getIdToken()`. The system
+  // diagnostic tabs only used it for a non-existent `/api/v1/admin/*`
+  // endpoint (fail-closed, early-return on null), so null is safe here.
+  const accessToken: string | null = null;
 
   const hasPermission = (permission: string) => {
     if (isDeveloper) return true;
@@ -30,10 +97,13 @@ export function useAdmin() {
   return {
     admin,
     accessToken,
-    isLoading,
+    firebaseUser,
+    isLoading: loading,
     role: roleName,
     isDeveloper,
     permissions,
+    /** Full branch assignment (empty for brand-wide roles). */
+    assignedStoreIds,
     hasPermission,
     hasAllPermissions,
     hasAnyPermission,

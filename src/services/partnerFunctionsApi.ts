@@ -3,6 +3,7 @@
  * Authoritative HTTP client connecting Partner POS directly to Firebase Cloud Functions v2.
  */
 import { auth } from '@/config/firebase';
+import { validateRefundRequestId } from '@/utils/refundRequestIdentity';
 
 export interface ApiRequestOptions {
   /** Timeout in ms (default 20 000 for general, 30 000 for porter book/rebook). */
@@ -17,6 +18,140 @@ export interface ApiRequestOptions {
 export interface ApiOptions {
   timeoutMs?: number;
   idempotencyKey?: string;
+}
+
+// ── Multi-provider dispatch (delivery_routing.md DR1–DR11) ──────────────────
+
+export type DispatchProviderId = 'borzo' | 'shadowfax' | 'porter';
+
+/** Display label for a dispatch provider id (unknown ids read as "Courier"). */
+export function dispatchProviderLabel(provider?: string | null): string {
+  return provider === 'borzo'
+    ? 'Borzo'
+    : provider === 'shadowfax'
+      ? 'Shadowfax'
+      : provider === 'porter'
+        ? 'Porter'
+        : 'Courier';
+}
+
+/** One provider's quote verdict — never silently dropped (DR2/DR3). */
+export interface DispatchProviderOutcome {
+  provider: DispatchProviderId;
+  outcome: 'ok' | 'not_serviced' | 'transient_failure';
+  fare?: number;
+  distanceKm?: number;
+  pickupEtaMinutes?: number;
+  quoteId?: string;
+  source?: string;
+  expiresAt?: number;
+  error?: string;
+}
+
+/**
+ * POST /dispatch/quote 200 body. When serviceable:false the address is out
+ * of the 8km zone (winner/providers/estimatedFare are absent); when
+ * serviceable:true the winner is the cheapest provider and the flattened
+ * estimated* fields mirror the winner for back-compat with the old Porter
+ * quote shape.
+ */
+export interface DispatchQuoteResult {
+  serviceable: boolean;
+  reason?: string;
+  distanceKm?: number;
+  servicedRadiusKm?: number;
+  message?: string;
+  winner?: DispatchProviderId;
+  providers?: DispatchProviderOutcome[];
+  estimatedFare?: number;
+  estimatedDistanceKm?: number;
+  estimatedPickupMinutes?: number;
+  quoteId?: string;
+  vehicleType?: string;
+  source?: string;
+  quotedAt?: number;
+  expiresAt?: number;
+  validForSeconds?: number;
+}
+
+/** DR7 fare-confirm gate returned with HTTP 200 from /dispatch/book. */
+export interface DispatchFareConfirm {
+  provider: DispatchProviderId;
+  quotedFare: number;
+  newFare: number;
+  delta: number;
+  threshold: number;
+  message?: string;
+}
+
+/** DR8 manual lane returned with HTTP 200 from /dispatch/book. */
+export interface DispatchManualLane {
+  instructions: string;
+  pasteEndpoint?: string;
+}
+
+/**
+ * POST /dispatch/book|rebook body. Exactly one of: a booked result,
+ * needsFareConfirm (200), manual_action_required (200), reused summary, or
+ * a 202 in-progress body ({error, retryAfterMs} — returned as a resolved
+ * value because 202 is an ok fetch status).
+ */
+export interface DispatchBookResult {
+  provider?: DispatchProviderId;
+  providerOrderId?: string;
+  riderName?: string | null;
+  riderPhone?: string | null;
+  riderVehicleNumber?: string | null;
+  trackingUrl?: string;
+  status?: string;
+  source?: string;
+  reused?: boolean;
+  orderId?: string;
+  attempts?: Array<{
+    provider: DispatchProviderId;
+    outcome: string;
+    error?: string;
+    at: number;
+  }>;
+  failover?: {
+    from: DispatchProviderId;
+    to: DispatchProviderId;
+    cheapestProvider: DispatchProviderId;
+  };
+  needsFareConfirm?: boolean;
+  quotedFare?: number;
+  newFare?: number;
+  delta?: number;
+  threshold?: number;
+  confirmEndpoint?: string;
+  manual_action_required?: boolean;
+  instructions?: string;
+  pasteEndpoint?: string;
+  message?: string;
+  /** 202 in-progress marker (ok-status body, not an exception). */
+  error?: string;
+  retryAfterMs?: number;
+}
+
+/** POST /dispatch/porter-manual 200 body. */
+export interface DispatchManualBookingResult {
+  success?: boolean;
+  reused?: boolean;
+  provider: DispatchProviderId;
+  orderId: string;
+  porterOrderId: string;
+  trackingUrl?: string | null;
+  status?: string;
+  source?: string;
+}
+
+/** POST /dispatch/cancel 200 body. */
+export interface DispatchCancelResult {
+  success?: boolean;
+  orderId?: string;
+  provider?: DispatchProviderId | null;
+  providerCancel?: string;
+  message?: string;
 }
 
 const DEFAULT_TIMEOUT_MS = 20_000;
@@ -116,8 +251,17 @@ async function apiRequest<T>(
           }
           throw new Error(errorMsg);
         }
-        // retryable status — fall through to retry loop
-        lastError = new Error(`Server error ${res.status}`);
+        // retryable status — fall through to retry loop, but keep the
+        // server's message so the FINAL throw explains the real verdict
+        // (e.g. /dispatch/quote 503 NO_SERVICEABLE_PROVIDER).
+        let msg = `Server error ${res.status}`;
+        try {
+          const errData = await res.json();
+          if (errData.error || errData.message) msg = errData.error || errData.message;
+        } catch {
+          // body not JSON — keep the status-only message
+        }
+        lastError = new Error(msg);
         continue;
       }
 
@@ -162,6 +306,19 @@ export const partnerFunctionsApi = {
    */
   async pushOrderToPetpooja(orderId: string): Promise<{ success: boolean }> {
     return await apiRequest<{ success: boolean }>('/petpooja/pushOrder', { orderId });
+  },
+
+  /**
+   * Relays one Petpooja onboarding test scenario through the test runner API
+   * (POST /petpooja/testRunner). Returns the Petpooja-side order id that
+   * support needs for reconciliation. Throws on relay failure — callers
+   * surface it per-scenario, never as a silent skip.
+   */
+  async runPetpoojaTestScenario(params: {
+    scenarioId: string;
+    branchId?: string;
+  }): Promise<{ success: boolean; scenarioId: string; petpoojaOrderId: string }> {
+    return await apiRequest('/petpooja/testRunner', params);
   },
 
   /**
@@ -215,6 +372,101 @@ export const partnerFunctionsApi = {
   }> {
     return await apiRequest('/porter/quote', params, {
       timeoutMs: DEFAULT_TIMEOUT_MS,
+      retries: 1,
+    });
+  },
+
+  /**
+   * Multi-provider dispatch quote (delivery_routing.md DR1–DR5): radius gate
+   * + parallel Borzo/Shadowfax/Porter fan-out; cheapest serviceable wins.
+   * A 200 with serviceable:false means the address is out of zone; a 503
+   * throws (no eligible provider) — never a static client-side fare.
+   */
+  async dispatchQuote(params: {
+    pickupLat: number;
+    pickupLng: number;
+    dropLat: number;
+    dropLng: number;
+    customerName?: string;
+    customerPhone?: string;
+    orderId?: string;
+  }): Promise<DispatchQuoteResult> {
+    return await apiRequest('/dispatch/quote', params, {
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+      retries: 1,
+    });
+  },
+
+  /**
+   * Books the cheapest serviceable provider (DR6 walk). Response can be a
+   * booking, a needsFareConfirm gate (DR7), a manual_action_required Porter
+   * lane (DR8), an idempotent reused summary, or a 202 in-progress body
+   * ({error, retryAfterMs} — an ok-status JSON, not a throw).
+   */
+  async dispatchBook(
+    params: {
+      orderId: string;
+      staffName?: string;
+      quotedFare?: number;
+      confirmFare?: boolean;
+      preferredProvider?: DispatchProviderId;
+    },
+    options?: ApiOptions,
+  ): Promise<DispatchBookResult> {
+    return await apiRequest('/dispatch/book', params, {
+      ...options,
+      timeoutMs: options?.timeoutMs ?? PORTER_TIMEOUT_MS,
+      retries: 1,
+    });
+  },
+
+  /**
+   * Re-enters the dispatch walk for a rebookable order (needsRebook /
+   * rider_cancelled / dispatch_failed). 409 NOT_REBOOKABLE otherwise.
+   */
+  async dispatchRebook(
+    params: {
+      orderId: string;
+      staffName?: string;
+      quotedFare?: number;
+      confirmFare?: boolean;
+    },
+    options?: ApiOptions,
+  ): Promise<DispatchBookResult> {
+    return await apiRequest('/dispatch/rebook', params, {
+      ...options,
+      timeoutMs: options?.timeoutMs ?? PORTER_TIMEOUT_MS,
+      retries: 1,
+    });
+  },
+
+  /**
+   * Saves a Porter booking staff made in the Porter app (manual lane, DR8).
+   * Idempotent on (orderId, porterOrderId); 400 validates the pasted id/URL.
+   */
+  async savePorterManualBooking(params: {
+    orderId: string;
+    porterOrderId: string;
+    trackingUrl?: string;
+    staffName?: string;
+  }): Promise<DispatchManualBookingResult> {
+    return await apiRequest('/dispatch/porter-manual', params, {
+      timeoutMs: PORTER_TIMEOUT_MS,
+      retries: 1,
+    });
+  },
+
+  /**
+   * Cancels the active dispatch for an order — Porter delegates to the
+   * Porter cancel flow, Borzo/Shadowfax release locally (staff must also
+   * cancel in the provider dashboard). 409 when nothing is active.
+   */
+  async dispatchCancel(params: {
+    orderId: string;
+    staffName?: string;
+  }): Promise<DispatchCancelResult> {
+    return await apiRequest('/dispatch/cancel', params, {
+      timeoutMs: PORTER_TIMEOUT_MS,
       retries: 1,
     });
   },
@@ -301,6 +553,19 @@ export const partnerFunctionsApi = {
   },
 
   /**
+   * KDS 1-tap 86 toggle contract (KDSQuick86Drawer). Same server route as
+   * syncItemStock — object-form alias so the kitchen path can evolve its
+   * own payload (e.g. operator id, reason) without touching POS sync callers.
+   */
+  async toggle86Item(params: {
+    branchId: string;
+    itemId: string;
+    inStock: boolean;
+  }): Promise<{ success: boolean }> {
+    return await apiRequest('/petpooja/pushStock', params);
+  },
+
+  /**
    * Staff Grill-Coins compensation. Server-side only: writes the balance AND
    * a ledger row, branch-scoped. Never fake this client-side.
    */
@@ -358,16 +623,25 @@ export const partnerFunctionsApi = {
 
   /**
    * Releases a Razorpay refund server-side (POST /payments/refund, staff-only,
-   * idempotent per order). Loop 5/120: the refunds page MUST use this — never
+   * idempotent per refundRequestId). Loop 5/120: the refunds page MUST use this — never
    * flip local state and claim money moved.
    */
   async releaseRefund(params: {
+    refundRequestId: string;
     orderId: string;
     razorpayPaymentId: string;
     amountRupees?: number;
     reason?: string;
   }): Promise<{ id?: string; status?: string; reused?: boolean }> {
-    return await apiRequest('/payments/refund', params);
+    validateRefundRequestId(params?.refundRequestId);
+    if (typeof params?.razorpayPaymentId !== 'string' || !params.razorpayPaymentId.trim()) {
+      throw new Error(
+        'No gateway payment id recorded — refund not attempted. A brand admin must locate the capture in Payments.'
+      );
+    }
+    return await apiRequest('/payments/refund', params, {
+      idempotencyKey: params.refundRequestId,
+    });
   },
 
   /**
@@ -385,6 +659,22 @@ export const partnerFunctionsApi = {
     cityIds?: string[];
   }): Promise<{ uid: string; email: string; role: string; invited: boolean }> {
     return await apiRequest('/staff/invite', params);
+  },
+
+  /**
+   * Revokes a staff member's RBAC claims server-side (POST /auth/revokeRole).
+   * The server asserts brand-admin, clears role/branchIds/cityIds claims to
+   * `customer`, and mirrors the role into users/{uid} — so the old direct
+   * `deleteDoc(users/{uid})` (rules `allow delete: if false`) could never
+   * succeed. The profile document is intentionally kept; access is what is
+   * revoked.
+   */
+  async revokeUserRole(params: { targetUid: string }): Promise<{
+    success: boolean;
+    targetUid: string;
+    role: string;
+  }> {
+    return await apiRequest('/auth/revokeRole', params);
   },
 
   /**
@@ -461,6 +751,30 @@ export const partnerFunctionsApi = {
   },
 
   /**
+   * Escalates a ticket server-side (POST /tickets/escalate, staff-only,
+   * branch-scoped, snapshot on dev-team escalation). Never a direct
+   * Firestore tier flip.
+   */
+  async escalateTicket(params: {
+    ticketId: string;
+    targetTier: 'brand_support' | 'developer_team';
+    reason: string;
+  }): Promise<{ success: boolean; ticketId: string }> {
+    return await apiRequest('/tickets/escalate', params);
+  },
+
+  /**
+   * Records a non-money ticket resolution server-side
+   * (POST /tickets/resolveNote). Money actions stay on resolveTicket.
+   */
+  async resolveTicketNote(params: {
+    ticketId: string;
+    resolution: string;
+  }): Promise<{ success: boolean; ticketId: string }> {
+    return await apiRequest('/tickets/resolveNote', params);
+  },
+
+  /**
    * Raises a support ticket server-side (POST /tickets/create). Runs spam
    * guards + branch assignment + customer binding server-side — never a
    * direct Firestore addDoc that skips all three.
@@ -509,11 +823,19 @@ export const partnerFunctionsApi = {
    * KDS order-status bump server-side (POST /orders/bumpStatus).
    * Branch-checked + Delivery-compatible object write — never a direct
    * Firestore flip that skips scope enforcement.
+   *
+   * `expectedStatus` is the status the operator's screen was showing when they
+   * tapped — a lost-update precondition. The server route currently strips it
+   * (orderBumpSchema is a non-strict z.object); the transaction-side
+   * enforcement is owned by the backend lane. Sent now so the contract is in
+   * place and no client change is needed when the server starts honouring it.
    */
   async bumpOrderStatus(params: {
     orderId: string;
     status: string;
+    expectedStatus?: string;
     cancellationReason?: string;
+    timelineEvent?: { title: string; actor?: string; description?: string };
   }): Promise<{ orderId: string; status: Record<string, any> }> {
     return await apiRequest('/orders/bumpStatus', params);
   },

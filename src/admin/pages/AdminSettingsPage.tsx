@@ -29,6 +29,31 @@ export const DEFAULT_PARTNER_SETTINGS: PartnerSettings = {
 
 export const PARTNER_SETTINGS_DOC = "partner_settings";
 
+/**
+ * L1: the save handler validated only `supportPhone`, so a negative GST rate,
+ * delivery fee or minimum order could be persisted — and then silently
+ * reverted on reload by `mergePartnerSettings` (which rejects negatives,
+ * making a "successful" save look like it never happened). Reject
+ * non-finite/negative amounts before the write.
+ */
+export function validatePartnerFinancials(input: {
+  gstRate: number;
+  deliveryFee: number;
+  minOrder: number;
+}): string | null {
+  const amounts: Array<[string, number]> = [
+    ["GST tax rate", input.gstRate],
+    ["base delivery fee", input.deliveryFee],
+    ["minimum order", input.minOrder],
+  ];
+  for (const [label, value] of amounts) {
+    if (!Number.isFinite(value) || value < 0) {
+      return `Enter nonnegative amounts — the ${label} must be a finite number of 0 or more.`;
+    }
+  }
+  return null;
+}
+
 /** Overlay saved values on defaults; garbage numbers fall back to defaults. */
 export function mergePartnerSettings(saved: Partial<PartnerSettings>): PartnerSettings {
   const num = (v: unknown, fallback: number) =>
@@ -81,6 +106,12 @@ export const AdminSettingsPage: React.FC = () => {
       toast.error("Enter a real helpdesk number — blanks and placeholders are rejected.");
       return;
     }
+    // L1: never persist negative financial configuration.
+    const financialError = validatePartnerFinancials({ gstRate, deliveryFee, minOrder });
+    if (financialError) {
+      toast.error(financialError);
+      return;
+    }
     setIsSaving(true);
     setSaveSuccess(false);
     try {
@@ -121,6 +152,7 @@ export const AdminSettingsPage: React.FC = () => {
                 <input
                   type="number"
                   step="0.1"
+                  min={0}
                   value={gstRate}
                   onChange={(e) => setGstRate(parseFloat(e.target.value))}
                   className="w-full p-3 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] text-sm font-semibold focus:outline-none"
@@ -135,6 +167,7 @@ export const AdminSettingsPage: React.FC = () => {
                 <input
                   type="number"
                   step="1"
+                  min={0}
                   value={deliveryFee}
                   onChange={(e) => setDeliveryFee(parseFloat(e.target.value))}
                   className="w-full p-3 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] text-sm font-semibold focus:outline-none"
@@ -151,6 +184,7 @@ export const AdminSettingsPage: React.FC = () => {
                 <input
                   type="number"
                   step="5"
+                  min={0}
                   value={minOrder}
                   onChange={(e) => setMinOrder(parseFloat(e.target.value))}
                   className="w-full p-3 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] text-sm font-semibold focus:outline-none"

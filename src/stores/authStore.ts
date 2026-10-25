@@ -8,6 +8,7 @@ import {
 import { auth, db } from '@/config/firebase';
 import { doc, getDoc, Timestamp } from 'firebase/firestore';
 import type { User, UserRole } from '@/types';
+import { clearAppCaches } from '@/core/session/clearAppCaches';
 
 interface AuthState {
   user: User | null;
@@ -321,6 +322,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       console.warn('SignOut error:', err);
     }
     clearCachedProfile();
+    clearAppCaches(); // Clear all app caches (QueryClient, localStorage user-data) to prevent cross-user leaks
     set({ user: null, firebaseUser: null, error: null, loading: false, offlineNotice: null });
   },
 

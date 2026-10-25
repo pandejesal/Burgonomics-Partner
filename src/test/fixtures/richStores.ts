@@ -406,7 +406,7 @@ const generateDocuments = (storeId: string): StoreDocument[] => [
     id: `DOC-${storeId}-01`,
     name: "FSSAI Food License.pdf",
     type: "FSSAI",
-    expiryDate: "2027-12-31",
+    expiryDate: "2027-08-31",
     status: "active",
   },
   {
@@ -454,7 +454,7 @@ const MANAGERS = [
 
 // DEV-ONLY: rich store directory fixture (moved verbatim from storesData.ts).
 export const INITIAL_RICH_STORES: RichStore[] = MOCK_STORES.map((store, idx) => {
-  const managerName = MANAGERS[idx] || "Operational Lead";
+  const managerName = MANAGERS[idx] ?? "Unassigned";
   const revenueSeed = 30000 + Math.random() * 45000;
   const ordersSeed = Math.floor(revenueSeed / 320);
 
@@ -498,7 +498,7 @@ export const INITIAL_RICH_STORES: RichStore[] = MOCK_STORES.map((store, idx) => 
     avgOrderValue: store.isOpen ? Math.floor(revenueSeed / ordersSeed) : 0,
     popularItem:
       idx % 3 === 0
-        ? "Classic Cheese Overload"
+        ? "Tandoori Tikki Burger"
         : idx % 3 === 1
           ? "Crispy Paneer Supreme"
           : "Vibe-Check Veggie Burger",

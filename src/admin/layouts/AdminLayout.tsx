@@ -27,7 +27,8 @@ import {
   Megaphone,
   Layers,
 } from "lucide-react";
-import { useAdminAuthStore } from "../store/adminAuthStore";
+import { useAdmin } from "../hooks/useAdmin";
+import { useAuthStore } from "@/stores/authStore";
 import { useAdminTheme } from "../theme/ThemeContext";
 import { CommandPalette } from "../components/CommandPalette";
 import { AdminAvatar } from "../components/Utilities";
@@ -39,7 +40,10 @@ interface AdminLayoutProps {
 }
 
 export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
-  const { admin, logout } = useAdminAuthStore();
+  // Single sign-in: identity comes from the unified partner session.
+  const { admin } = useAdmin();
+  const { signOut } = useAuthStore();
+  const logout = () => void signOut();
   const { theme, setTheme } = useAdminTheme();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const location = useLocation();
@@ -417,7 +421,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
         </header>
 
         {/* Workspace Content */}
-        <main className="flex-1 overflow-y-auto bg-[#F8F8F8] dark:bg-[#121212] p-6 md:p-8">
+        <main className="flex-1 overflow-y-auto bg-[#F8F8F8] dark:bg-[#121212] p-6 md:p-8 pb-24 md:pb-24 lg:pb-0">
           {children ?? <Outlet />}
         </main>
       </div>

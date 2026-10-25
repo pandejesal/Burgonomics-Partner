@@ -22,6 +22,8 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
@@ -80,12 +82,11 @@
 	<!-- No NSCameraUsageDescription / NSPhotoLibraryUsageDescription: no camera
 	     or photo code ships (no @capacitor/camera, no picker). Declaring them
 	     invites App Store privacy questions. Re-add with the scanner feature. -->
-	<!-- Location: @capacitor/geolocation is declared in capacitor.config.ts but
-	     no src callers ship yet (loop-47), so the OS never prompts. The key
-	     below exists so a future dispatch-tracking call fails closed with an
-	     honest prompt string instead of a crash. -->
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Your location is used only for live courier dispatch tracking while a delivery is active.</string>
+	<!-- No NSLocationWhenInUseUsageDescription: @capacitor/geolocation has no
+	     src call sites in this app, and the Android merged permissions are
+	     stripped in the manifest. Requesting location without a feature is a
+	     store-policy rejection risk; re-add both the key and a real call site
+	     before shipping courier tracking. -->
 	<!-- Push/entitlements: UIBackgroundModes remote-notification is declared
 	     above for FCM kitchen-order pushes. aps-environment lives in the Xcode
 	     App.entitlements (added at `npx cap add ios` / Xcode open time — the

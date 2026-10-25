@@ -18,7 +18,7 @@ import {
 
 export function UsersPage() {
   const { user: currentUser } = useAuthStore();
-  const { users, isLoading, inviteUser, updateUser, toggleUserStatus, revokeUser } = useUsers();
+  const { users, isLoading, error, inviteUser, updateUser, toggleUserStatus, revokeUser } = useUsers();
   const { branches } = useBranches();
 
   const [roleFilter, setRoleFilter] = useState<'all' | 'exec_regional' | 'store_staff' | 'support_dev'>('all');
@@ -47,10 +47,10 @@ export function UsersPage() {
     return true;
   });
 
-  // Loop 43/120: staff mutations hit rules walls (invite creates others'
-  // docs, revoke deletes, cross-user edits) — every one of these used to
-  // fail silently (hung modal / phantom revoke). Loud now; a server staff-
-  // invite endpoint is QUEUED (client cannot mint roles by rules design).
+  // Loop 43/120: staff mutations hit rules walls (cross-user edits) — these
+  // used to fail silently (hung modal / phantom revoke). Loud now. Invite
+  // runs through POST /staff/invite and revoke through POST /auth/revokeRole;
+  // the client cannot mint or clear roles by rules design.
   const handleInviteSubmit = async (data: any) => {
     try {
       await inviteUser.mutateAsync(data);
@@ -80,9 +80,12 @@ export function UsersPage() {
     if (!revokingUser) return;
     try {
       await revokeUser.mutateAsync(revokingUser.id);
+      toast.success('Access revoked.', {
+        description: `${revokingUser.name}'s RBAC claims were cleared server-side (role → customer); their profile record is kept.`,
+      });
       setRevokingUser(null);
     } catch (err) {
-      toast.error('Revoke FAILED — user was not removed.', {
+      toast.error('Revoke FAILED — access was NOT removed.', {
         description: err instanceof Error ? err.message : String(err),
       });
     }
@@ -202,6 +205,21 @@ export function UsersPage() {
       {/* Roster List */}
       {isLoading ? (
         <div className="p-16 text-center text-zinc-400 text-xs">Loading team roster...</div>
+      ) : error ? (
+        // A backend failure must be visible — NOT an all-zero roster that
+        // reads as "no staff onboarded" (Runbook §8: no silent outages).
+        <div className="text-center py-16 bg-[#2A1208] rounded-2xl border border-[#5A2A10] p-8 space-y-3">
+          <AlertTriangle className="w-12 h-12 mx-auto text-orange-400" />
+          <h3 className="font-bold text-white text-sm">Could not load team roster</h3>
+          <p className="text-xs text-zinc-400 max-w-sm mx-auto">
+            The staff list could not be read from Firestore — this is not an
+            empty roster. Check the connection and retry; the failure was not
+            silent.
+          </p>
+          <p className="text-xs text-orange-300 max-w-sm mx-auto font-mono break-words">
+            {error instanceof Error ? error.message : String(error)}
+          </p>
+        </div>
       ) : filteredUsers.length === 0 ? (
         <div className="text-center py-16 bg-[#112415] rounded-2xl border border-[#1E3A24] p-8 space-y-3">
           <Users className="w-12 h-12 mx-auto text-zinc-600" />
@@ -215,7 +233,19 @@ export function UsersPage() {
           users={filteredUsers}
           branches={branches}
           onEdit={(user) => setEditingUser(user)}
-          onToggleStatus={(userId, active) => toggleUserStatus.mutate({ userId, active })}
+          onToggleStatus={(userId, active) =>
+            // L4: a rejected toggle used to leave the roster unchanged with no
+            // feedback — surface the failure instead of failing silently.
+            toggleUserStatus.mutate(
+              { userId, active },
+              {
+                onError: (err) =>
+                  toast.error('Status NOT changed.', {
+                    description: err instanceof Error ? err.message : String(err),
+                  }),
+              }
+            )
+          }
           onRevoke={(user) => setRevokingUser(user)}
         />
       )}
@@ -246,7 +276,10 @@ export function UsersPage() {
               <span>Revoke Access for {revokingUser.name}?</span>
             </h3>
             <p className="text-xs text-zinc-300 leading-relaxed">
-              Revoking access will immediately disable this user's POS & KDS credentials and log an audit security event.
+              Revoking clears this user's RBAC claims server-side (POST /auth/revokeRole): they
+              drop to <span className="font-mono text-rose-300">customer</span>, their POS & KDS
+              tokens refresh without the staff role, and the profile record is kept. Brand owners
+              and developers only — anyone else gets a 403 from the server.
             </p>
 
             <div className="flex items-center justify-end space-x-3 pt-2">

@@ -41,11 +41,51 @@ const STANDBY_STATE: StoreOperationalState = {
   posTerminalOnline: false,
 };
 
+/**
+ * M16: per-store operational status is fetched with `Promise.allSettled`, not
+ * a bare `Promise.all` hidden inside an unreturned chain. The old inner chain
+ * neither returned nor caught, so ONE store's rejection became an unhandled
+ * rejection that also discarded every successful store's measured state.
+ * Successful reads land in `states`, failures in `errors` (message per store).
+ */
+export async function loadStoreStatuses(
+  storeIds: string[],
+  read: (storeId: string) => Promise<StoreOperationalState>,
+): Promise<{
+  states: Record<string, StoreOperationalState>;
+  errors: Record<string, string>;
+}> {
+  const settled = await Promise.allSettled(
+    // Resolve the (possibly proxied) access inside the promise chain so a
+    // synchronous throw is captured per store instead of escaping.
+    storeIds.map((storeId) =>
+      Promise.resolve()
+        .then(() => read(storeId))
+        .then((state) => ({ storeId, state })),
+    ),
+  );
+  const states: Record<string, StoreOperationalState> = {};
+  const errors: Record<string, string> = {};
+  settled.forEach((result, index) => {
+    const storeId = storeIds[index];
+    if (result.status === "fulfilled") {
+      states[storeId] = result.value.state;
+    } else {
+      const reason = result.reason;
+      errors[storeId] = reason instanceof Error ? reason.message : String(reason);
+    }
+  });
+  return { states, errors };
+}
+
 export function PetpoojaStoresPage() {
   const [stores, setStores] = useState<GatewayStore[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedStoreId, setSelectedStoreId] = useState<string>("");
   const [storeStates, setStoreStates] = useState<Record<string, StoreOperationalState>>({});
+  // M16: stores whose status read failed — rendered as unavailable, never as
+  // standby defaults pretending to be measured.
+  const [storeStatusErrors, setStoreStatusErrors] = useState<Record<string, string>>({});
   // Null until a real sync operation runs; honest empty state.
   const [syncReport, setSyncReport] = useState<SyncReport | null>(null);
 
@@ -59,24 +99,26 @@ export function PetpoojaStoresPage() {
   } | null>(null);
 
   useEffect(() => {
-    void petpoojaGateway.getStores().then((list) => {
-      setStores(list);
-      if (list.length > 0) {
-        setSelectedStoreId(list[0].id);
-        // Pre-fetch operational states
-        Promise.all(
-          list.map((s) =>
-            petpoojaGateway.getStoreStatus(s.id).then((st) => ({ id: s.id, state: st })),
-          ),
-        ).then((results) => {
-          const map: Record<string, StoreOperationalState> = {};
-          results.forEach((r) => {
-            map[r.id] = r.state;
-          });
-          setStoreStates(map);
-        });
-      }
-    });
+    // P0-2: the gateway Proxy throws synchronously when the flag is off —
+    // defer the property access into the promise chain so the effect can
+    // never escape React and hit the app-level error boundary.
+    void Promise.resolve()
+      .then(() => petpoojaGateway.getStores())
+      .then(async (list) => {
+        setStores(list);
+        if (list.length > 0) {
+          setSelectedStoreId(list[0].id);
+          // Pre-fetch operational states — M16: settle each read independently
+          // so one failing store cannot discard the others or reject unhandled.
+          const { states, errors } = await loadStoreStatuses(
+            list.map((s) => s.id),
+            (storeId) => petpoojaGateway.getStoreStatus(storeId),
+          );
+          setStoreStates(states);
+          setStoreStatusErrors(errors);
+        }
+      })
+      .catch(() => setStores([]));
   }, []);
 
   const selectedStore = stores.find((s) => s.id === selectedStoreId) || stores[0] || null;
@@ -152,6 +194,27 @@ export function PetpoojaStoresPage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {filteredStores.map((store) => {
+              const statusError = storeStatusErrors[store.id];
+              // M16: an unmeasured store says so — no standby defaults dressed
+              // up as a live operational state.
+              if (statusError) {
+                return (
+                  <motion.div
+                    key={store.id}
+                    className="rounded-[20px] p-5 border border-red-200 dark:border-red-900/40 bg-red-50/40 dark:bg-red-950/10 text-left"
+                  >
+                    <h4 className="text-xs font-black text-gray-900 dark:text-white truncate">
+                      {store.name}
+                    </h4>
+                    <p className="text-[10px] font-bold text-gray-400 mt-0.5 uppercase tracking-wider font-mono">
+                      ID: {store.petpoojaRestId || "N/A"}
+                    </p>
+                    <p className="text-[10px] font-bold text-red-600 dark:text-red-400 mt-2">
+                      Operational status unavailable — {statusError}. Reload to retry this store.
+                    </p>
+                  </motion.div>
+                );
+              }
               const state = storeStates[store.id] || selectedState;
               const isSelected = selectedStoreId === store.id;
 

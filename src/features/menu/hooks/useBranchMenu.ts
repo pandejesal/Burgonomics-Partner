@@ -16,8 +16,12 @@ import {
 import { useAppStore } from '@/stores/appStore';
 import { useAuth } from '@/hooks/useAuth';
 import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
+import { toast } from 'sonner';
 import type { EightSixDuration } from '../components/Instant86ingModal';
 import type { MenuItem } from '@/types';
+
+/** POS push outcome — 'skipped' (no POS identity) is NOT a failure. */
+type StockPushStatus = 'synced' | 'skipped' | 'failed';
 
 /**
  * All mutations target the canonical `products` collection (one menu source
@@ -29,7 +33,7 @@ async function pushStock(
   items: MenuItem[] | undefined,
   itemId: string,
   inStock: boolean
-): Promise<boolean> {
+): Promise<StockPushStatus> {
   const menuItem = items?.find((i) => i.id === itemId);
   // Loop 6: combos carry fabricated local ids (createComboMeal) unknown to
   // Petpooja — pushing one as an item id could 86 an unrelated POS item on
@@ -37,21 +41,21 @@ async function pushStock(
   // component-level POS 86ing is a product call.
   if (menuItem?.isCombo) {
     console.warn(`[useBranchMenu] Combo ${itemId} has no POS identity — POS push skipped (app-only 86)`);
-    return false;
+    return 'skipped';
   }
   const petpoojaItemId = menuItem?.petpoojaItemId;
   if (!petpoojaItemId) {
     // Never push a Firestore doc id to the POS as an item id — the KOT side
     // would 86 the wrong item (or nothing) with a success response.
     console.warn(`[useBranchMenu] No petpoojaItemId for ${itemId} — POS push skipped`);
-    return false;
+    return 'skipped';
   }
   try {
-    await partnerFunctionsApi.syncItemStock(branchId, petpoojaItemId, inStock);
-    return true;
+    await partnerFunctionsApi.toggle86Item({ branchId, itemId: petpoojaItemId, inStock });
+    return 'synced';
   } catch (err) {
     console.warn('[useBranchMenu] Petpooja stock push failed (Firestore state kept):', err);
-    return false;
+    return 'failed';
   }
 }
 
@@ -74,25 +78,76 @@ export function useBranchMenu() {
       itemId: string;
       available?: boolean;
       isAvailable?: boolean;
+      notifyError?: boolean;
     }) => {
       const activeState = available !== undefined ? available : isAvailable ?? true;
       if (!branchId) throw new Error('No branch selected');
       const itemRef = doc(db, 'products', itemId);
       const payload = {
+        // F4: the readers AND every availability flag (inStock / isAvailable /
+        // available). Writing only inStock left legacy docs with
+        // `available: false` permanently sold out after a "restore". Set all
+        // three to the same truth so a restore actually restores.
         inStock: activeState,
+        isAvailable: activeState,
+        available: activeState,
         disabledUntil: null,
         eightSixDuration: null,
         eightSixReason: null,
         updatedAt: Timestamp.now(),
         lastSyncedAt: Timestamp.now(),
       };
-      await updateDoc(itemRef, payload).catch(async () => {
-        await setDoc(itemRef, { ...payload, branchId }, { merge: true });
-      });
-      await pushStock(branchId, baseMenu.items, itemId, activeState);
+      // F16: no create-on-fail fallback. The old `.catch(() => setDoc(…,
+      // { merge: true }))` turned ANY update failure — a rules denial, or a
+      // transient error on a doc that already exists — into a partial
+      // product document carrying only stock fields. Denials now reject and
+      // the optimistic rollback + onError toast below tell staff the truth.
+      await updateDoc(itemRef, payload);
+      // Server confirmation first, then POS propagation (best-effort): the
+      // returned status drives the honest POS-sync toast in onSuccess.
+      const posStatus = await pushStock(branchId, baseMenu.items, itemId, activeState);
+      return { itemId, available: activeState, posStatus };
     },
-    onSuccess: () => {
+    // Optimistic 1-tap: the KDS drawer flips instantly, and the snapshot
+    // (or the onError rollback below) is the server confirmation — the UI
+    // never claims a state Firestore refused to take.
+    onMutate: async ({ itemId, available, isAvailable }) => {
+      const activeState = available !== undefined ? available : isAvailable ?? true;
+      await queryClient.cancelQueries({ queryKey: ['menuItems', branchId] });
+      const previous = queryClient.getQueryData<MenuItem[]>(['menuItems', branchId]);
+      if (previous) {
+        queryClient.setQueryData<MenuItem[]>(
+          ['menuItems', branchId],
+          previous.map((i) =>
+            i.id === itemId
+              ? { ...i, inStock: activeState, isAvailable: activeState, available: activeState }
+              : i
+          )
+        );
+      }
+      return { previous, itemId };
+    },
+    onError: (err, vars, ctx) => {
+      if (ctx?.previous) {
+        queryClient.setQueryData<MenuItem[]>(['menuItems', branchId], ctx.previous);
+      }
+      // Non-blocking: the drawer stays open, the item reverts, staff retries.
+      if (vars.notifyError !== false) {
+        toast.error('Could not update item stock', {
+          description: err instanceof Error ? err.message : 'Firestore write failed — item reverted.',
+        });
+      }
+    },
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['menuItems', branchId] });
+      // Non-blocking POS warning: Firestore (the app truth) already took the
+      // change — only the physical Petpooja POS is stale. 'skipped' (combos
+      // /unlinked items) is by design and stays silent.
+      if (result?.posStatus === 'failed') {
+        toast.warning('Item updated in app — Petpooja POS sync failed.', {
+          description: 'The POS may still show the old stock state. Toggle again to re-push.',
+        });
+      }
     },
   });
 
@@ -105,6 +160,7 @@ export function useBranchMenu() {
       itemId: string;
       duration: EightSixDuration;
       reason: string;
+      notifyError?: boolean;
     }) => {
       if (!branchId) throw new Error('No branch selected');
       let disabledUntil: Date | null = null;
@@ -122,17 +178,35 @@ export function useBranchMenu() {
       const itemRef = doc(db, 'products', itemId);
       const payload = {
         inStock: false,
+        // F4: readers AND the availability flags — keep all of them false so
+        // every surface agrees the item is 86'd.
+        isAvailable: false,
+        available: false,
         disabledUntil: disabledUntil ? Timestamp.fromDate(disabledUntil) : null,
         eightSixReason: reason,
         eightSixDuration: duration,
         updatedAt: Timestamp.now(),
       };
-      await updateDoc(itemRef, payload).catch(async () => {
-        await setDoc(itemRef, { ...payload, branchId }, { merge: true });
-      });
+      // F16: no create-on-fail fallback (see toggleAvailability) — a denied
+      // update must not plant a nameless product doc.
+      await updateDoc(itemRef, payload);
       // Loop 6: report POS propagation honestly — the page toast must not
       // claim "& POS" when the best-effort push failed or skipped.
-      return { posSynced: await pushStock(branchId, baseMenu.items, itemId, false) };
+      return { posSynced: (await pushStock(branchId, baseMenu.items, itemId, false)) === 'synced' };
+    },
+    // F16: this mutation had no error path at all — a denied write failed
+    // silently while the drawer stayed open. There is no optimistic flip
+    // here (state comes from the invalidated snapshot), so nothing to roll
+    // back — just say the 86 was not saved.
+    onError: (err, vars) => {
+      // Same opt-out as the toggle path: a page that renders its own
+      // severity-aware role="alert" passes notifyError:false so one rejected
+      // write yields ONE error surface, not two. Default callers keep the toast.
+      if (vars.notifyError !== false) {
+        toast.error('Could not 86 this item — it was NOT marked out of stock.', {
+          description: err instanceof Error ? err.message : 'Firestore write failed.',
+        });
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['menuItems', branchId] });
@@ -163,6 +237,10 @@ export function useBranchMenu() {
           d.ref,
           {
             inStock: isAvailable,
+            // F4: keep every flag the readers consume in sync (legacy docs
+            // carried stale `available`/`isAvailable` values).
+            isAvailable,
+            available: isAvailable,
             // Re-enabling clears stale 86 metadata (see toggleAvailability).
             ...(isAvailable
               ? { disabledUntil: null, eightSixDuration: null, eightSixReason: null }

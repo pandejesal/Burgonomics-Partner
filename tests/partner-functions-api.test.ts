@@ -75,6 +75,7 @@ describe('partnerFunctionsApi gateway (real client, mocked transport)', () => {
     }) as any;
 
     const res = await partnerFunctionsApi.releaseRefund({
+      refundRequestId: 'refundreq_fixture_valid',
       orderId: 'ord_1',
       razorpayPaymentId: 'pay_1',
       amountRupees: 99.5,
@@ -82,6 +83,7 @@ describe('partnerFunctionsApi gateway (real client, mocked transport)', () => {
     });
     expect(seen.url).toMatch(/\/payments\/refund$/);
     expect(JSON.parse(String(seen.init?.body))).toMatchObject({
+      refundRequestId: 'refundreq_fixture_valid',
       orderId: 'ord_1',
       razorpayPaymentId: 'pay_1',
       amountRupees: 99.5,
@@ -94,8 +96,173 @@ describe('partnerFunctionsApi gateway (real client, mocked transport)', () => {
         headers: { 'Content-Type': 'application/json' },
       })) as any;
     await expect(
-      partnerFunctionsApi.releaseRefund({ orderId: 'ord_1', razorpayPaymentId: 'pay_1' })
+      partnerFunctionsApi.releaseRefund({
+        refundRequestId: 'refundreq_fixture_valid',
+        orderId: 'ord_1',
+        razorpayPaymentId: 'pay_1',
+      })
     ).rejects.toThrow(/no captured payment/);
+  });
+
+  it('binds exact refundRequestId to fetch body and X-Idempotency-Key header across separate calls', async () => {
+    const calls: Array<{ url: string; headers: Record<string, string>; body: any }> = [];
+    globalThis.fetch = (async (url: any, init: any) => {
+      calls.push({
+        url: String(url),
+        headers: init.headers,
+        body: JSON.parse(String(init.body)),
+      });
+      return new Response(JSON.stringify({ id: 'rfnd_call', status: 'processed' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as any;
+
+    // Call 1
+    const key1 = 'refundreq_doc_alpha_123';
+    await partnerFunctionsApi.releaseRefund({
+      refundRequestId: key1,
+      orderId: 'ord_101',
+      razorpayPaymentId: 'pay_101',
+      amountRupees: 250,
+    });
+
+    // Call 2
+    const key2 = 'refundreq_doc_beta_456';
+    await partnerFunctionsApi.releaseRefund({
+      refundRequestId: key2,
+      orderId: 'ord_102',
+      razorpayPaymentId: 'pay_102',
+      amountRupees: 250,
+    });
+
+    expect(calls).toHaveLength(2);
+
+    // Call 1 verification
+    expect(calls[0].headers['X-Idempotency-Key']).toBe(key1);
+    expect(calls[0].body.refundRequestId).toBe(key1);
+
+    // Call 2 verification
+    expect(calls[1].headers['X-Idempotency-Key']).toBe(key2);
+    expect(calls[1].body.refundRequestId).toBe(key2);
+
+    // Distinct keys across calls
+    expect(calls[0].headers['X-Idempotency-Key']).not.toBe(calls[1].headers['X-Idempotency-Key']);
+    expect(calls[0].body.refundRequestId).not.toBe(calls[1].body.refundRequestId);
+  });
+
+  it('preserves the exact same idempotency key across transient retries without rotation', async () => {
+    const calls: Array<{ headers: Record<string, string>; body: any }> = [];
+    let attempt = 0;
+    globalThis.fetch = (async (_url: any, init: any) => {
+      attempt++;
+      calls.push({
+        headers: init.headers,
+        body: JSON.parse(String(init.body)),
+      });
+      if (attempt === 1) {
+        // Transient 503 failure
+        return new Response(JSON.stringify({ error: 'Service Unavailable' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ id: 'rfnd_retry_ok', status: 'processed' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as any;
+
+    const key = 'refundreq_transient_retry_789';
+    const res = await partnerFunctionsApi.releaseRefund({
+      refundRequestId: key,
+      orderId: 'ord_retry',
+      razorpayPaymentId: 'pay_retry',
+      amountRupees: 500,
+    });
+
+    expect(res.status).toBe('processed');
+    expect(calls).toHaveLength(2);
+    // Both attempts must use the EXACT same key (no rotation, no uuid/timestamp fallback)
+    expect(calls[0].headers['X-Idempotency-Key']).toBe(key);
+    expect(calls[1].headers['X-Idempotency-Key']).toBe(key);
+    expect(calls[0].body.refundRequestId).toBe(key);
+    expect(calls[1].body.refundRequestId).toBe(key);
+  });
+
+  it('blocks network fetch locally when refundRequestId is invalid or missing', async () => {
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy as any;
+
+    // Missing / undefined
+    await expect(
+      partnerFunctionsApi.releaseRefund({
+        orderId: 'ord_inv',
+        razorpayPaymentId: 'pay_inv',
+      } as any)
+    ).rejects.toThrow(/refundRequestId/);
+
+    // Too short (< 8 chars)
+    await expect(
+      partnerFunctionsApi.releaseRefund({
+        refundRequestId: 'short7',
+        orderId: 'ord_inv',
+        razorpayPaymentId: 'pay_inv',
+      })
+    ).rejects.toThrow(/refundRequestId/);
+
+    // Too long (> 128 chars)
+    await expect(
+      partnerFunctionsApi.releaseRefund({
+        refundRequestId: 'a'.repeat(129),
+        orderId: 'ord_inv',
+        razorpayPaymentId: 'pay_inv',
+      })
+    ).rejects.toThrow(/refundRequestId/);
+
+    // Invalid characters (spaces, special characters)
+    await expect(
+      partnerFunctionsApi.releaseRefund({
+        refundRequestId: 'refundreq with spaces!',
+        orderId: 'ord_inv',
+        razorpayPaymentId: 'pay_inv',
+      })
+    ).rejects.toThrow(/refundRequestId/);
+
+    // Unpopulated / collision token
+    await expect(
+      partnerFunctionsApi.releaseRefund({
+        refundRequestId: 'refundreq_undefined',
+        orderId: 'ord_inv',
+        razorpayPaymentId: 'pay_inv',
+      })
+    ).rejects.toThrow(/refundRequestId/);
+
+    // Network must NOT have been called for any of these
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('blocks network fetch locally when no gateway payment id is recorded', async () => {
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy as any;
+
+    await expect(
+      partnerFunctionsApi.releaseRefund({
+        refundRequestId: 'refundreq_fixture_valid',
+        orderId: 'ord_inv',
+        razorpayPaymentId: '   ',
+      })
+    ).rejects.toThrow(/payment id/i);
+
+    await expect(
+      partnerFunctionsApi.releaseRefund({
+        refundRequestId: 'refundreq_fixture_valid',
+        orderId: 'ord_inv',
+        razorpayPaymentId: undefined as any,
+      })
+    ).rejects.toThrow(/payment id/i);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('POSTs refund dispositions with id/reason and surfaces 409 conflicts', async () => {
@@ -195,6 +362,40 @@ describe('partnerFunctionsApi gateway (real client, mocked transport)', () => {
         headers: { 'Content-Type': 'application/json' },
       })) as any;
     await expect(partnerFunctionsApi.cancelPorterRider('ord_9')).rejects.toThrow(/rejected the cancellation/);
+  });
+
+  it('POSTs the KDS 86 toggle to the Petpooja stock route with branch/item/state', async () => {
+    const seen: { url?: string; init?: RequestInit } = {};
+    globalThis.fetch = (async (url: any, init: any) => {
+      seen.url = String(url);
+      seen.init = init;
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as any;
+
+    const res = await partnerFunctionsApi.toggle86Item({
+      branchId: 'branch_surat_01',
+      itemId: 'pp_b1',
+      inStock: false,
+    });
+    expect(seen.url).toBe('https://example.invalid/api/petpooja/pushStock');
+    expect(JSON.parse(String(seen.init?.body))).toEqual({
+      branchId: 'branch_surat_01',
+      itemId: 'pp_b1',
+      inStock: false,
+    });
+    expect(res.success).toBe(true);
+
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: 'Petpooja POS rejected the stock push' }), {
+        status: 502,
+        headers: { 'Content-Type': 'application/json' },
+      })) as any;
+    await expect(
+      partnerFunctionsApi.toggle86Item({ branchId: 'b1', itemId: 'pp_b1', inStock: true })
+    ).rejects.toThrow(/rejected the stock push/);
   });
 
   it('measures API health instead of fabricating latency', async () => {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React from "react";
 import { motion } from "motion/react";
 import { useQuery } from "@tanstack/react-query";
 import { petpoojaGateway } from "@/core/integrations/petpooja";
@@ -30,24 +30,28 @@ import {
 
 
 export function PetpoojaDashboardPage() {
-  const [refreshInterval] = useState(15);
-  const [lastRefreshed, setLastRefreshed] = useState<string>(new Date().toLocaleTimeString());
+  const refreshInterval = 15;
 
-  const { data: health, refetch: refetchHealth } = useQuery({
+  const {
+    data: health,
+    refetch: refetchHealth,
+    dataUpdatedAt,
+  } = useQuery({
     queryKey: ["petpooja-gateway-health"],
-    queryFn: () => petpoojaGateway.getHealth(),
+    // P0-2: deferred so the gateway Proxy flag-check never throws sync.
+    queryFn: () => Promise.resolve().then(() => petpoojaGateway.getHealth()),
     refetchInterval: refreshInterval * 1000,
   });
 
   const { data: metrics, refetch: refetchMetrics } = useQuery({
     queryKey: ["petpooja-gateway-metrics"],
-    queryFn: () => petpoojaGateway.getMetrics(),
+    queryFn: () => Promise.resolve().then(() => petpoojaGateway.getMetrics()),
     refetchInterval: refreshInterval * 1000,
   });
 
   const { data: queues, refetch: refetchQueues } = useQuery({
     queryKey: ["petpooja-gateway-queues"],
-    queryFn: () => petpoojaGateway.getQueues(),
+    queryFn: () => Promise.resolve().then(() => petpoojaGateway.getQueues()),
     refetchInterval: refreshInterval * 1000,
   });
 
@@ -55,20 +59,39 @@ export function PetpoojaDashboardPage() {
     refetchHealth();
     refetchMetrics();
     refetchQueues();
-    setLastRefreshed(new Date().toLocaleTimeString());
   };
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setLastRefreshed(new Date().toLocaleTimeString());
-    }, 15000);
-    return () => clearInterval(timer);
-  }, []);
 
   const timeSeriesData = metrics?.timeSeries || [];
   const menuSyncDurationData = metrics?.menuSyncDuration || [];
   const prometheusText = metrics?.prometheusText || "";
   const gatewayConnected = health?.connected === true;
+
+  // F25 honesty: `dataUpdatedAt` stamps the last *completed health query*, not a
+  // proven remote probe — `getHealth()` catches remote failures and resolves a
+  // degraded result (httpGateway.ts:434-451), so query completion is not proof of
+  // a successful connection. 0 means no read has completed yet; show "—" instead
+  // of a timer tick that implies a cadence.
+  const lastHealthReadLabel = dataUpdatedAt
+    ? new Date(dataUpdatedAt).toLocaleTimeString()
+    : "—";
+
+  // O1: the "Live" chip is only earned by a series that actually carries a
+  // point. An empty series (gateway disabled, or nothing recorded) renders a
+  // neutral "Standby" chip instead of claiming live telemetry.
+  const seriesBadge = (hasData: boolean) => (
+    <span
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase tracking-wider ${
+        hasData
+          ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 border-emerald-500/20"
+          : "bg-gray-100 text-gray-500 dark:bg-gray-900 dark:text-gray-400 border-gray-200 dark:border-gray-800"
+      }`}
+    >
+      {hasData ? "Live" : "Standby"}
+    </span>
+  );
+  const hasLatencySeries = timeSeriesData.length > 0;
+  const hasMenuSyncSeries = menuSyncDurationData.length > 0;
+  const hasPrometheusText = prometheusText.length > 0;
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -120,7 +143,7 @@ export function PetpoojaDashboardPage() {
 
         <div className="flex items-center gap-4">
           <span className="text-xs font-semibold text-gray-400 font-mono">
-            Last pull: {lastRefreshed}
+            Last health read: {lastHealthReadLabel}
           </span>
           <AdminButton variant="outline" size="sm" onClick={handleManualRefresh}>
             <RefreshCw size={12} className="mr-1" />
@@ -134,10 +157,12 @@ export function PetpoojaDashboardPage() {
         <motion.div variants={itemVariants}>
           <StatCard
             title="Connected Stores"
-            value={`${metrics?.connectedStoresCount ?? 0} / ${metrics?.totalStoresCount ?? 0}`}
+            // Blocker 2: httpGateway.getMetrics() supplies an unconditional
+            // `0 / 0` (httpGateway.ts:626-627); no store count is measured, so
+            // metrics-object presence is NOT provenance for these two fields.
+            value="—"
             icon={Server}
-            subtext="Awaiting live merchant credentials"
-            trend={{ value: 0, label: "Live link rate", isPositive: false }}
+            subtext="Store counts are not reported by this gateway"
           />
         </motion.div>
 
@@ -147,17 +172,19 @@ export function PetpoojaDashboardPage() {
             value={gatewayConnected ? "Healthy" : "Standby"}
             icon={CheckCircle}
             subtext={health?.message || "Awaiting live gateway telemetry"}
-            trend={{ value: 0, label: "Live link rate", isPositive: false }}
           />
         </motion.div>
 
         <motion.div variants={itemVariants}>
           <StatCard
             title="Circuit Breakers Open"
-            value={String(metrics?.openBreakersCount ?? 0)}
+            value={metrics ? String(metrics.openBreakersCount) : "—"}
             icon={AlertTriangle}
-            subtext="Tracked from live gateway metrics"
-            trend={{ value: 0, label: "Tripped gateways", isPositive: true }}
+            subtext={
+              metrics
+                ? "Reported by live gateway metrics"
+                : "Awaiting live gateway metrics"
+            }
           />
         </motion.div>
 
@@ -166,8 +193,11 @@ export function PetpoojaDashboardPage() {
             title="Queue Health"
             value={metrics?.queueStatusLabel || "STANDBY"}
             icon={Zap}
-            subtext={`${queues?.waitingJobsCount ?? 0} pending, ${queues?.failedJobsCount ?? 0} failed, 0 DLQ`}
-            trend={{ value: 0, label: "Idle queue latency", isPositive: true }}
+            subtext={
+              queues
+                ? `${queues.waitingJobsCount} pending, ${queues.failedJobsCount} failed`
+                : "Awaiting live queue telemetry"
+            }
           />
         </motion.div>
       </div>
@@ -178,11 +208,7 @@ export function PetpoojaDashboardPage() {
           <AdminCard
             title="API Latency & Processing Speed"
             subtitle="Petpooja API request latency vs webhook processing speed (ms)"
-            extra={
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 border border-emerald-500/20 uppercase tracking-wider">
-                Live
-              </span>
-            }
+            extra={seriesBadge(hasLatencySeries)}
           >
             <div className="h-[280px] w-full mt-4 font-mono text-[10px]">
               <ResponsiveContainer width="100%" height="100%">
@@ -242,11 +268,7 @@ export function PetpoojaDashboardPage() {
           <AdminCard
             title="Menu Synchronization Volume"
             subtitle="Completed node mutations, created items and deleted structures (count)"
-            extra={
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 border border-emerald-500/20 uppercase tracking-wider">
-                Live
-              </span>
-            }
+            extra={seriesBadge(hasMenuSyncSeries)}
           >
             <div className="h-[280px] w-full mt-4 font-mono text-[10px]">
               <ResponsiveContainer width="100%" height="100%">
@@ -298,12 +320,8 @@ export function PetpoojaDashboardPage() {
         <motion.div variants={itemVariants} className="lg:col-span-2">
           <AdminCard
             title="Queue Growth Rate & Retries"
-            subtitle="Simultaneous BullMQ sync requests vs active exponential retries"
-            extra={
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 border border-emerald-500/20 uppercase tracking-wider">
-                Live
-              </span>
-            }
+            subtitle="Queue growth vs retry attempts reported by the gateway (count)"
+            extra={seriesBadge(hasLatencySeries)}
           >
             <div className="h-[260px] w-full mt-4 font-mono text-[10px]">
               <ResponsiveContainer width="100%" height="100%">
@@ -351,20 +369,26 @@ export function PetpoojaDashboardPage() {
         <motion.div variants={itemVariants}>
           <AdminCard
             title="Prometheus Metrics Feed"
-            subtitle="Scraper node-exporter telemetry terminal"
+            subtitle="Client-side gateway counters and local order outbox depth"
             extra={
-              <span className="flex h-2 w-2 items-center justify-center relative">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500"></span>
-              </span>
+              hasPrometheusText ? (
+                <span className="flex h-2 w-2 items-center justify-center relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-amber-500"></span>
+                </span>
+              ) : (
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-gray-300 dark:bg-gray-700" />
+              )
             }
           >
             <div className="space-y-4">
               <div className="p-4 rounded-xl bg-gray-900 text-gray-300 border border-gray-800 font-mono text-[10px] h-[210px] overflow-y-auto leading-relaxed whitespace-pre select-all no-scrollbar">
-                {prometheusText}
+                {hasPrometheusText
+                  ? prometheusText
+                  : "# No gateway counters available yet"}
               </div>
               <div className="flex justify-between items-center text-[10px] font-bold text-gray-400 uppercase tracking-wider font-mono">
-                <span>PORT: 3000/metrics</span>
+                <span>Source: client gateway adapter</span>
                 <span>Content-Type: text/plain</span>
               </div>
             </div>

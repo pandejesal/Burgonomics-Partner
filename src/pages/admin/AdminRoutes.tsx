@@ -1,6 +1,6 @@
-import React, { Suspense, lazy, useEffect, useState } from "react";
-import { Routes, Route, Outlet, useNavigate, useLocation } from "react-router-dom";
-import { useAdminAuthStore } from "@/admin/store/adminAuthStore";
+import React, { Suspense, lazy } from "react";
+import { Routes, Route, Outlet, Navigate } from "react-router-dom";
+import { useAuthStore } from "@/stores/authStore";
 import { AdminLayout } from "@/admin/layouts/AdminLayout";
 import { PetpoojaOperationsLayout } from "@/admin/layouts/PetpoojaOperationsLayout";
 import { SystemOperationsLayout } from "@/admin/layouts/SystemOperationsLayout";
@@ -10,18 +10,15 @@ import { ThemeProvider } from "@/admin/theme/ThemeContext";
 // must render with zero lazy delay). Everything else is route-level
 // code-split via lazyPage below.
 import { AdminDashboardPlaceholder } from "@/admin/pages/AdminDashboardPlaceholder";
-import { AdminLoginPage } from "@/admin/pages/AdminLoginPage";
 import { AdminOrdersPage } from "@/admin/pages/AdminOrdersPage";
 import { AdminStoresPage } from "@/admin/pages/AdminStoresPage";
 import { AdminMenuPage } from "@/admin/pages/AdminMenuPage";
 
 // Heavy recharts pages are code-split so the initial admin bundle stays lean.
 // (Previously every chart page loaded upfront → 1.2MB+ admin-analytics chunk.)
-const AdminMarketingDashboard = lazy(() =>
-  import("@/admin/pages/AdminMarketingDashboard").then((m) => ({
-    default: m.AdminMarketingDashboard,
-  }))
-);
+// NOTE: the marketing dashboard is intentionally absent — /admin/marketing is a
+// retired mock route (see RETIRED_MOCK_ROUTES) and is never imported, so its
+// recharts bundle stays out of the shipped app entirely.
 const AdminCustomerAnalyticsPage = lazy(
   () => import("@/admin/pages/AdminCustomerAnalyticsPage")
 );
@@ -113,7 +110,7 @@ const AdminLoyaltyConfigPage = lazyPage(
   "AdminLoyaltyConfigPage"
 );
 const AdminSegmentsPage = lazyPage(
-  () => import("@/admin/pages/AdminSegmentsPage"),
+  () => named(() => import("@/admin/pages/AdminSegmentsPage"), "AdminSegmentsPage"),
   "AdminSegmentsPage"
 );
 const AdminPaymentsPage = lazyPage(
@@ -183,34 +180,21 @@ const PetpoojaHealthPage = lazyPage(
 // Delivery dispatch queue stays eager (live ops, like KDS).
 import { DeliveryQueuePage } from "@/pages/DeliveryQueuePage";
 
+/**
+ * Roles permitted inside the Control Room (/admin/*).
+ *
+ * Single sign-in: the outer App router already enforces authentication via
+ * the unified partner session. This is the second, role-level gate — brand
+ * owners, developers and regional managers get the migrated admin surface.
+ * Branch owners/staff and support keep their partner-console surface
+ * (/dashboard, /orders, /menu, …) and are bounced to /dashboard.
+ */
+export const ADMIN_PORTAL_ROLES = ["brand_owner", "developer", "regional_manager"] as const;
 
 export function AdminPortalLayout() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { admin, bootstrap, isLoading } = useAdminAuthStore();
-  const [isReady, setIsReady] = useState(false);
+  const { user, loading } = useAuthStore();
 
-  const isLoginPage = location.pathname === "/admin/login";
-
-  useEffect(() => {
-    if (isLoginPage) {
-      setIsReady(true);
-      return;
-    }
-
-    bootstrap().then((loggedIn) => {
-      if (!loggedIn && !admin) {
-        navigate("/admin/login", { replace: true });
-      }
-      setIsReady(true);
-    });
-  }, [bootstrap, navigate, isLoginPage, admin]);
-
-  if (isLoginPage) {
-    return <Outlet />;
-  }
-
-  if (!isReady || isLoading) {
+  if (loading) {
     return (
       <div className="flex h-screen w-screen flex-col items-center justify-center bg-[#F8F8F8] dark:bg-bg font-sans antialiased">
         <div className="relative flex flex-col items-center">
@@ -218,15 +202,19 @@ export function AdminPortalLayout() {
             B
           </div>
           <span className="mt-4 text-xs font-bold uppercase tracking-widest text-accent dark:text-accent-light animate-pulse">
-            Authenticating Administrative Access...
+            Loading Control Room...
           </span>
         </div>
       </div>
     );
   }
 
-  if (!admin) {
-    return null;
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (!(ADMIN_PORTAL_ROLES as readonly string[]).includes(user.role)) {
+    return <Navigate to="/dashboard" replace />;
   }
 
   return (
@@ -242,8 +230,10 @@ export function AdminRoutes() {
   return (
     <Routes>
       <Route element={<AdminPortalLayout />}>
-        {/* Public inside admin */}
-        <Route path="login" element={<AdminLoginPage />} />
+        {/* Legacy deep-link: the standalone /admin/login no longer exists —
+            single sign-in lives at /login. Keep the path as a redirect so
+            bookmarks and the old handover screenshots 18-22 resolve. */}
+        <Route path="login" element={<Navigate to="/login" replace />} />
 
         {/* Dashboard & Core Ops */}
         <Route index element={<AdminDashboardPlaceholder />} />
@@ -262,18 +252,12 @@ export function AdminRoutes() {
         {/* Marketing / Offers / Campaigns */}
         <Route path="offers" element={<AdminOffersPage />} />
         <Route path="coupons" element={<AdminCouponsPage />} />
-        <Route path="campaigns" element={<AdminCampaignsPage />} />
-        <Route path="campaigns/create" element={<AdminCreateCampaignPage />} />
-        <Route path="templates" element={<AdminTemplatesPage />} />
-        <Route
-          path="marketing"
-          element={
-            <Suspense fallback={<AdminLazyFallback />}>
-              <AdminMarketingDashboard />
-            </Suspense>
-          }
-        />
-        <Route path="automation" element={<AdminAutomationPage />} />
+        {/* Marketing / Campaigns / Automation (Retired mock routes -> redirect to active orders) */}
+        <Route path="campaigns" element={<Navigate to="/admin/orders" replace />} />
+        <Route path="campaigns/create" element={<Navigate to="/admin/orders" replace />} />
+        <Route path="templates" element={<Navigate to="/admin/orders" replace />} />
+        <Route path="marketing" element={<Navigate to="/admin/orders" replace />} />
+        <Route path="automation" element={<Navigate to="/admin/orders" replace />} />
 
         {/* Customers */}
         <Route path="customers" element={<AdminCustomersPage />} />
@@ -286,7 +270,7 @@ export function AdminRoutes() {
             </Suspense>
           }
         />
-        <Route path="customers/loyalty" element={<AdminLoyaltyConfigPage />} />
+        <Route path="customers/loyalty" element={<Navigate to="/admin/orders" replace />} />
         <Route path="customers/segments" element={<AdminSegmentsPage />} />
         <Route path="segments" element={<AdminSegmentsPage />} />
 
@@ -313,7 +297,7 @@ export function AdminRoutes() {
             </Suspense>
           }
         />
-        <Route path="notifications-hub" element={<AdminNotificationsPage />} />
+        <Route path="notifications-hub" element={<Navigate to="/admin/orders" replace />} />
         <Route path="settings-hub" element={<AdminSettingsPage />} />
         <Route path="settings" element={<AdminSettingsPage />} />
         <Route path="profile" element={<AdminProfilePage />} />
@@ -363,6 +347,14 @@ export function AdminRoutes() {
           <Route path="security" element={<AdminSystemPage activeView="security" />} />
           <Route path="settings" element={<AdminSystemPage activeView="settings" />} />
         </Route>
+
+        {/* Legacy/deep-link targets: the AOV KPI card and old bookmarks point at
+            /admin/analytics, which was never a route — redirect to the registered
+            hub instead of an empty content pane. */}
+        <Route path="analytics" element={<Navigate to="/admin/analytics-hub" replace />} />
+        {/* Unregistered /admin/... paths rendered an empty pane (sidebar stayed,
+            content blank) — bounce them to the admin home. */}
+        <Route path="*" element={<Navigate to="/admin" replace />} />
       </Route>
     </Routes>
   );

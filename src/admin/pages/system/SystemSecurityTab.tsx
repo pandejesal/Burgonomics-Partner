@@ -1,182 +1,35 @@
-import React, { useState, useEffect, useCallback } from "react";
-import {
-  ShieldAlert,
-  UserX,
-  Plus,
-  RefreshCw,
-  HardDrive,
-  Download,
-  KeyRound,
-  Eye,
-  AlertTriangle,
-} from "lucide-react";
-import { useAdminAuthStore } from "../../store/adminAuthStore";
-
-interface UserSession {
-  id?: string;
-  tokenHash?: string;
-  adminEmail?: string;
-  role?: string;
-  device: string | null;
-  browser?: string | null;
-  os?: string | null;
-  ip: string | null;
-  country?: string | null;
-  activePath?: string;
-  lastActive?: string;
-  createdAt?: string;
-  lastSeenAt?: string;
-  expiresAt?: string;
-}
-
-const INITIAL_SESSIONS: UserSession[] = [
-  {
-    tokenHash: "token_48f9",
-    adminEmail: "lead-dev@burgonomics.com",
-    role: "System Admin",
-    ip: "103.45.201.12",
-    device: "Chrome v112 (macOS)",
-    activePath: "/admin/system/security",
-    lastActive: "Just now",
-  },
-  {
-    tokenHash: "token_902a",
-    adminEmail: "operations@burgonomics.com",
-    role: "Operations Manager",
-    ip: "192.168.1.42",
-    device: "Safari v16 (iPadOS)",
-    activePath: "/admin/orders",
-    lastActive: "3 minutes ago",
-  },
-  {
-    tokenHash: "token_31c8",
-    adminEmail: "manager-delhi@burgonomics.com",
-    role: "Store Manager",
-    ip: "221.120.30.5",
-    device: "Edge v110 (Windows 11)",
-    activePath: "/admin/inventory",
-    lastActive: "14 minutes ago",
-  },
-];
-
-// Demo placeholder rows (no backend backup job exists yet): sizes/statuses
-// are illustrative, NOT measured. See handleTriggerBackup.
-const INITIAL_BACKUPS = [
-  {
-    id: "backup_20260719_1000",
-    filename: "demo_placeholder_snapshot_1000.sql.gz",
-    sizeMb: 0,
-    type: "auto",
-    timestamp: "Today 10:00:00",
-    status: "demo",
-  },
-  {
-    id: "backup_20260719_0600",
-    filename: "demo_placeholder_snapshot_0600.sql.gz",
-    sizeMb: 0,
-    type: "auto",
-    timestamp: "Today 06:00:00",
-    status: "demo",
-  },
-  {
-    id: "backup_20260718_0000",
-    filename: "demo_placeholder_snapshot_manual_release.sql.gz",
-    sizeMb: 0,
-    type: "manual",
-    timestamp: "Yesterday 00:00:00",
-    status: "demo",
-  },
-];
+import React, { useState } from "react";
+import { ShieldAlert, AlertTriangle } from "lucide-react";
+import { toast } from "sonner";
 
 export const SystemSecurityTab: React.FC = () => {
-  const { accessToken, admin } = useAdminAuthStore();
-  // Demo rows are DEV-only: the sessions endpoint does not exist server-side
-  // (fetch always fails), so production must render empty — never fabricated
-  // admin emails, IPs, and backup files.
-  const [sessions, setSessions] = useState<UserSession[]>(import.meta.env.DEV ? INITIAL_SESSIONS : []);
-  const [backups, setBackups] = useState(import.meta.env.DEV ? INITIAL_BACKUPS : []);
   const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
   const [maintenancePin, setMaintenancePin] = useState("");
-  const [isLoadingSessions, setIsLoadingSessions] = useState(false);
-
-  const fetchSessions = useCallback(async () => {
-    if (!accessToken) return;
-    setIsLoadingSessions(true);
-    try {
-      const response = await fetch("/api/v1/admin/auth/sessions", {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setSessions(data);
-      }
-    } catch (err) {
-      console.error("Failed to fetch admin sessions", err);
-    } finally {
-      setIsLoadingSessions(false);
-    }
-  }, [accessToken]);
-
-  useEffect(() => {
-    fetchSessions();
-  }, [fetchSessions]);
-
-  const handleRevokeSession = async (id: string) => {
-    if (!accessToken) return;
-    try {
-      const response = await fetch(`/api/v1/admin/auth/sessions/${encodeURIComponent(id)}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (response.ok) {
-        fetchSessions();
-      }
-    } catch (err) {
-      console.error("Failed to revoke session", err);
-    }
-  };
-
-  // Backup is a LOCAL run-log entry, not a durable copy: there is no pg_dump,
-  // no S3, no backend job behind this button. The old alert claimed all three
-  // and logged a random filename/size as "healthy" — a fake disaster-recovery
-  // story. Do not present this as a real backup until a server job exists.
-  const handleTriggerBackup = () => {
-    alert(
-      "Demo backup log (NOT a durable copy): no pg_dump ran and nothing was sent to S3. Wire a real backup job before relying on this list.",
-    );
-    const newBackup = {
-      id: "backup_" + Date.now().toString().substring(5),
-      filename: `local_backup_log_${new Date().toISOString().slice(0, 10)}.json`,
-      sizeMb: 0,
-      type: "manual",
-      timestamp: "Just now",
-      status: "demo",
-    };
-    setBackups((prev) => [newBackup, ...prev]);
-  };
 
   const handleToggleMaintenance = () => {
     // No Default PIN: the old `|| "2026"` fallback meant anyone who opened
     // this console knew the safety PIN. Refuse until the operator sets one.
     const requiredPin = import.meta.env.VITE_ADMIN_MAINTENANCE_PIN as string | undefined;
     if (!requiredPin) {
-      alert("Maintenance lock is not configured (set VITE_ADMIN_MAINTENANCE_PIN). Refusing.");
+      toast.warning(
+        "Maintenance flag is not configured (set VITE_ADMIN_MAINTENANCE_PIN). Nothing was changed.",
+      );
       return;
     }
     if (isMaintenanceMode) {
       setIsMaintenanceMode(false);
       setMaintenancePin("");
-      alert(
-        "Local console flag cleared. NOTE: this toggle never controlled the live API — it only marks this console. Coordinate real maintenance out-of-band.",
+      toast.warning(
+        "Local flag cleared. This toggle never controls the live API — it marks this console only.",
       );
     } else {
       if (!maintenancePin || maintenancePin !== requiredPin) {
-        alert("CRITICAL AUTHORIZATION FAILED. Incorrect safety confirmation PIN.");
+        toast.error("Incorrect confirmation PIN — nothing was changed.");
         return;
       }
       setIsMaintenanceMode(true);
-      alert(
-        "Local console flag set. NOTE: customer checkouts are NOT throttled by this toggle — it marks this console only. Coordinate real maintenance out-of-band.",
+      toast.warning(
+        "Local flag set. Customer checkouts are NOT affected by this toggle — it marks this console only.",
       );
     }
   };
@@ -188,105 +41,23 @@ export const SystemSecurityTab: React.FC = () => {
         <ShieldAlert size={18} className="shrink-0 mt-0.5 animate-pulse" />
         <div>
           <span className="font-bold block uppercase tracking-wider text-[10px]">
-            Administrative Access Matrix Controls
+            Local Console Controls — No Server Backend
           </span>
           <p className="mt-1 leading-relaxed text-red-200">
-            Ensure proper protocol when handling sessions or snapshot restorations. Every
-            revokation, maintenance toggle, and backup extraction is registered and audited under
-            the developer audit ledger.
+            These controls are local to this console. No server-side session revocation,
+            audit ledger, or backup endpoint is wired — do not rely on them for production
+            incident response.
           </p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Active Developer Sessions */}
-        <div className="lg:col-span-2 p-6 rounded-[24px] bg-[#0c130e] border border-gray-800 space-y-4 shadow-xl">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-800 pb-4 gap-4">
-            <div>
-              <h3 className="text-sm font-black tracking-wider text-white font-mono uppercase">
-                ACTIVE ADMINISTRATIVE SESSIONS
-              </h3>
-              <p className="text-[10px] text-gray-500 font-mono mt-0.5">
-                Revoke tokens and close developer/store admin sessions
-              </p>
-            </div>
-
-            <button
-              onClick={fetchSessions}
-              className="p-1.5 rounded-lg bg-black border border-gray-800 text-gray-400 hover:text-white"
-            >
-              <RefreshCw size={14} className={isLoadingSessions ? "animate-spin" : ""} />
-            </button>
-          </div>
-
-          <div className="overflow-x-auto font-mono text-xs">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr className="border-b border-gray-800 text-gray-500 uppercase text-[9px] tracking-wider text-left">
-                  <th className="py-2 px-3">Identity User</th>
-                  <th className="py-2 px-3">IP Address</th>
-                  <th className="py-2 px-3">Client Device</th>
-                  <th className="py-2 px-3">Last Active</th>
-                  <th className="py-2 px-3 text-right">Access</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-900/40">
-                {sessions.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="py-8 text-center text-gray-500">
-                      No active sessions found.
-                    </td>
-                  </tr>
-                ) : (
-                  sessions.map((s) => {
-                    const osPart = s.os ? s.os : "";
-                    const browserPart = s.browser ? s.browser : "";
-                    const fullDevice = `${osPart} ${browserPart}`.trim() || "Unknown Client";
-
-                    return (
-                      <tr key={s.id} className="hover:bg-black/20">
-                        <td className="py-3 px-3">
-                          <span className="block font-bold text-white truncate max-w-[150px]">
-                            {admin?.email || "Admin User"}
-                          </span>
-                          <span className="block text-[9px] text-gray-500 uppercase">
-                            {admin?.role?.name || "System Admin"}
-                          </span>
-                        </td>
-                        <td className="py-3 px-3 text-gray-400 font-bold">{s.ip || "127.0.0.1"}</td>
-                        <td
-                          className="py-3 px-3 text-gray-400 truncate max-w-[130px]"
-                          title={fullDevice}
-                        >
-                          {fullDevice}
-                        </td>
-                        <td className="py-3 px-3 text-emerald-400 font-semibold">
-                          {s.lastSeenAt ? new Date(s.lastSeenAt).toLocaleTimeString() : "N/A"}
-                        </td>
-                        <td className="py-3 px-3 text-right">
-                          <button
-                            onClick={() => s.id && handleRevokeSession(s.id)}
-                            className="p-1 text-gray-600 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors cursor-pointer inline-flex items-center"
-                            title="Force Close Session"
-                          >
-                            <UserX size={14} />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
         {/* Maintenance / Emergency Mode */}
-        <div className="p-6 rounded-[24px] bg-[#0c130e] border border-gray-800 shadow-xl flex flex-col justify-between">
+        <div className="lg:col-start-2 p-6 rounded-[24px] bg-[#0c130e] border border-gray-800 shadow-xl flex flex-col justify-between">
           <div className="space-y-4">
             <div className="border-b border-gray-800 pb-3">
               <span className="font-mono text-xs font-black text-emerald-400 uppercase tracking-widest">
-                Core Circuit Breaker
+                Local Maintenance Flag
               </span>
             </div>
 
@@ -296,8 +67,9 @@ export const SystemSecurityTab: React.FC = () => {
                 <span className="uppercase text-[9px]">Emergency Maintenance Mode</span>
               </div>
               <p>
-                Toggling maintenance blocks all checkout routes and returns HTTP 503 across customer
-                platforms. Requires authorization confirmation PIN to confirm emergency protocol.
+                Sets a local flag on this console only — it does not block checkouts, throttle
+                traffic, or affect any customer app. A configured confirmation PIN is required;
+                real maintenance must be coordinated out-of-band.
               </p>
 
               {!isMaintenanceMode && (
@@ -321,67 +93,9 @@ export const SystemSecurityTab: React.FC = () => {
                   : "bg-red-950/20 border border-red-900 text-red-400 hover:bg-red-950/40"
               }`}
             >
-              {isMaintenanceMode ? "Terminate Maintenance" : "Toggle Maintenance Mode"}
+              {isMaintenanceMode ? "Clear Local Flag" : "Set Local Flag (PIN Required)"}
             </button>
           </div>
-        </div>
-      </div>
-
-      {/* Durable PostgreSQL Snapshots */}
-      <div className="p-6 rounded-[24px] bg-[#0c130e] border border-gray-800 shadow-xl space-y-4 font-mono text-xs">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-800 pb-4 gap-4">
-          <div>
-            <h3 className="text-sm font-black tracking-wider text-white uppercase font-mono">
-              SQL TRANSACTION LEDGER SNAPSHOTS
-            </h3>
-            <p className="text-[10px] text-gray-500 font-mono mt-0.5">
-              Automated pg_dump snapshots backup history and state preservation indexes
-            </p>
-          </div>
-
-          <button
-            onClick={handleTriggerBackup}
-            className="px-3 py-1.5 bg-primary hover:bg-[#156d39] text-white text-[10px] font-black uppercase tracking-wider rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <Plus size={12} /> Force Database Snapshot
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {backups.map((b) => (
-            <div
-              key={b.id}
-              className="p-4 bg-black/40 border border-gray-900 rounded-xl flex flex-col justify-between space-y-4"
-            >
-              <div>
-                <div className="flex items-center justify-between">
-                  <span
-                    className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${
-                      b.type === "auto"
-                        ? "bg-blue-950/20 text-blue-400 border border-blue-900/50"
-                        : "bg-purple-950/20 text-purple-400 border border-purple-900/50"
-                    }`}
-                  >
-                    {b.type}
-                  </span>
-                  <span className="text-[10px] text-gray-500 font-bold">{b.timestamp}</span>
-                </div>
-                <span className="block text-xs font-bold text-white mt-2 break-all font-mono leading-tight">
-                  {b.filename}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between border-t border-gray-950 pt-2.5">
-                <span className="text-[10px] text-gray-400 font-bold">Size: {b.sizeMb} MB</span>
-                <button
-                  onClick={() => alert(`Downloading SQL Snapshot archive: ${b.filename}`)}
-                  className="p-1 rounded bg-gray-900 hover:text-white hover:bg-gray-800 transition-all cursor-pointer inline-flex items-center text-gray-400"
-                >
-                  <Download size={12} />
-                </button>
-              </div>
-            </div>
-          ))}
         </div>
       </div>
     </div>

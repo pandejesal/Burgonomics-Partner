@@ -1,16 +1,15 @@
 import React, { useState, useEffect } from 'react';
+import { useAuthStore } from '@/stores/authStore';
 import { db } from '@/config/firebase';
 import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import {
   Activity,
   AlertTriangle,
-  CheckCircle2,
   Clock,
   Cpu,
   Database,
   ExternalLink,
   Flame,
-  Radio,
   RefreshCw,
   Server,
   ShieldAlert,
@@ -41,14 +40,19 @@ interface DevDiagnosticsModalProps {
 }
 
 export function DevDiagnosticsModal({ isOpen, onClose }: DevDiagnosticsModalProps) {
+  const { user } = useAuthStore();
+  const canViewDiagnostics = user?.role === 'developer' || user?.role === 'brand_owner';
   const [snapshots, setSnapshots] = useState<DevErrorSnapshot[]>([]);
+  const [snapshotState, setSnapshotState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [selectedSnapshot, setSelectedSnapshot] = useState<DevErrorSnapshot | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'snapshots' | 'gateways' | 'sandbox'>('overview');
   const [isTestingSmoke, setIsTestingSmoke] = useState(false);
   const [smokeLogs, setSmokeLogs] = useState<string[]>([]);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !canViewDiagnostics) return;
+    setSnapshotState('loading');
+    setSnapshots([]);
 
     try {
       const q = query(
@@ -65,19 +69,22 @@ export function DevDiagnosticsModal({ isOpen, onClose }: DevDiagnosticsModalProp
             list.push({ id: doc.id, ...doc.data() } as DevErrorSnapshot);
           });
           setSnapshots(list);
+          setSnapshotState('ready');
         },
         (error) => {
           console.warn('[DevDiagnostics] Error subscribing to snapshots:', error);
+          setSnapshotState('error');
         }
       );
 
       return () => unsubscribe();
     } catch (err) {
       console.warn('[DevDiagnostics] Snapshot query setup error:', err);
+      setSnapshotState('error');
     }
-  }, [isOpen]);
+  }, [isOpen, canViewDiagnostics]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !canViewDiagnostics) return null;
 
   const runSandboxSmokeTest = async () => {
     setIsTestingSmoke(true);
@@ -117,7 +124,7 @@ export function DevDiagnosticsModal({ isOpen, onClose }: DevDiagnosticsModalProp
                 </span>
               </div>
               <p className="text-xs text-zinc-400">
-                Live backend health, error snapshots, gateway latencies, and sandbox smoke testing
+                Architecture reference and error snapshots — gateway health is not measured here
               </p>
             </div>
           </div>
@@ -141,7 +148,7 @@ export function DevDiagnosticsModal({ isOpen, onClose }: DevDiagnosticsModalProp
             }`}
           >
             <Activity className="w-4 h-4" />
-            <span>Architecture & Health</span>
+            <span>Architecture Reference</span>
           </button>
 
           <button
@@ -153,7 +160,7 @@ export function DevDiagnosticsModal({ isOpen, onClose }: DevDiagnosticsModalProp
             }`}
           >
             <Server className="w-4 h-4" />
-            <span>Service Gateways (4)</span>
+            <span>Service Gateways (3)</span>
           </button>
 
           <button
@@ -195,35 +202,31 @@ export function DevDiagnosticsModal({ isOpen, onClose }: DevDiagnosticsModalProp
                 <div className="bg-surface p-4 rounded-xl border border-border space-y-1">
                   <span className="text-zinc-400 text-[10px] uppercase font-bold tracking-wider">Cloud Functions</span>
                   <div className="text-lg font-bold text-white flex items-center space-x-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                    <span>v2 asia-south1</span>
+                    <span>Health unknown</span>
                   </div>
-                  <p className="text-[11px] text-zinc-400">Node.js 20 / Blaze / Mumbai</p>
+                  <p className="text-[11px] text-zinc-400">Deployment not measured</p>
                 </div>
 
                 <div className="bg-surface p-4 rounded-xl border border-border space-y-1">
                   <span className="text-zinc-400 text-[10px] uppercase font-bold tracking-wider">Razorpay Route Split</span>
-                  <div className="text-lg font-bold text-emerald-400 flex items-center space-x-2">
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Marketplace Active</span>
+                  <div className="text-lg font-bold text-text-secondary flex items-center space-x-2">
+                    <span>Health unknown</span>
                   </div>
                   <p className="text-[11px] text-zinc-400">Brand Royalty % vs Branch Net</p>
                 </div>
 
                 <div className="bg-surface p-4 rounded-xl border border-border space-y-1">
                   <span className="text-zinc-400 text-[10px] uppercase font-bold tracking-wider">Petpooja POS Bridge</span>
-                  <div className="text-lg font-bold text-emerald-400 flex items-center space-x-2">
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Hourly Sync & 86ing</span>
+                  <div className="text-lg font-bold text-text-secondary flex items-center space-x-2">
+                    <span>Health unknown</span>
                   </div>
                   <p className="text-[11px] text-zinc-400">Retry Queue + Item Auto-Refund</p>
                 </div>
 
                 <div className="bg-surface p-4 rounded-xl border border-border space-y-1">
                   <span className="text-zinc-400 text-[10px] uppercase font-bold tracking-wider">Porter Delivery Logistics</span>
-                  <div className="text-lg font-bold text-cyan-400 flex items-center space-x-2">
-                    <Radio className="w-4 h-4" />
-                    <span>Live Quote / Dispatch</span>
+                  <div className="text-lg font-bold text-text-secondary flex items-center space-x-2">
+                    <span>Health unknown</span>
                   </div>
                   <p className="text-[11px] text-zinc-400">2-Wheeler Bike Rate Card</p>
                 </div>
@@ -233,7 +236,7 @@ export function DevDiagnosticsModal({ isOpen, onClose }: DevDiagnosticsModalProp
               <div className="bg-surface border border-border rounded-xl p-5 space-y-3">
                 <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center space-x-2">
                   <Flame className="w-4 h-4 text-accent-light" />
-                  <span>Authoritative Backend Invariants</span>
+                  <span>Intended Architecture (not runtime verification)</span>
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-zinc-300">
                   <div className="p-3 bg-bg rounded-lg border border-border space-y-1">
@@ -270,28 +273,28 @@ export function DevDiagnosticsModal({ isOpen, onClose }: DevDiagnosticsModalProp
               <div className="bg-surface p-5 rounded-xl border border-border space-y-3">
                 <div className="flex items-center justify-between border-b border-border pb-3">
                   <div className="flex items-center space-x-3">
-                    <span className="w-3 h-3 rounded-full bg-emerald-400" />
+                    <span className="w-3 h-3 rounded-full bg-border" />
                     <div>
                       <h4 className="font-bold text-sm text-white">Razorpay PG & Route API</h4>
-                      <p className="text-[11px] text-zinc-400">Endpoint: https://api.razorpay.com/v1 | asia-south1</p>
+                      <p className="text-[11px] text-zinc-400">Runtime configuration not measured</p>
                     </div>
                   </div>
-                  <span className="px-2.5 py-1 rounded-md text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">
-                    Operational (Sandbox Mock Active)
+                  <span className="px-2.5 py-1 rounded-md text-[10px] font-bold bg-bg text-text-secondary border border-border">
+                    Health unknown — not measured
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-3 text-xs">
                   <div className="bg-bg p-3 rounded-lg border border-border">
                     <span className="text-[10px] text-zinc-400 block">HMAC Signature</span>
-                    <span className="font-mono text-emerald-400">TimingSafe SHA256</span>
+                    <span className="font-mono text-text-secondary">Not measured</span>
                   </div>
                   <div className="bg-bg p-3 rounded-lg border border-border">
                     <span className="text-[10px] text-zinc-400 block">Route Split Reversal</span>
-                    <span className="font-mono text-emerald-400">reverse_all: 1</span>
+                    <span className="font-mono text-text-secondary">Not measured</span>
                   </div>
                   <div className="bg-bg p-3 rounded-lg border border-border">
                     <span className="text-[10px] text-zinc-400 block">Audit Trail</span>
-                    <span className="font-mono text-cyan-400">payment_audits/</span>
+                    <span className="font-mono text-text-secondary">Not measured</span>
                   </div>
                 </div>
               </div>
@@ -299,28 +302,28 @@ export function DevDiagnosticsModal({ isOpen, onClose }: DevDiagnosticsModalProp
               <div className="bg-surface p-5 rounded-xl border border-border space-y-3">
                 <div className="flex items-center justify-between border-b border-border pb-3">
                   <div className="flex items-center space-x-3">
-                    <span className="w-3 h-3 rounded-full bg-emerald-400" />
+                    <span className="w-3 h-3 rounded-full bg-border" />
                     <div>
                       <h4 className="font-bold text-sm text-white">Petpooja POS V1 API</h4>
                       <p className="text-[11px] text-zinc-400">Menu & Push Order V1 Gateways</p>
                     </div>
                   </div>
-                  <span className="px-2.5 py-1 rounded-md text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">
-                    Operational (Auto 86ing Enabled)
+                  <span className="px-2.5 py-1 rounded-md text-[10px] font-bold bg-bg text-text-secondary border border-border">
+                    Health unknown — not measured
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-3 text-xs">
                   <div className="bg-bg p-3 rounded-lg border border-border">
                     <span className="text-[10px] text-zinc-400 block">Menu Sync Schedule</span>
-                    <span className="font-mono text-white">0 * * * * (Hourly)</span>
+                    <span className="font-mono text-text-secondary">Not measured</span>
                   </div>
                   <div className="bg-bg p-3 rounded-lg border border-border">
                     <span className="text-[10px] text-zinc-400 block">KOT Retry Queue</span>
-                    <span className="font-mono text-white">1m, 5m, 30m Backoff</span>
+                    <span className="font-mono text-text-secondary">Not measured</span>
                   </div>
                   <div className="bg-bg p-3 rounded-lg border border-border">
                     <span className="text-[10px] text-zinc-400 block">Kitchen 86ing</span>
-                    <span className="font-mono text-emerald-400">Instant Firestore Sync</span>
+                    <span className="font-mono text-text-secondary">Not measured</span>
                   </div>
                 </div>
               </div>
@@ -328,28 +331,28 @@ export function DevDiagnosticsModal({ isOpen, onClose }: DevDiagnosticsModalProp
               <div className="bg-surface p-5 rounded-xl border border-border space-y-3">
                 <div className="flex items-center justify-between border-b border-border pb-3">
                   <div className="flex items-center space-x-3">
-                    <span className="w-3 h-3 rounded-full bg-cyan-400" />
+                    <span className="w-3 h-3 rounded-full bg-border" />
                     <div>
                       <h4 className="font-bold text-sm text-white">Porter Logistics API</h4>
-                      <p className="text-[11px] text-zinc-400">Endpoint: https://api.porter.in/v1</p>
+                      <p className="text-[11px] text-zinc-400">Runtime configuration not measured</p>
                     </div>
                   </div>
-                  <span className="px-2.5 py-1 rounded-md text-[10px] font-bold bg-cyan-950 text-cyan-400 border border-cyan-800">
-                    2-Wheeler Dispatch Active
+                  <span className="px-2.5 py-1 rounded-md text-[10px] font-bold bg-bg text-text-secondary border border-border">
+                    Health unknown — not measured
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-3 text-xs">
                   <div className="bg-bg p-3 rounded-lg border border-border">
                     <span className="text-[10px] text-zinc-400 block">Base Rate Card</span>
-                    <span className="font-mono text-white">₹40 for 2km + ₹10/km</span>
+                    <span className="font-mono text-text-secondary">Not measured</span>
                   </div>
                   <div className="bg-bg p-3 rounded-lg border border-border">
                     <span className="text-[10px] text-zinc-400 block">Webhook Verification</span>
-                    <span className="font-mono text-emerald-400">HMAC SHA256</span>
+                    <span className="font-mono text-text-secondary">Not measured</span>
                   </div>
                   <div className="bg-bg p-3 rounded-lg border border-border">
                     <span className="text-[10px] text-zinc-400 block">Cancellation Fallback</span>
-                    <span className="font-mono text-amber-400">1-Click Rebook / In-House</span>
+                    <span className="font-mono text-text-secondary">Not measured</span>
                   </div>
                 </div>
               </div>
@@ -365,11 +368,14 @@ export function DevDiagnosticsModal({ isOpen, onClose }: DevDiagnosticsModalProp
                 <span className="text-xs text-zinc-500">Auto-streamed from Firestore</span>
               </div>
 
-              {snapshots.length === 0 ? (
+              {snapshotState !== 'ready' ? (
+                <p role="status" className="text-sm text-text-secondary">
+                  {snapshotState === 'error' ? 'Error snapshots unavailable. Close and reopen to retry.' : 'Loading error snapshots…'}
+                </p>
+              ) : snapshots.length === 0 ? (
                 <div className="p-12 text-center bg-surface rounded-xl border border-border space-y-2">
-                  <CheckCircle2 className="w-8 h-8 mx-auto text-emerald-400" />
-                  <h4 className="font-bold text-sm text-white">Zero Critical Exceptions Logged</h4>
-                  <p className="text-xs text-zinc-400">All backend gateway invocations are healthy and functioning normally.</p>
+                  <h4 className="font-bold text-sm text-white">No error snapshots recorded</h4>
+                  <p className="text-xs text-zinc-400">This is not a health check. Gateway health is unknown.</p>
                 </div>
               ) : (
                 <div className="space-y-2">

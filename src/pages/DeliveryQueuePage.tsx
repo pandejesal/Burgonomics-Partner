@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   PorterDispatchCard,
   RiderAssignmentModal,
+  deriveDeliveryFeedState,
   usePorterLogistics,
 } from '@/features/delivery';
 import {
@@ -23,20 +24,40 @@ export function DeliveryQueuePage() {
   const {
     deliveryOrders,
     isLoading,
+    error: ordersError,
+    refetch: refetchOrders,
     quotes,
     loadingQuotes,
     dispatchingOrderIds,
     rebookingOrderIds,
+    fareConfirms,
+    manualLanes,
+    pastingOrderIds,
     fetchOrderQuote,
     dispatchPorter,
+    confirmFareDispatch,
+    dismissFareConfirm,
+    savePorterManual,
     assignInHouseRider,
     cancelPorter,
     rebookPorter,
   } = usePorterLogistics();
 
+  // Feed honesty (F06-06 regression): an errored orders read must surface a
+  // real error + Retry, never "No Delivery Orders In Queue" — which reads as
+  // "no work available" while orders are simply unreadable.
+  const feedState = deriveDeliveryFeedState({ isLoading, error: ordersError });
+
   const [searchQuery, setSearchQuery] = useState('');
   const [filterTab, setFilterTab] = useState<'all' | 'ready' | 'in_transit' | 'unassigned'>('all');
   const [assigningOrder, setAssigningOrder] = useState<Order | null>(null);
+
+  // Honest connectivity: quotes only holds successful dispatch quote
+  // responses from this session, so a non-empty map is the only evidence
+  // we have that SOME provider's API answered (Borzo or Shadowfax — or a
+  // legacy Porter quote). A quote is not provider health, and an empty map
+  // is unverified, not dead.
+  const dispatcherReachable = Object.keys(quotes).length > 0;
 
   // Filtered orders list
   const filteredOrders = useMemo(() => {
@@ -69,11 +90,17 @@ export function DeliveryQueuePage() {
     });
   }, [deliveryOrders, filterTab, searchQuery]);
 
-  // Statistics
+  // Statistics — rendered only for a readable feed: counting zeros on an
+  // errored feed reads as "nothing ready" when orders are simply unreadable.
   const readyCount = deliveryOrders.filter((o) => o.status === 'ready').length;
   const inTransitCount = deliveryOrders.filter(
     (o) => o.status === 'out_for_delivery' || !!o.riderName
   ).length;
+  const countsAreLive = feedState === 'ready';
+
+  // Empty-state copy depends on WHY the list is empty: a narrow tab/search is
+  // not the same claim as "everything has been allocated or completed".
+  const hasActiveQueueFilters = filterTab !== 'all' || searchQuery.trim().length > 0;
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-16 select-none">
@@ -81,13 +108,13 @@ export function DeliveryQueuePage() {
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
         <div>
           <h1 className="text-2xl font-black text-white tracking-wide flex items-center gap-2.5">
-            <span>Delivery Queue & Porter Logistics</span>
+            <span>Delivery Queue & Courier Dispatch</span>
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-orange-950 border border-orange-500/40 text-orange-400 font-bold">
-              3PL Dispatch Live
+              3PL Dispatch
             </span>
           </h1>
           <p className="text-xs text-neutral-400">
-            Automated Porter 2-wheeler courier allocation, live fare quotes, and in-house fleet assignment
+            Automated multi-provider courier allocation (Borzo / Shadowfax), live fare quotes, and in-house rider assignment
           </p>
         </div>
 
@@ -108,7 +135,7 @@ export function DeliveryQueuePage() {
           </div>
           <div>
             <span className="text-xs font-bold text-neutral-400 block uppercase">Ready for Dispatch</span>
-            <span className="font-mono text-2xl font-black text-amber-400">{readyCount} Orders</span>
+            <span className="font-mono text-2xl font-black text-amber-400">{countsAreLive ? `${readyCount} Orders` : '—'}</span>
           </div>
         </div>
 
@@ -118,7 +145,7 @@ export function DeliveryQueuePage() {
           </div>
           <div>
             <span className="text-xs font-bold text-neutral-400 block uppercase">Out for Delivery</span>
-            <span className="font-mono text-2xl font-black text-cyan-400">{inTransitCount} Couriers</span>
+            <span className="font-mono text-2xl font-black text-cyan-400">{countsAreLive ? `${inTransitCount} Couriers` : '—'}</span>
           </div>
         </div>
 
@@ -127,8 +154,17 @@ export function DeliveryQueuePage() {
             <Zap className="w-6 h-6" />
           </div>
           <div>
-            <span className="text-xs font-bold text-neutral-400 block uppercase">Porter API Status</span>
-            <span className="font-mono text-base font-black text-emerald-400">Connected ✓ (Instant)</span>
+            <span className="text-xs font-bold text-neutral-400 block uppercase">Dispatcher Status</span>
+            <span
+              className={`font-mono text-base font-black ${dispatcherReachable ? 'text-emerald-400' : 'text-neutral-400'}`}
+              title={
+                dispatcherReachable
+                  ? 'A dispatch quote returned successfully this session.'
+                  : 'No dispatch quote has succeeded this session — status not verified.'
+              }
+            >
+              {dispatcherReachable ? 'Reachable ✓ (this session)' : 'Unknown — not checked'}
+            </span>
           </div>
         </div>
       </div>
@@ -199,37 +235,80 @@ export function DeliveryQueuePage() {
         </div>
       </div>
 
-      {/* Orders Grid */}
-      {isLoading ? (
-        <div className="flex justify-center py-20 text-neutral-400">
-          <Clock className="w-8 h-8 animate-spin mb-2" />
-        </div>
-      ) : filteredOrders.length === 0 ? (
-        <div className="text-center py-16 bg-neutral-900/40 rounded-3xl border border-dashed border-neutral-800 p-8">
-          <Bike className="w-12 h-12 mx-auto text-neutral-600 mb-3" />
-          <h3 className="font-bold text-white text-base">No Delivery Orders In Queue</h3>
-          <p className="text-xs text-neutral-500 mt-1">
-            All packed delivery orders have been allocated couriers or completed.
-          </p>
+      {/* Orders Grid — an errored feed shows the failure panel with Retry
+          (mirroring OrdersPage); the "no orders" empty state renders ONLY
+          once the feed is known-good, so a failed read can never claim the
+          queue is empty. */}
+      {feedState === 'loading' ? (
+        <div
+          role="status"
+          aria-label="Loading delivery orders"
+          className="flex justify-center py-20 text-neutral-400"
+        >
+          <Clock className="w-8 h-8 animate-spin mb-2" aria-hidden="true" />
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredOrders.map((order) => (
-            <PorterDispatchCard
-              key={order.id}
-              order={order}
-              quote={quotes[order.id]}
-              loadingQuote={loadingQuotes[order.id]}
-              isDispatching={dispatchingOrderIds[order.id]}
-              isRebooking={rebookingOrderIds[order.id]}
-              onFetchQuote={fetchOrderQuote}
-              onDispatchPorter={dispatchPorter}
-              onOpenAssignModal={setAssigningOrder}
-              onCancelPorter={cancelPorter}
-              onRebookPorter={rebookPorter}
-            />
-          ))}
-        </div>
+        <>
+          {feedState === 'error' && (
+            <div
+              role="alert"
+              className="rounded-2xl border border-rose-500/50 bg-rose-950/60 p-4 text-xs font-bold text-rose-200 flex flex-wrap items-center justify-between gap-3"
+            >
+              <span className="inline-flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 stroke-[2.5] text-rose-300 shrink-0" />
+                Delivery order feed failed —{' '}
+                {(ordersError as Error)?.message || 'check connection and permissions.'}
+              </span>
+              <button
+                type="button"
+                onClick={() => refetchOrders()}
+                className="px-4 py-2 min-h-[44px] rounded-xl bg-[#0E4825] text-emerald-300 font-bold cursor-pointer"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {filteredOrders.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredOrders.map((order) => (
+                <PorterDispatchCard
+                  key={order.id}
+                  order={order}
+                  quote={quotes[order.id]}
+                  loadingQuote={loadingQuotes[order.id]}
+                  isDispatching={dispatchingOrderIds[order.id]}
+                  isRebooking={rebookingOrderIds[order.id]}
+                  fareConfirm={fareConfirms[order.id]}
+                  manualLane={manualLanes[order.id]}
+                  isPasting={pastingOrderIds[order.id]}
+                  onFetchQuote={fetchOrderQuote}
+                  onDispatchPorter={dispatchPorter}
+                  onOpenAssignModal={setAssigningOrder}
+                  onCancelPorter={cancelPorter}
+                  onRebookPorter={rebookPorter}
+                  onConfirmFare={confirmFareDispatch}
+                  onDismissFareConfirm={(o) => dismissFareConfirm(o.id)}
+                  onPastePorter={(o, porterOrderId, trackingUrl) =>
+                    savePorterManual(o.id, porterOrderId, trackingUrl)
+                  }
+                />
+              ))}
+            </div>
+          ) : (
+            feedState === 'ready' && (
+              <div className="text-center py-16 bg-neutral-900/40 rounded-3xl border border-dashed border-neutral-800 p-8">
+                <Bike className="w-12 h-12 mx-auto text-neutral-500 mb-3" aria-hidden="true" />
+                <h3 className="font-bold text-white text-base">No Delivery Orders In Queue</h3>
+                <p className="text-xs text-neutral-400 mt-1">
+                  {hasActiveQueueFilters
+                    ? 'No delivery orders match the current tab or search.'
+                    : 'All packed delivery orders have been allocated couriers or completed.'}
+                </p>
+              </div>
+            )
+          )}
+        </>
       )}
 
       {/* In-House Rider Assignment Modal */}

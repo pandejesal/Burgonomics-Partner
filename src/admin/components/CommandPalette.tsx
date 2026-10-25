@@ -20,13 +20,15 @@ import {
   Shield,
 } from "lucide-react";
 import { useAdminTheme } from "../theme/ThemeContext";
-import { useAdminAuthStore } from "../store/adminAuthStore";
+import { useAuthStore } from "@/stores/authStore";
 
 export const CommandPalette: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const navigate = useNavigate();
   const { theme, setTheme } = useAdminTheme();
-  const { logout } = useAdminAuthStore();
+  // Single sign-in: one logout for the whole Partner console.
+  const { signOut } = useAuthStore();
+  const logout = () => void signOut();
 
   // Toggle open on CMD/CTRL + K
   useEffect(() => {

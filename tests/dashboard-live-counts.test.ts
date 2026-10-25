@@ -11,6 +11,8 @@ const docs = (n: number) =>
   Array.from({ length: n }, (_, i) => ({ id: `d${i}`, data: () => ({}) }));
 
 vi.mock('firebase/firestore', () => ({
+  // src/config/firebase.ts (pulled in via authStore) calls getFirestore(app).
+  getFirestore: vi.fn(() => ({})),
   collection: vi.fn((_db: unknown, name: string) => ({ __col: name })),
   collectionGroup: vi.fn((_db: unknown, name: string) => ({ __col: name })),
   where: vi.fn(() => ({ _where: true })),

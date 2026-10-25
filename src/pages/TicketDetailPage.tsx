@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { useTicket } from '@/hooks/useTicket';
 import { useAuthStore } from '@/stores/authStore';
 import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
@@ -14,6 +15,7 @@ import {
   Store,
   User,
   AlertCircle,
+  AlertTriangle,
   DollarSign,
   Gift,
   Building,
@@ -33,7 +35,7 @@ export function TicketDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuthStore();
-  const { ticket, isLoading, updateTicket, addMessage } = useTicket(id || '');
+  const { ticket, isLoading, error, addMessage } = useTicket(id || '');
   const queryClient = useQueryClient();
 
   // 5 Tabs: 'refund' | 'goodwill' | 'escalate_brand' | 'escalate_dev' | 'standard'
@@ -57,6 +59,34 @@ export function TicketDetailPage() {
     );
   }
 
+  if (error) {
+    const isTicketNotFound = error instanceof Error && error.message === 'Ticket not found.';
+    if (!isTicketNotFound) {
+      // A read failure is NOT "ticket not found" — an incident page must not
+      // conflate an outage with absence (Runbook §8 partial-data honesty).
+      return (
+        <div className="p-16 text-center bg-surface rounded-2xl border border-[#5A2A10] text-white space-y-3">
+          <AlertTriangle className="w-10 h-10 mx-auto text-orange-400" />
+          <h3 className="font-bold text-sm">Could not load ticket</h3>
+          <p className="text-xs text-zinc-400 max-w-sm mx-auto">
+            The ticket read failed from Firestore — this is a connection/backend
+            outage, not a deleted ticket. Check the connection, then return to
+            the incident queue to reload this ticket.
+          </p>
+          <p className="text-xs text-orange-300 max-w-sm mx-auto font-mono break-words">
+            {error instanceof Error ? error.message : String(error)}
+          </p>
+          <button
+            onClick={() => navigate('/tickets')}
+            className="px-4 py-2 bg-accent text-white text-xs font-semibold rounded-xl cursor-pointer"
+          >
+            Return to Incident Queue
+          </button>
+        </div>
+      );
+    }
+  }
+
   if (!ticket) {
     return (
       <div className="p-16 text-center bg-surface rounded-2xl border border-border text-white space-y-3">
@@ -76,8 +106,11 @@ export function TicketDetailPage() {
   const assignedTier = normalizeTier((ticket as any).assignedTo?.tier);
   const diagnostics = (ticket as any).diagnostics || {};
   const timeline = normalizeTimeline((ticket as any).timeline);
+  // Diagnostics (raw error stacks, payload copy) are a developer/brand-owner
+  // tool — fail-closed: any other or missing role is denied.
+  const canViewDiagnostics = user?.role === 'developer' || user?.role === 'brand_owner';
 
-  const handleCopyPayload = () => {
+  const handleCopyPayload = async () => {
     const payload = JSON.stringify(
       {
         ticketId: ticket.id,
@@ -91,9 +124,17 @@ export function TicketDetailPage() {
       null,
       2
     );
-    navigator.clipboard.writeText(payload);
-    setCopiedPayload(true);
-    setTimeout(() => setCopiedPayload(false), 2000);
+    // M5: the clipboard write is async and can reject (denied permission,
+    // insecure context, absent API). Announce the copy only after it resolves;
+    // otherwise report an honest failure instead of faking success.
+    try {
+      await navigator.clipboard.writeText(payload);
+      setCopiedPayload(true);
+      toast.success('Diagnostics payload copied to clipboard.');
+      setTimeout(() => setCopiedPayload(false), 2000);
+    } catch {
+      toast.error('Copy failed — select the payload and copy it manually.');
+    }
   };
 
   // Partial-refund validation lives in utils/refundValidation (unit-tested):
@@ -182,39 +223,70 @@ export function TicketDetailPage() {
       }
       setResolutionNotes('');
       return;
-    } else if (activeActionTab === 'escalate_brand') {
-      await updateTicket.mutateAsync({
-        status: 'in_progress',
-        assignedToTier: 'brand_support',
-        resolution: `Escalated to Tier 2 (Brand Support): ${resolutionNotes.trim() || 'Franchise/Brand policy review required'}`,
-      });
-      setSuccessMessage('Successfully escalated to Tier 2 (Brand Support Team).');
-    } else if (activeActionTab === 'escalate_dev') {
-      await updateTicket.mutateAsync({
-        status: 'in_progress',
-        assignedToTier: 'developer_team',
-        resolution: `Escalated to Tier 3 (Developer Team): ${resolutionNotes.trim() || 'Technical investigation / API gateway timeout'}`,
-      });
-      setSuccessMessage('Successfully escalated to Tier 3 (Developer Team). P0 Diagnostic snapshot generated.');
     } else {
-      await updateTicket.mutateAsync({
-        status: 'resolved',
-        resolution: resolutionNotes.trim() || `Resolved by ${user?.name || 'Staff'} (${user?.role || 'team'})`,
-      });
-      setSuccessMessage('Incident marked as resolved.');
+      // The three non-money actions: one guard so a rejected server call can
+      // never look like a success (spinner, error banner, ticket unchanged).
+      // Routes: POST /tickets/escalate (branch-scoped, notified) and
+      // POST /tickets/resolveNote (staff-only, timeline-appended).
+      setIsResolving(true);
+      try {
+        if (activeActionTab === 'escalate_brand') {
+          await partnerFunctionsApi.escalateTicket({
+            ticketId: id || '',
+            targetTier: 'brand_support',
+            reason: resolutionNotes.trim() || 'Franchise/Brand policy review required',
+          });
+          await refreshTicket();
+          setSuccessMessage('Escalated to Tier 2 (Brand Support) — the ticket timeline is updated.');
+        } else if (activeActionTab === 'escalate_dev') {
+          const result: any = await partnerFunctionsApi.escalateTicket({
+            ticketId: id || '',
+            targetTier: 'developer_team',
+            reason: resolutionNotes.trim() || 'Technical investigation / API gateway timeout',
+          });
+          await refreshTicket();
+          const snapshotId = result?.snapshotId;
+          setSuccessMessage(
+            `Escalated to Tier 3 (Developer Team).${snapshotId ? ` Diagnostic snapshot ${snapshotId} recorded.` : ''}`
+          );
+        } else {
+          await partnerFunctionsApi.resolveTicketNote({
+            ticketId: id || '',
+            resolution: resolutionNotes.trim() || `Resolved by ${user?.name || 'Staff'} (${user?.role || 'team'})`,
+          });
+          await refreshTicket();
+          setSuccessMessage('Incident marked as resolved.');
+        }
+        setResolutionNotes('');   // clear only on success — retries keep the notes
+      } catch (err) {
+        setActionError(
+          err instanceof Error
+            ? err.message
+            : 'Request failed — the ticket was not changed. Retry or escalate later.'
+        );
+      } finally {
+        setIsResolving(false);
+      }
     }
-
-    setResolutionNotes('');
   };
 
   const handleSendReply = async () => {
     if (!replyText.trim()) return;
-    await addMessage.mutateAsync({
-      text: replyText.trim(),
-      authorName: user?.name || 'Store Staff',
-      authorRole: user?.role || 'branch_staff',
-    });
-    setReplyText('');
+    // authorRole is intentionally NOT sent: the legacy fallback derives the
+    // timeline actor role from the session store, never from screen props.
+    // L5: a rejected send must be reported, not swallowed — and the draft is
+    // cleared only once the server call resolves.
+    try {
+      await addMessage.mutateAsync({
+        text: replyText.trim(),
+        authorName: user?.name || 'Store Staff',
+      });
+      setReplyText('');
+    } catch (err) {
+      toast.error('Reply NOT sent.', {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    }
   };
 
   return (
@@ -375,8 +447,9 @@ export function TicketDetailPage() {
           </div>
         </div>
 
-        {/* Developer Diagnostics Drawer (Tier 3 or when diagnostics present) */}
-        {(assignedTier === 'developer_team' || Object.keys(diagnostics).length > 0) && (
+        {/* Developer Diagnostics Drawer — role-gated (developer/brand_owner
+            only, fail-closed) and only for Tier 3 or when diagnostics present) */}
+        {canViewDiagnostics && (assignedTier === 'developer_team' || Object.keys(diagnostics).length > 0) && (
           <div className="bg-[#0A0C0A] border-2 border-rose-800/60 rounded-2xl p-4 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -406,7 +479,7 @@ export function TicketDetailPage() {
               </div>
               <div className="bg-[#112415] p-2.5 rounded-xl border border-border">
                 <span className="text-zinc-500 block">Client Platform</span>
-                <span className="text-cyan-400 font-bold">{diagnostics.clientAppVersion || 'v2.4.1 (Web)'}</span>
+                <span className="text-cyan-400 font-bold">{diagnostics.clientAppVersion || 'Unknown'}</span>
               </div>
             </div>
 
@@ -529,7 +602,7 @@ export function TicketDetailPage() {
                 )}
 
                 <p className="text-[11px] text-zinc-400">
-                  ⚡ Auto-invokes <code className="text-amber-400">autoRefund</code> Cloud Function with Razorpay Route split reversal (net branch deduction).
+                  Refunds are processed server-side. Nothing moves until the server confirms, and the result appears in this ticket's audit trail.
                 </p>
               </div>
             )}
@@ -578,7 +651,7 @@ export function TicketDetailPage() {
               <div className="bg-[#112415] p-4 rounded-xl border border-border text-xs text-rose-300 space-y-1">
                 <span className="font-bold">P0 Bug Escalation:</span>
                 <p className="text-[11px] text-zinc-400">
-                  Generates an immutable <code className="text-amber-400">dev_error_snapshots</code> document containing transaction IDs, API error stack traces, and client version context for lead developer triaging.
+                  Sends this ticket to the developer team with technical context (order, transaction, and error references) attached for investigation.
                 </p>
               </div>
             )}
@@ -598,7 +671,7 @@ export function TicketDetailPage() {
             {/* Submit Action Button */}
             <button
               onClick={handleExecuteAction}
-              disabled={updateTicket.isPending || isResolving || !!partialRefundError}
+              disabled={isResolving || !!partialRefundError}
               className="w-full py-2.5 rounded-xl bg-accent hover:bg-accent-hover text-white font-black text-xs uppercase tracking-wider shadow-md transition-colors cursor-pointer min-h-[44px]"
             >
               {isResolving ? 'Processing Server Action…' : (

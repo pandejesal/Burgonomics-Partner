@@ -811,7 +811,12 @@ export const BURGONOMICS_63_ITEMS: Omit<MenuItem, 'lastSyncedAt'>[] = [
  * stamping `lastSyncedAt` per doc. No seeds are written in live mode.
  *
  * MOCK (default): seeds the branch menu from the built-in catalog so the
- * app runs fully offline without credentials.
+ * app runs fully offline without credentials — DEV BUILDS ONLY. The built-in
+ * catalog is DEMO data (ids like prd_jr_hero carry invented PP-BRG-*
+ * petpoojaItemIds); a production mock build refuses instead of persisting it
+ * into `menu/{branchId}/…`, the very collection the live ingestion writes
+ * once the outlet is linked. Production mock builds never assume
+ * demonstration data was reality.
  */
 export async function syncPetpoojaMenuForBranch(branchId: string): Promise<{
   categoriesSynced: number;
@@ -819,7 +824,13 @@ export async function syncPetpoojaMenuForBranch(branchId: string): Promise<{
   syncedAt: Date;
 }> {
   const { petpoojaGateway } = await import("@/core/integrations/petpooja");
-  if (petpoojaGateway.implementation === "live") {
+  // P0-2: defer the Proxy flag-check — this async fn already turned the sync
+  // throw into a rejection, so semantics are unchanged (off ⇒ still rejects
+  // fail-closed), it just can never be a bare synchronous access.
+  const implementation = await Promise.resolve().then(
+    () => petpoojaGateway.implementation,
+  );
+  if (implementation === "live") {
     const { partnerFunctionsApi } = await import("./partnerFunctionsApi");
     const res = await partnerFunctionsApi.syncPetpoojaMenu(branchId);
     return {
@@ -827,6 +838,18 @@ export async function syncPetpoojaMenuForBranch(branchId: string): Promise<{
       itemsSynced: res.itemCount ?? 0,
       syncedAt: new Date(),
     };
+  }
+
+  // ZERO-FABRICATION gate: the mock branch is the DEFAULT in every build
+  // without the live gateway, including production ones. Writing the demo
+  // catalog would persist invented PP-BRG-* items into menu/{branchId}/…
+  // with merge:true. Production refuses (consumers are catch-safe:
+  // PetpoojaStatusBadge marks status error; useMenu falls through); dev
+  // keeps the offline demo.
+  if (!import.meta.env.DEV) {
+    throw new Error(
+      "Petpooja sync is not live in this build — refusing to write demo catalog data into Firestore. Enable the live gateway or sync from a dev build."
+    );
   }
 
   const batch = writeBatch(db);
@@ -872,6 +895,19 @@ export async function syncPetpoojaMenuForBranch(branchId: string): Promise<{
 
 /**
  * Check if the branch menu requires an hourly sync (canonical `products`).
+ *
+ * Honesty contract:
+ * - The staleness input is the OLDEST valid `lastSyncedAt` across ALL product
+ *   docs for the branch (docs whose stamp is missing/corrupt count as unknown
+ *   and are ignored; a branch with NO valid stamps must sync) — the menu is
+ *   as fresh as its least-recently-synced item. A `where`-only Firestore
+ *   query returns documents in unspecified order, so reading `docs[0]` (the
+ *   previous behaviour) answered with whichever document happened to come
+ *   back first and could hide a stale menu behind one freshly re-stamped
+ *   item.
+ * - A read or sync failure is surfaced (thrown) instead of returning
+ *   `false`; a failed gate must never be indistinguishable from "menu fresh,
+ *   no sync needed". The single consumer (useMenu) already catches and logs.
  */
 export async function checkAndAutoSyncMenu(branchId: string): Promise<boolean> {
   try {
@@ -884,15 +920,26 @@ export async function checkAndAutoSyncMenu(branchId: string): Promise<boolean> {
       return true;
     }
 
-    const firstDoc = itemsSnap.docs[0].data();
-    const lastSynced: Timestamp | undefined = firstDoc.lastSyncedAt;
+    const stampMillis: number[] = [];
+    for (const docSnap of itemsSnap.docs) {
+      const stamp = (docSnap.data() as { lastSyncedAt?: Timestamp }).lastSyncedAt;
+      const millis = stamp?.toMillis?.();
+      if (typeof millis === 'number' && Number.isFinite(millis)) {
+        stampMillis.push(millis);
+      }
+      // Stamps that are missing, non-Timestamp, or non-finite stand for an
+      // UNKNOWN sync time — they cannot make the branch look fresh, so they
+      // are excluded rather than trusted. A branch with NO valid stamp at
+      // all must sync.
+    }
 
-    if (!lastSynced) {
+    if (stampMillis.length === 0) {
       await syncPetpoojaMenuForBranch(branchId);
       return true;
     }
 
-    const ageInHours = (Date.now() - lastSynced.toMillis()) / (1000 * 60 * 60);
+    const oldestMillis = stampMillis.reduce((min, n) => (n < min ? n : min), stampMillis[0]);
+    const ageInHours = (Date.now() - oldestMillis) / (1000 * 60 * 60);
     if (ageInHours >= 1) {
       await syncPetpoojaMenuForBranch(branchId);
       return true;
@@ -900,7 +947,9 @@ export async function checkAndAutoSyncMenu(branchId: string): Promise<boolean> {
 
     return false;
   } catch (err) {
-    console.warn('Error during auto-sync check:', err);
-    return false;
+    console.warn(`Error during auto-sync check for branch ${branchId}:`, err);
+    throw err instanceof Error
+      ? err
+      : new Error(`Menu auto-sync check failed for branch ${branchId}`, { cause: err });
   }
 }

@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { logger } from '@/core/logging/logger';
 import { secureStorage, SECURE_KEYS } from '@/core/storage/secureStorage';
 import { isSafeDeepLink } from '@/utils/urlSafety';
+import { clampPushBranchSelection, navigateInApp } from '@/shared/platform/deepLinkRouter';
 import type { User } from '@/types';
 
 let listenersAttached = false;
@@ -93,6 +94,40 @@ async function currentStoreUser(fallback?: User | null): Promise<User | null> {
   } catch {
     return fallback || null;
   }
+}
+
+/**
+ * Opens an order/ticket push target.
+ *
+ * Two bugs fixed here:
+ * 1. ROUTER FLAVOUR — native shells mount HashRouter (App.tsx), so
+ *    `window.location.href = '/orders/x'` navigated the WebView to a literal
+ *    `file:///orders/x` document that does not exist and the in-app router
+ *    never saw the route. navigateInApp() picks `#/orders/x` on native and
+ *    `/orders/x` on web.
+ * 2. OUTLET — the deep link never selected an outlet, so the order screen
+ *    opened scoped to whatever outlet happened to be persisted. The payload's
+ *    branchId is now applied first, CLAMPED to the session's RBAC scope
+ *    (a push payload is attacker-controllable input and must never widen
+ *    what this operator may read).
+ */
+async function openPushTarget(path: string, branchId: unknown): Promise<void> {
+  if (typeof branchId === 'string' && branchId) {
+    try {
+      const [{ useAppStore }, { useAuthStore }, { resolveScopedBranchIds }] = await Promise.all([
+        import('@/stores/appStore'),
+        import('@/stores/authStore'),
+        import('@/utils/branchScope'),
+      ]);
+      const user = useAuthStore.getState().user;
+      const allowed = clampPushBranchSelection(branchId, resolveScopedBranchIds(user, null));
+      if (allowed) useAppStore.getState().setSelectedBranchId(allowed);
+    } catch {
+      // A store failure must never block navigation — the route still opens
+      // against the currently selected outlet.
+    }
+  }
+  navigateInApp(path);
 }
 
 /** Desired topics for a user (branch + escalation fan-out per role). */
@@ -231,14 +266,14 @@ async function attachListenersOnce(): Promise<void> {
           ? {
               label: 'View Order',
               onClick: () => {
-                window.location.href = `/orders/${orderId}`;
+                void openPushTarget(`/orders/${orderId}`, data.branchId);
               },
             }
           : ticketId && (!kind || kind === 'ticket' || kind === 'ticket_escalated' || kind === 'ticket_reminder')
             ? {
                 label: 'View Ticket',
                 onClick: () => {
-                  window.location.href = `/tickets/${ticketId}`;
+                  void openPushTarget(`/tickets/${ticketId}`, data.branchId);
                 },
               }
             : undefined;
@@ -276,11 +311,11 @@ async function attachListenersOnce(): Promise<void> {
 
       if (orderId && (!kind || kind === 'order' || kind === 'NEW_KOT' || kind === 'payment_captured')) {
         setTimeout(() => {
-          window.location.href = `/orders/${orderId}`;
+          void openPushTarget(`/orders/${orderId}`, data.branchId);
         }, 100);
       } else if (ticketId && (!kind || kind === 'ticket' || kind === 'ticket_escalated' || kind === 'ticket_reminder')) {
         setTimeout(() => {
-          window.location.href = `/tickets/${ticketId}`;
+          void openPushTarget(`/tickets/${ticketId}`, data.branchId);
         }, 100);
       } else if (typeof data.deepLink === 'string' && isSafeDeepLink(data.deepLink)) {
         // Loop 11: campaign deep links (burgonomics://menu, owned https) used
@@ -290,7 +325,7 @@ async function attachListenersOnce(): Promise<void> {
         const path = toInAppPath(data.deepLink);
         if (path) {
           setTimeout(() => {
-            window.location.href = path;
+            navigateInApp(path);
           }, 100);
         }
       }

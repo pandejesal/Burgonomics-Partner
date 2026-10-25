@@ -49,7 +49,8 @@ export const adminPaymentsService = {
       (snapshot) => {
         const liveRefunds: RefundDetails[] = [];
         snapshot.forEach((docSnap) => {
-          liveRefunds.push(docSnap.data() as RefundDetails);
+          const data = docSnap.data() as RefundDetails;
+          liveRefunds.push({ ...data, id: docSnap.id });
         });
         onUpdate(liveRefunds);
       },

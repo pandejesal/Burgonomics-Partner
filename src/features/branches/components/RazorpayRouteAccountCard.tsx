@@ -1,5 +1,5 @@
 import React from 'react';
-import { CreditCard, DollarSign, Lock, ShieldCheck, CheckCircle2, AlertCircle } from 'lucide-react';
+import { CreditCard, Lock, CheckCircle2, AlertCircle } from 'lucide-react';
 
 interface RazorpayRouteAccountCardProps {
   accountId: string;
@@ -9,6 +9,26 @@ interface RazorpayRouteAccountCardProps {
   disabled?: boolean;
 }
 
+/**
+ * Razorpay Route linked-account ids are `acc_` + the account suffix
+ * (alphanumerics; real ids are 14 chars, kept >=6 here so a future length
+ * change cannot reject valid ids). A bare "acc_" or arbitrary text must never
+ * count as linked: the branch config would persist it and the Route transfer
+ * would then fail at the gateway (transfer.failed parked for review).
+ * Note: underscores are rejected on purpose — real ids are alphanumeric
+ * (`acc_00000000000001`); the repo's `acc_Rzp_Surat_01` fixtures are demo
+ * data, and `useAnalytics` already refuses to treat them as real accounts.
+ */
+const ROUTE_ACCOUNT_ID_PATTERN = /^acc_[A-Za-z0-9]{6,}$/;
+
+export function normalizeRouteAccountId(raw: string): string {
+  return typeof raw === 'string' ? raw.trim() : '';
+}
+
+export function isValidRouteAccountId(raw: string): boolean {
+  return ROUTE_ACCOUNT_ID_PATTERN.test(normalizeRouteAccountId(raw));
+}
+
 export function RazorpayRouteAccountCard({
   accountId,
   onChange,
@@ -16,7 +36,9 @@ export function RazorpayRouteAccountCard({
   isSuperAdmin = true,
   disabled = false,
 }: RazorpayRouteAccountCardProps) {
-  const isLinked = !!accountId && accountId.startsWith('acc_');
+  const normalizedAccountId = normalizeRouteAccountId(accountId);
+  const isLinked = isValidRouteAccountId(normalizedAccountId);
+  const showFormatError = normalizedAccountId.length > 0 && !isLinked;
   const franchiseSharePercent = (100 - brandRoyaltyPercent).toFixed(1);
 
   return (
@@ -49,16 +71,22 @@ export function RazorpayRouteAccountCard({
 
       {/* Account Input */}
       <div className="space-y-1">
-        <label className="block text-[11px] font-semibold text-zinc-300">
+        <label
+          htmlFor="razorpay-route-account-id"
+          className="block text-[11px] font-semibold text-zinc-300"
+        >
           Razorpay Linked Account ID (acc_xxxx)
         </label>
         <div className="relative">
           <input
+            id="razorpay-route-account-id"
             type="text"
-            placeholder="acc_Rzp_Surat_01"
-            value={accountId}
+            placeholder="acc_RzpSurat01"
+            value={normalizedAccountId}
             disabled={!isSuperAdmin || disabled}
-            onChange={(e) => onChange(e.target.value.trim())}
+            aria-invalid={showFormatError}
+            aria-describedby={showFormatError ? "route-account-id-error" : undefined}
+            onChange={(e) => onChange(normalizeRouteAccountId(e.target.value))}
             className="w-full px-3 py-2 text-xs bg-[#112415] border border-[#1E3A24] rounded-xl text-white font-mono placeholder-zinc-600 focus:outline-none focus:border-[#4ADE80] disabled:opacity-60 disabled:cursor-not-allowed"
           />
           {!isSuperAdmin && (
@@ -68,6 +96,13 @@ export function RazorpayRouteAccountCard({
             </div>
           )}
         </div>
+        {showFormatError && (
+          <p id="route-account-id-error" className="text-[10px] text-amber-400" role="alert">
+            This does not look like a Razorpay Route account id (acc_ + at least 6 letters or
+            digits). Check it in the Razorpay dashboard before saving — payouts to an unlinked
+            branch fail.
+          </p>
+        )}
       </div>
 
       {/* Royalty Split Breakdown */}

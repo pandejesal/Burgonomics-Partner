@@ -3,7 +3,7 @@ import { RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { syncPetpoojaMenuForBranch } from '@/services/petpoojaSync';
 
 interface PetpoojaStatusBadgeProps {
-  branchId?: string;
+  branchId: string;
   onSyncComplete?: () => void;
 }
 
@@ -31,7 +31,7 @@ export function petpoojaBadgeMeta(status: PetpoojaBadgeStatus): {
 }
 
 export const PetpoojaStatusBadge: React.FC<PetpoojaStatusBadgeProps> = ({
-  branchId = 'branch_surat_01',
+  branchId,
   onSyncComplete,
 }) => {
   const [syncing, setSyncing] = useState(false);
@@ -59,7 +59,8 @@ export const PetpoojaStatusBadge: React.FC<PetpoojaStatusBadgeProps> = ({
   };
 
   return (
-    <div className="flex items-center space-x-2 bg-surface/80 border border-border px-3 py-1.5 rounded-full text-xs text-white">
+    <div
+      className="flex shrink-0 items-center space-x-1.5 bg-surface/80 border border-border px-2 sm:px-2.5 py-1.5 rounded-full text-xs text-white">
       <span className="flex h-2 w-2 relative">
         <span
           className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${petpoojaBadgeMeta(status).dot}`}
@@ -69,7 +70,7 @@ export const PetpoojaStatusBadge: React.FC<PetpoojaStatusBadgeProps> = ({
         />
       </span>
 
-      <span className="font-medium text-zinc-300 hidden sm:inline">Petpooja POS:</span>
+      <span className="font-medium text-zinc-300 hidden lg:inline">Petpooja POS:</span>
       <span
         className="font-semibold uppercase tracking-wider text-[10px] text-zinc-300"
         title={
@@ -81,7 +82,7 @@ export const PetpoojaStatusBadge: React.FC<PetpoojaStatusBadgeProps> = ({
         {petpoojaBadgeMeta(status).label}
       </span>
 
-      <span className="text-zinc-500 hidden md:inline text-[11px]">({lastSyncTime})</span>
+      <span className="text-zinc-500 hidden xl:inline text-[11px]">({lastSyncTime})</span>
 
       <button
         onClick={handleManualSync}

@@ -25,8 +25,6 @@ import {
   Trash2,
   Play,
 } from "lucide-react";
-import { useAdminAuthStore } from "../store/adminAuthStore";
-
 import { appConfig } from "@/core/config/env";
 
 interface SystemOperationsLayoutProps {

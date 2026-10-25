@@ -22,8 +22,8 @@ Write-Host "=========================================================="
 
 # 1. Reset App to Dashboard
 Write-Host "`n[1] Starting App on Dashboard..."
-& $adb -s $device shell am force-stop com.glassdoorsstudio.burgonomics.partner
-& $adb -s $device shell am start -n com.glassdoorsstudio.burgonomics.partner/.MainActivity
+& $adb -s $device shell am force-stop com.burgonomics.partner
+& $adb -s $device shell am start -n com.burgonomics.partner/.MainActivity
 Start-Sleep -Seconds 4
 Capture-Screen "screen_01_dashboard.png"
 

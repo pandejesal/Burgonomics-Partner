@@ -22,7 +22,7 @@ import { PageHeader } from "../components/Headers";
 import { AdminCard } from "../components/Cards";
 import { AdminButton } from "../components/Buttons";
 import { customerStorage, SavedSegment, CustomerProfile } from "./customersData";
-import { marketingStorage } from "./marketingData";
+import { marketingStorage, MarketingCampaign } from "./marketingData";
 
 export const AdminCreateCampaignPage: React.FC = () => {
   const navigate = useNavigate();
@@ -34,7 +34,7 @@ export const AdminCreateCampaignPage: React.FC = () => {
   const [campaignName, setCampaignName] = useState("");
   const [campaignDesc, setCampaignDesc] = useState("");
   const [objective, setObjective] = useState<MarketingCampaign["objective"]>("Sales Conversion");
-  const [channels, setChannels] = useState<string[]>(["Push"]);
+  const [channels, setChannels] = useState<MarketingCampaign["channels"]>(["Push"]);
 
   const [audienceType, setAudienceType] = useState<MarketingCampaign["audienceType"]>("Entire Base");
   const [selectedSegmentId, setSelectedSegmentId] = useState("");
@@ -60,7 +60,7 @@ export const AdminCreateCampaignPage: React.FC = () => {
     setCustomers(customerStorage.getCustomers());
   }, []);
 
-  const toggleChannel = (chan: string) => {
+  const toggleChannel = (chan: MarketingCampaign["channels"][number]) => {
     setChannels((prev) => (prev.includes(chan) ? prev.filter((c) => c !== chan) : [...prev, chan]));
   };
 
@@ -130,7 +130,7 @@ export const AdminCreateCampaignPage: React.FC = () => {
       name: campaignName,
       description: campaignDesc || `Campaign pushing ${msgTitle}`,
       objective,
-      channels: channels as Array<"Push" | "SMS" | "WhatsApp" | "Email" | "In-App">,
+      channels,
       status: scheduleType === "now" ? "Active" : "Scheduled",
       audienceType,
       audienceFilterValue: audienceVal,
@@ -246,13 +246,13 @@ export const AdminCreateCampaignPage: React.FC = () => {
                     Campaign Strategic Objective
                   </label>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {[
+                    {([
                       "Sales Conversion",
                       "User Retention",
                       "Brand Awareness",
                       "Re-engagement",
                       "Feedback Survey",
-                    ].map((obj) => (
+                    ] as const).map((obj) => (
                       <button
                         key={obj}
                         type="button"
@@ -275,12 +275,12 @@ export const AdminCreateCampaignPage: React.FC = () => {
                     Gateway Channels (Multi-Select)
                   </label>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    {[
+                    {([
                       { id: "Push", label: "App Push", icon: Bell },
                       { id: "WhatsApp", label: "WhatsApp", icon: Phone },
                       { id: "SMS", label: "SMS Gateway", icon: MessageSquare },
                       { id: "Email", label: "Email Blast", icon: Mail },
-                    ].map((item) => {
+                    ] as const).map((item) => {
                       const isSelected = channels.includes(item.id);
                       const Icon = item.icon;
                       return (
@@ -314,7 +314,7 @@ export const AdminCreateCampaignPage: React.FC = () => {
                     Target Recipient Filter
                   </label>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {[
+                    {([
                       {
                         id: "Entire Base",
                         label: "Entire Customer Base",
@@ -345,7 +345,7 @@ export const AdminCreateCampaignPage: React.FC = () => {
                         label: "Manual Direct List",
                         desc: "Select specific individual customers",
                       },
-                    ].map((item) => (
+                    ] as const).map((item) => (
                       <button
                         key={item.id}
                         type="button"
@@ -783,7 +783,7 @@ export const AdminCreateCampaignPage: React.FC = () => {
         <div className="space-y-6">
           <AdminCard
             title="Channel Preview"
-            subtitle="Live preview of how the alert renders on a customer phone"
+            subtitle="Preview of how the alert renders on a customer phone"
           >
             {/* Phone shell container */}
             <div className="relative mx-auto max-w-[280px] h-[520px] rounded-[36px] border-[12px] border-gray-900 dark:border-gray-800 bg-gray-100 dark:bg-[#121212] overflow-hidden shadow-2xl flex flex-col">

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Clock, Activity, Database } from "lucide-react";
+import { Clock, Activity, Database, Server } from "lucide-react";
 
 export const SystemMetricsTab: React.FC = () => {
   const [metricView, setMetricView] = useState<"http" | "infrastructure" | "integration">("http");

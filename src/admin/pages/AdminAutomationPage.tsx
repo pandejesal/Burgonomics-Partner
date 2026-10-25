@@ -32,7 +32,7 @@ export const AdminAutomationPage: React.FC = () => {
   // Form states
   const [flowName, setFlowName] = useState("");
   const [flowDesc, setFlowDesc] = useState("");
-  const [triggerType, setTriggerType] = useState<string>("Registration");
+  const [triggerType, setTriggerType] = useState<MarketingAutomation["triggerType"]>("Registration");
 
   useEffect(() => {
     const flows = marketingStorage.getAutomations();
@@ -405,7 +405,7 @@ export const AdminAutomationPage: React.FC = () => {
                 </label>
                 <select
                   value={triggerType}
-                  onChange={(e) => setTriggerType(e.target.value)}
+                  onChange={(e) => setTriggerType(e.target.value as MarketingAutomation["triggerType"])}
                   className="w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-black px-3 py-2 text-sm focus:outline-none dark:text-white"
                 >
                   <option value="Registration">Customer Registration</option>

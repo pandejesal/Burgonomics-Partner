@@ -87,7 +87,7 @@ export const GlobalAlerts: React.FC = () => {
             <div className="p-1 rounded-xl bg-white/20 dark:bg-black/10 shrink-0">
               <Icon size={18} />
             </div>
-            <div className="flex-1 pr-6">
+            <div className="flex-1 pr-12">
               <span className="block font-bold text-xs tracking-tight uppercase">
                 {alert.title}
               </span>
@@ -95,7 +95,8 @@ export const GlobalAlerts: React.FC = () => {
             </div>
             <button
               onClick={() => dismissAlert(alert.id)}
-              className="absolute top-4 right-4 text-current opacity-60 hover:opacity-100 p-0.5 rounded-lg hover:bg-black/5"
+              className="absolute top-2 right-2 flex min-h-[44px] min-w-[44px] items-center justify-center text-current opacity-60 hover:opacity-100 rounded-xl hover:bg-black/5 cursor-pointer"
+              aria-label={`Dismiss alert: ${alert.title}`}
             >
               <X size={14} />
             </button>

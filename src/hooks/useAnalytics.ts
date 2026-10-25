@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore';
 import { startOfWeek, startOfMonth, subDays, format } from 'date-fns';
 import { fetchAliasedStoreOrders, normalizeOrderDoc } from '@/utils/orderContract';
+import { FIRESTORE_IN_LIMIT, isGlobalRole, resolveScopedBranchIds } from '@/utils/branchScope';
 
 export interface DailyRevenue {
   date: string;
@@ -112,29 +113,64 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         },
       };
 
-      try {
-        if (selectedBranchId && selectedBranchId !== 'all') {
-          branchIds = [selectedBranchId];
-        } else if (['brand_owner', 'developer', 'support'].includes(user.role)) {
-          const branchesSnap = await getDocs(
-            query(collection(db, 'branches'), limit(100))
+      // Empty, honest result for fail-closed scopes (assigned branches
+      // missing) — never unfiltered brand-wide numbers for a scoped role.
+      const emptyResult = (warning: string): AnalyticsResult => ({
+        period,
+        totalRevenue: 0,
+        totalOrders: 0,
+        averageOrderValue: 0,
+        brandRoyaltyEarned: 0,
+        netBranchPayoutTotal: 0,
+        dailyRevenue: [],
+        topItems: [],
+        branchStats: [],
+        hourlyRush: [],
+        fulfillmentBreakdown: [],
+        logistics: {
+          deliveryFeesCollected: 0,
+          porterIncurredCost: 0,
+          netMargin: 0,
+          totalDeliveryTrips: 0,
+          avgDeliveryDistanceKm: 0,
+        },
+        warnings: [warning],
+      });
+
+      // Scope resolution — branch_owner/branch_staff are CLAMPED to their
+      // assigned branches. The old code read selectedBranchId straight from
+      // localStorage (user-writable!) before any role check, so a forged
+      // selection handed any branch owner the whole brand's revenue and
+      // royalty ledger; and an unassigned scoped role fell through to an
+      // unfiltered all-outlets read. resolveScopedBranchIds fails closed.
+      if (!isGlobalRole(user.role)) {
+        branchIds = resolveScopedBranchIds(user, selectedBranchId);
+        if (branchIds.length === 0) {
+          return emptyResult(
+            'No branches are assigned to your account — analytics are scoped to your outlets.'
           );
-          branchesSnap.docs.forEach((d) => {
-            branchIds.push(d.id);
-            const data = d.data();
-            branchMeta[d.id] = {
-              name: data.name || d.id,
-              city: data.city || 'Gujarat',
-              accountId: data.razorpayAccountId || `acc_Rzp_${d.id}`,
-            };
-          });
-        } else if (user.role === 'regional_manager') {
-          const cityIds = user.cityIds?.length ? user.cityIds : ['Ahmedabad', 'Surat'];
+        }
+      }
+
+      try {
+        if (user.role === 'regional_manager') {
+          // Regional managers are CITY-scoped, so their city check runs
+          // BEFORE the explicit-selection short-circuit: a forged or stale
+          // localStorage `selectedBranchId` must never widen them past their
+          // assigned cities (the old code took it verbatim). Fail closed: no
+          // assigned cities means NO analytics scope, never a two-city guess.
+          const cityIds = user.cityIds ?? [];
+          if (cityIds.length === 0) {
+            return emptyResult(
+              'No cities are assigned to your account - analytics are scoped to your cities.'
+            );
+          }
           const branchesSnap = await getDocs(
             query(collection(db, 'branches'), where('city', 'in', cityIds), limit(100))
           );
+          const allowedBranchIds = new Set<string>();
           branchesSnap.docs.forEach((d) => {
-            branchIds.push(d.id);
+            allowedBranchIds.add(d.id);
             const data = d.data();
             branchMeta[d.id] = {
               name: data.name || d.id,
@@ -142,14 +178,53 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
               accountId: data.razorpayAccountId || `acc_Rzp_${d.id}`,
             };
           });
-        } else {
-          // Loop 51/120: no hardcoded fallback outlet — unassigned staff see
-          // unfiltered analytics, never another branch's numbers as their own.
-          const userBranches = user.branchIds?.length ? user.branchIds : [];
-          branchIds.push(...userBranches);
+          if (
+            selectedBranchId &&
+            selectedBranchId !== 'all' &&
+            !allowedBranchIds.has(selectedBranchId)
+          ) {
+            return emptyResult(
+              'Selected outlet is outside your assigned cities - analytics are scoped to your cities.'
+            );
+          }
+          branchIds =
+            selectedBranchId && selectedBranchId !== 'all'
+              ? [selectedBranchId]
+              : [...allowedBranchIds];
+          if (branchIds.length === 0) {
+            // Mirrors useTickets: a city scope that resolves to no outlets is
+            // a denial, never an unfiltered all-outlets read.
+            return emptyResult(
+              'No outlets were found in your assigned cities - analytics are scoped to your cities.'
+            );
+          }
+        } else if (isGlobalRole(user.role)) {
+          if (selectedBranchId && selectedBranchId !== 'all') {
+            branchIds = [selectedBranchId];
+          } else if (['brand_owner', 'developer', 'support'].includes(user.role)) {
+            const branchesSnap = await getDocs(
+              query(collection(db, 'branches'), limit(100))
+            );
+            branchesSnap.docs.forEach((d) => {
+              branchIds.push(d.id);
+              const data = d.data();
+              branchMeta[d.id] = {
+                name: data.name || d.id,
+                city: data.city || 'Gujarat',
+                accountId: data.razorpayAccountId || `acc_Rzp_${d.id}`,
+              };
+            });
+          }
         }
       } catch (err) {
         console.warn('Error querying branches for analytics:', err);
+        // Fail CLOSED for every role whose scope needed this read: an
+        // unresolved scope must never fall through to an unfiltered,
+        // all-outlets orders read. Brand-wide roles are the only exception
+        // (their empty scope genuinely means "all outlets").
+        if (user.role === 'regional_manager' || !isGlobalRole(user.role)) {
+          return emptyResult('Could not resolve your outlet scope - analytics are not shown.');
+        }
         warnings.push('Branch list failed to load — figures cover all outlets.');
       }
 
@@ -177,11 +252,14 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
       try {
         // Loop 51/120: bounded — a year view must not pull unbounded history.
         const ORDER_CAP = 2000;
+        // `in` + `createdAt >=` + `orderBy createdAt` needs the composite
+        // index. An undeployed index is a query error, never an unordered
+        // page: arbitrary documents must not be presented as period totals.
         const ordersQuery =
           branchIds.length > 0
             ? query(
                 collection(db, 'orders'),
-                where('branchId', 'in', branchIds.slice(0, 10)),
+                where('branchId', 'in', branchIds.slice(0, FIRESTORE_IN_LIMIT)),
                 where('createdAt', '>=', startTimestamp),
                 orderBy('createdAt', 'asc'),
                 limit(ORDER_CAP)
@@ -193,13 +271,13 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
                 limit(ORDER_CAP)
               );
 
+        let rawDocs: Array<{ id: string; data: Record<string, any> }>;
         const ordersSnap = await getDocs(ordersQuery);
-
-        // Normalize: delivery-app docs share this collection with a nested shape.
-        const rawDocs = ordersSnap.docs.map((d) => ({
+        rawDocs = ordersSnap.docs.map((d) => ({
           id: d.id,
           data: d.data() as Record<string, any>,
         }));
+
         // Linked Delivery stores (registry; no extra reads when unmapped).
         if (branchIds.length > 0) {
           try {
@@ -216,9 +294,17 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
             warnings.push('Linked delivery stores could not be loaded.');
           }
         }
+        // The aliased merge carries pre-range docs — narrow to the period in
+        // memory, where Timestamp and ISO-string createdAt both compare
+        // correctly. An unparseable date is excluded, never counted.
         orders = rawDocs
           .map((d) => normalizeOrderDoc(d.id, d.data))
-          .filter((o: any) => !branchIds.length || (o.branchId && branchIds.includes(o.branchId)));
+          .filter((o: any) => !branchIds.length || (o.branchId && branchIds.includes(o.branchId)))
+          .filter((o: any) => {
+            const c = (o as any).createdAt;
+            const ms = c?.toMillis?.() ?? (c?.toDate ? c.toDate().getTime() : new Date(c ?? 0).getTime());
+            return Number.isFinite(ms) ? ms >= startDate.getTime() : false;
+          });
       } catch (err) {
         console.warn('Error querying orders for analytics:', err);
         warnings.push('Order data failed to load — figures below are incomplete.');
@@ -468,10 +554,15 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         .reduce((s, o) => s + (Number((o as any).deliveryFee) || 0), 0);
       const deliveryOrders = chanAgg.delivery.orders;
 
+      // No Porter billing source is wired: the courier cost is UNKNOWN, not
+      // zero. It is reported as 0 here and the UI withholds any margin verdict
+      // while cost === 0 beside live trips (see FulfillmentDonut).
+      const porterIncurredCost = 0;
+
       const logistics: LogisticsSummary = {
         deliveryFeesCollected: Math.round(deliveryFeesCollected),
-        porterIncurredCost: 0,
-        netMargin: Math.round(deliveryFeesCollected),
+        porterIncurredCost,
+        netMargin: Math.round(deliveryFeesCollected - porterIncurredCost),
         totalDeliveryTrips: deliveryOrders,
         avgDeliveryDistanceKm: 0,
       };

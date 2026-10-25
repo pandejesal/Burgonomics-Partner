@@ -47,18 +47,18 @@ export function BranchSwitcher() {
   // of trust (see resolveScopedBranchIds).
   if (!isGlobalRole) {
     return (
-      <div className="flex items-center space-x-2 px-3 py-1.5 bg-surface border border-border rounded-xl text-xs text-white">
-        <Store className="w-3.5 h-3.5 text-accent-light" />
-        <span className="font-semibold">{user?.branchIds?.[0] ? 'My Outlet' : 'Branch Scope'}</span>
+      <div className="flex min-w-0 items-center space-x-1.5 px-2.5 py-1.5 bg-surface border border-border rounded-xl text-xs text-white">
+        <Store className="w-3.5 h-3.5 shrink-0 text-accent-light" />
+        <span className="truncate font-semibold">{user?.branchIds?.[0] ? 'My Outlet' : 'Branch Scope'}</span>
       </div>
     );
   }
 
   return (
-    <div className="relative" ref={dropdownRef}>
+    <div className="relative min-w-0" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex min-w-0 max-w-[42vw] sm:max-w-none items-center space-x-2 px-3 py-1.5 bg-surface hover:bg-[#1A351F] border border-border rounded-xl text-xs text-white transition-colors cursor-pointer"
+        className="w-full flex min-w-0 max-w-[42vw] sm:max-w-none items-center space-x-2 px-3 py-1.5 bg-surface hover:bg-[#1A351F] border border-border rounded-xl text-xs text-white transition-colors cursor-pointer overflow-hidden"
       >
         {activeBranch ? (
           <>
@@ -73,7 +73,7 @@ export function BranchSwitcher() {
         ) : (
           <>
             <Globe className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
-            <span className="font-semibold truncate">All Outlets</span>
+            <span className="font-semibold truncate min-w-0">All Outlets</span>
           </>
         )}
         <ChevronDown className="w-3.5 h-3.5 shrink-0 text-zinc-400" />

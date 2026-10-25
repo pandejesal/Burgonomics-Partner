@@ -4,6 +4,7 @@ import { useNavigation } from '@/hooks/useNavigation';
 import { useAppStore } from '@/stores/appStore';
 import { useAuthStore } from '@/stores/authStore';
 import { clsx } from 'clsx';
+import { Logo } from '@/components/ui/Logo';
 import { User, Store, Shield } from 'lucide-react';
 
 export function Sidebar() {
@@ -28,9 +29,7 @@ export function Sidebar() {
             onClick={() => setSidebarOpen(false)}
             className="flex items-center space-x-2.5"
           >
-            <div className="w-8 h-8 rounded-xl bg-accent flex items-center justify-center font-black text-white text-base shadow-sm">
-              B
-            </div>
+            <Logo size={32} showText={false} className="shrink-0" />
             <div>
               <h1 className="text-base font-bold text-white tracking-wide">Burgonomics</h1>
               <p className="text-[10px] text-emerald-400 font-semibold uppercase tracking-wider">

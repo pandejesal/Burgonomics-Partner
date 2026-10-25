@@ -12,7 +12,6 @@ import {
   Layers,
   ChevronRight,
   ArrowUpRight,
-  Sparkles,
   Phone,
   CheckCircle,
   Clock,
@@ -146,13 +145,16 @@ export const AdminMarketingDashboard: React.FC = () => {
           title="Total Messages Dispatched"
           value={totalSent.toLocaleString()}
           icon={Mail}
-          trend={{ value: 12.8, label: "vs last month", isPositive: true }}
+          // P0-4 honesty: no prior-month trend — marketingStorage
+          // holds only current totals, no previous-period baseline to
+          // compare against. Omitted prop renders no chip.
         />
         <StatCard
           title="Consolidated CTR"
           value={`${clickThroughRate}%`}
           icon={Zap}
-          trend={{ value: 1.4, label: "Avg Open-to-Click", isPositive: true }}
+          // P0-4 honesty: no fabricated delta — a real trend needs a
+          // second measured period, which this data layer doesn't keep.
         />
         <StatCard
           title="Campaign Revenue"
@@ -163,38 +165,8 @@ export const AdminMarketingDashboard: React.FC = () => {
         />
       </div>
 
-      {/* Secondary quick action banners */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="md:col-span-2 rounded-[20px] bg-gradient-to-r from-primary/5 to-transparent border border-primary/10 p-6 flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">
-                <Sparkles size={12} />
-              </span>
-              <span className="text-xs font-bold text-primary uppercase tracking-widest font-mono">
-                AI SEGMENT SUGGESTION
-              </span>
-            </div>
-            <h3 className="text-lg font-black tracking-tight text-gray-900 dark:text-white">
-              Target Ahmedabad "At-Risk" Cohorts?
-            </h3>
-            <p className="text-sm text-gray-500 max-w-xl">
-              Our models indicate 312 premium tier members in Ahmedabad are reaching a 60-day
-              inactivity threshold. Launch a winback discount via WhatsApp template to stimulate
-              ₹1.2L potential sales.
-            </p>
-          </div>
-          <AdminButton
-            variant="primary"
-            size="sm"
-            onClick={() => void navigate("/admin/campaigns/create" )}
-            className="whitespace-nowrap shrink-0"
-          >
-            <span>Target Now</span>
-            <ChevronRight size={14} />
-          </AdminButton>
-        </div>
-
+      {/* Secondary quick action card */}
+      <div className="grid grid-cols-1 gap-6">
         <AdminCard className="flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-4">

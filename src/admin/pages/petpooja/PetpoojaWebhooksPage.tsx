@@ -32,21 +32,44 @@ export function PetpoojaWebhooksPage() {
   useEffect(() => {
     if (!isPlaying) return;
 
-    const unsubscribe = petpoojaGateway.subscribeWebhookLogs((records) => {
-      setWebhooks(records);
-      if (records.length > 0 && !selectedWh) {
-        setSelectedWh(records[0]);
-      }
-    });
+    // P0-2: subscribeWebhookLogs() throws synchronously when the gateway flag
+    // is off — defer it into the promise chain, cancel-safe: cleanup may run
+    // before the deferred subscribe resolves, so the subscription is handed
+    // straight back (unsubscribed) in that case instead of leaking.
+    let cancelled = false;
+    let unsubscribe: (() => void) | null = null;
 
-    return () => unsubscribe();
+    void Promise.resolve()
+      .then(() =>
+        petpoojaGateway.subscribeWebhookLogs((records) => {
+          if (cancelled) return;
+          setWebhooks(records);
+          if (records.length > 0 && !selectedWh) {
+            setSelectedWh(records[0]);
+          }
+        }),
+      )
+      .then((sub) => {
+        unsubscribe = sub;
+        if (cancelled) sub();
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
   }, [isPlaying, selectedWh]);
 
-  const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId("copied");
-    toast.success("Payload copied to clipboard.");
-    setTimeout(() => setCopiedId(null), 2000);
+  const handleCopy = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId("copied");
+      toast.success("Payload copied to clipboard.");
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      toast.error("Could not copy payload to clipboard. Please try again.");
+    }
   };
 
   // Search filter for webhook list

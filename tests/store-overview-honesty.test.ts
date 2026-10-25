@@ -10,12 +10,17 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('firebase/firestore', () => ({
+  // src/config/firebase.ts (pulled in via @/stores/authStore) calls
+  // getFirestore(app); authStore also binds doc/getDoc.
+  getFirestore: vi.fn(() => ({})),
   collection: vi.fn(() => ({})),
   collectionGroup: vi.fn(() => ({})),
   query: vi.fn(() => ({})),
   where: vi.fn(() => ({})),
   orderBy: vi.fn(() => ({})),
   limit: vi.fn(() => ({})),
+  doc: vi.fn(() => ({})),
+  getDoc: vi.fn(async () => ({ exists: () => false })),
   getDocs: (...args: unknown[]) => mocks.getDocsImpl(...args),
   Timestamp: { now: () => ({ toMillis: () => 0 }) },
 }));

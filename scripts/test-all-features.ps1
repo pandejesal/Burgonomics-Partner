@@ -16,8 +16,8 @@ Write-Host "=========================================================="
 
 # STEP 1: Launch App to Dashboard
 Write-Host "`n[1] Capturing Dashboard..."
-& $adb -s $device shell am force-stop com.glassdoorsstudio.burgonomics.partner
-& $adb -s $device shell am start -n com.glassdoorsstudio.burgonomics.partner/.MainActivity
+& $adb -s $device shell am force-stop com.burgonomics.partner
+& $adb -s $device shell am start -n com.burgonomics.partner/.MainActivity
 Start-Sleep -Seconds 3
 Capture-Screen "screen_01_dashboard.png"
 
