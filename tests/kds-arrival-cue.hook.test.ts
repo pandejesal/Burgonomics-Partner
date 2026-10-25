@@ -225,6 +225,7 @@ describe('useKDSRealtimeStream â€” one arrival cue after an acknowledge', (
     installAudioMock();
     __resetKDSAudioStateForTests();
     h.renderHook = () => {
+      // eslint-disable-next-line react-hooks/rules-of-hooks -- test harness invokes the hook directly
       useKDSRealtimeStream();
     };
     settle();

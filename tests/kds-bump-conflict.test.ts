@@ -204,6 +204,7 @@ describe('useKDSRealtimeStream — stale precondition conflicts (F11)', () => {
     (globalThis as any).localStorage = (globalThis as any).window.localStorage;
     __resetKDSAudioStateForTests();
     h.renderHook = () => {
+      // eslint-disable-next-line react-hooks/rules-of-hooks -- test harness invokes the hook directly
       h.result = useKDSRealtimeStream();
     };
     settle();
