@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { logger } from '@/core/logging/logger';
@@ -16,6 +16,7 @@ import {
 } from '@/utils/orderContract';
 import { FIRESTORE_IN_LIMIT, isGlobalRole, resolveScopedBranchIds } from '@/utils/branchScope';
 import { playKDSArrivalCue, resetKDSAlarmState, syncKDSAlarmState } from '@/utils/kdsAudio';
+import { isStaleOrderConflict } from '@/utils/orderConflict';
 import type { Order, OrderStatus } from '@/types';
 
 export interface RecalledOrderHistory {
@@ -136,6 +137,14 @@ export function classifyKdsStreamFailure(err: unknown): KdsStreamFailureKind {
     : 'listener_error';
 }
 
+/**
+ * F11: a 409 / stale-precondition rejection means ANOTHER terminal already
+ * moved this order. Reporting "order unchanged" is a lie in that case — and
+ * leaves the operator staring at a stale card. Surface the conflict and force
+ * a resubscribe so the board catches up.
+ */
+export { isStaleOrderConflict } from '@/utils/orderConflict';
+
 export function useKDSRealtimeStream() {
   const { user } = useAuthStore();
   const { selectedBranchId } = useAppStore();
@@ -156,6 +165,14 @@ export function useKDSRealtimeStream() {
   const [liveError, setLiveError] = useState<Error | null>(null);
   const [listenerEpoch, setListenerEpoch] = useState(0);
   const streamHydratedRef = useRef<boolean>(false);
+
+  // Resubscribe + refetch. Declared before bumpOrder so a stale-precondition
+  // (409) failure can force the board to catch up with the terminal that won.
+  const queryClient = useQueryClient();
+  const refresh = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['orders'] });
+    setListenerEpoch((epoch) => epoch + 1);
+  }, [queryClient]);
 
   // Surface the live-stream error when present, else the one-shot query error.
   const streamError = liveError ?? ordersError ?? null;
@@ -293,6 +310,13 @@ export function useKDSRealtimeStream() {
     (o) => o.status === 'ready' || (o.status as string) === 'ready_for_pickup'
   );
 
+  // F6: the branch scope the stream actually reads — surfaced so the KDS
+  // header can say when the Firestore `in` cap truncates it (no silent drop).
+  const scopeBranchIds = useMemo(
+    () => resolveScopedBranchIds(user, selectedBranchId),
+    [user, selectedBranchId]
+  );
+
   useEffect(() => {
     resetKDSAlarmState();
     return () => resetKDSAlarmState();
@@ -408,7 +432,7 @@ export function useKDSRealtimeStream() {
         }
       } catch (err: any) {
         const offline =
-          (typeof navigator !== 'undefined' && !navigator.onLine) ||
+          (typeof navigator !== 'undefined' && navigator.onLine === false) ||
           /offline|network|failed to fetch|firestore/i.test(err?.message || '');
         if (offline) {
           const { fresh } = readPendingKdsBumps(window.localStorage.getItem(PENDING_BUMPS_KEY));
@@ -425,6 +449,14 @@ export function useKDSRealtimeStream() {
           toast.error('Offline — bump queued', {
             description: 'It will apply automatically when you are back online.',
           });
+        } else if (isStaleOrderConflict(err)) {
+          // F11: the order DID change — another terminal got there first. Do
+          // not claim "unchanged"; reload so the card shows the winning state.
+          logger.warn('kds.bump_conflict', { orderId, message: err?.message });
+          toast.error('Another terminal already moved this order — refreshing', {
+            description: 'Your tap was not applied. The board is loading the latest status.',
+          });
+          refresh();
         } else {
           logger.warn('kds.bump_failed', { orderId, message: err?.message });
           toast.error('Bump failed — order unchanged', {
@@ -440,7 +472,7 @@ export function useKDSRealtimeStream() {
         });
       }
     },
-    [liveOrders, updateOrderStatus]
+    [liveOrders, updateOrderStatus, refresh]
   );
 
   // Recall the most recent bump within 60s (stack depth 5 — rapid
@@ -471,12 +503,19 @@ export function useKDSRealtimeStream() {
       return true;
     } catch (err: any) {
       logger.warn('kds.recall_failed', { message: err?.message });
-      toast.error('Recall failed — order unchanged', {
-        description: err?.message || 'Check connection and retry.',
-      });
+      if (isStaleOrderConflict(err)) {
+        toast.error('Another terminal already moved this order — refreshing', {
+          description: 'Your recall was not applied. The board is loading the latest status.',
+        });
+        refresh();
+      } else {
+        toast.error('Recall failed — order unchanged', {
+          description: err?.message || 'Check connection and retry.',
+        });
+      }
       return false;
     }
-  }, [recallStack, updateOrderStatus, liveOrders]);
+  }, [recallStack, updateOrderStatus, liveOrders, refresh]);
 
   const canRecall = liveRecallStack.length > 0;
 
@@ -486,12 +525,7 @@ export function useKDSRealtimeStream() {
   // onSnapshot replaces the poll; every snapshot is truth. lastRefreshAt
   // tracks the last successful stream delivery — never a manual tap
   // (refresh() resubscribes to force a fresh snapshot).
-  const queryClient = useQueryClient();
   const [lastRefreshAt, setLastRefreshAt] = useState<number>(Date.now());
-  const refresh = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['orders'] });
-    setListenerEpoch((epoch) => epoch + 1);
-  }, [queryClient]);
 
   useEffect(() => {
     if (!isLoading && !ordersError) setLastRefreshAt(Date.now());
@@ -500,7 +534,6 @@ export function useKDSRealtimeStream() {
   useEffect(() => {
     if (!user) return;
 
-    const scopeBranchIds = resolveScopedBranchIds(user, selectedBranchId);
     // Scoped roles with no assigned branches must never read the global
     // collection (mirrors useOrders' fail-closed read guard).
     if (scopeBranchIds.length === 0 && !isGlobalRole(user.role)) {
@@ -615,7 +648,7 @@ export function useKDSRealtimeStream() {
       // Resubscribing on user or branch change keeps the stream scoped to
       // the current RBAC decision; listenerEpoch lets refresh() force one.
     };
-  }, [user, selectedBranchId, listenerEpoch]);
+  }, [user, selectedBranchId, listenerEpoch, scopeBranchIds]);
 
   return {
     isOnline,
@@ -632,6 +665,8 @@ export function useKDSRealtimeStream() {
     lastBumpedOrder: recallHistory?.order || null,
     refresh,
     lastRefreshAt,
+    /** Branch scope this stream reads (F6: render truncation honestly). */
+    scopeBranchIds,
   };
 }
 

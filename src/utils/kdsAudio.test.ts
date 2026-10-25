@@ -299,7 +299,7 @@ describe('kdsAudio — arrival cue is heard exactly once', () => {
     expect(mockCtx.createOscillator).toHaveBeenCalledTimes(2);
   });
 
-  it('an acknowledged kitchen still cues a new ticket that keeps the count at the acknowledged level', () => {
+  it('an acknowledged kitchen cues a new ticket that refills the count AND re-arms the repeat loop', () => {
     // A + B pending, loop armed; staff acknowledge, which stops the loop at ack=2.
     syncKDSAlarmState(2);
     acknowledgeKDSAlarm(2);
@@ -311,16 +311,27 @@ describe('kdsAudio — arrival cue is heard exactly once', () => {
     expect(mockCtx.createOscillator).not.toHaveBeenCalled();
 
     // C arrives: pending is back at 2, not ABOVE ack=2, so sync stays silent.
+    // The arrival cue is the one immediate signal, and the latch is released
+    // so the repeat loop arms for as long as C stays pending (F3).
     playKDSArrivalCue(true, 2);
-    syncKDSAlarmState(2);
     expect(mockCtx.createOscillator).toHaveBeenCalledTimes(2);
-    expect(isKDSAlarmRepeating()).toBe(false);
+    syncKDSAlarmState(2);
+    // The follow-up sync must not double-chime.
+    expect(mockCtx.createOscillator).toHaveBeenCalledTimes(2);
+    expect(isKDSAlarmRepeating()).toBe(true);
 
-    // The next snapshot of the same count must not cue again.
+    // The loop now keeps reminding the kitchen every 10s.
+    mockCtx.createOscillator.mockClear();
+    vi.advanceTimersByTime(10000);
+    expect(mockCtx.createOscillator).toHaveBeenCalledTimes(2);
+
+    // The next snapshot of the same count must not cue again (the loop's own
+    // tick is the only sound).
     mockCtx.createOscillator.mockClear();
     playKDSArrivalCue(false, 2);
     syncKDSAlarmState(2);
     expect(mockCtx.createOscillator).not.toHaveBeenCalled();
+    expect(isKDSAlarmRepeating()).toBe(true);
   });
 
   it('an unchanged snapshot produces no cue', () => {

@@ -210,6 +210,43 @@ describe('menu feedback', () => {
     }
   });
 
+  it('restores EVERY availability flag the readers consume (F4 legacy available:false)', async () => {
+    harness.actualHook = true;
+    // A legacy doc: 86'd by inStock and by the older `available` flag. Writing
+    // only inStock left isAvailable/available false, so the item stayed sold
+    // out after a "restore".
+    const legacy = { ...item, inStock: false, isAvailable: false, available: false };
+    harness.queryClient!.setQueryData(['menuItems', 'branch'], [legacy]);
+    harness.updateDoc.mockResolvedValueOnce(undefined);
+
+    await expect(
+      useBranchMenu().toggleAvailability.mutateAsync({ itemId: legacy.id, available: true }),
+    ).resolves.toMatchObject({ available: true });
+
+    expect(harness.updateDoc).toHaveBeenCalledWith(
+      'product-ref',
+      expect.objectContaining({
+        inStock: true,
+        isAvailable: true,
+        available: true,
+        disabledUntil: null,
+        eightSixDuration: null,
+        eightSixReason: null,
+      }),
+    );
+
+    // The reader that gates the 86 drawer now agrees: sellable.
+    const { isItemInStock } = await import('../src/features/kds/components/KDSQuick86Drawer');
+    expect(
+      isItemInStock({
+        ...legacy,
+        inStock: true,
+        isAvailable: true,
+        available: true,
+      }),
+    ).toBe(true);
+  });
+
   it('announces a rejected real 86 write with exactly ONE error, not two', async () => {
     // The old case set actualHook=false (mocked mutateAsync), so the hook's
     // onError could never fire — it could not see the duplicate. Drive the

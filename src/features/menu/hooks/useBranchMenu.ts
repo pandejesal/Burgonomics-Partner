@@ -84,7 +84,13 @@ export function useBranchMenu() {
       if (!branchId) throw new Error('No branch selected');
       const itemRef = doc(db, 'products', itemId);
       const payload = {
+        // F4: the readers AND every availability flag (inStock / isAvailable /
+        // available). Writing only inStock left legacy docs with
+        // `available: false` permanently sold out after a "restore". Set all
+        // three to the same truth so a restore actually restores.
         inStock: activeState,
+        isAvailable: activeState,
+        available: activeState,
         disabledUntil: null,
         eightSixDuration: null,
         eightSixReason: null,
@@ -172,6 +178,10 @@ export function useBranchMenu() {
       const itemRef = doc(db, 'products', itemId);
       const payload = {
         inStock: false,
+        // F4: readers AND the availability flags — keep all of them false so
+        // every surface agrees the item is 86'd.
+        isAvailable: false,
+        available: false,
         disabledUntil: disabledUntil ? Timestamp.fromDate(disabledUntil) : null,
         eightSixReason: reason,
         eightSixDuration: duration,
@@ -227,6 +237,10 @@ export function useBranchMenu() {
           d.ref,
           {
             inStock: isAvailable,
+            // F4: keep every flag the readers consume in sync (legacy docs
+            // carried stale `available`/`isAvailable` values).
+            isAvailable,
+            available: isAvailable,
             // Re-enabling clears stale 86 metadata (see toggleAvailability).
             ...(isAvailable
               ? { disabledUntil: null, eightSixDuration: null, eightSixReason: null }

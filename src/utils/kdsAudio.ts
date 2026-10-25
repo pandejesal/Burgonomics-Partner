@@ -152,17 +152,27 @@ export function syncKDSAlarmState(pendingCount: number): void {
   if (!repeatIntervalId) {
     playKDSChime();
     void triggerKDSHaptic();
-    repeatIntervalId = setInterval(() => {
-      // Tick against the live pending count captured at the last sync — the
-      // loop self-stops the moment the kitchen clears the makeline.
-      if (!isKDSAudioMuted() && currentPendingCount > 0) {
-        playKDSChime();
-        void triggerKDSHaptic();
-      } else {
-        stopRepeatingKDSAlarm();
-      }
-    }, KDS_ALARM_REPEAT_MS); // 10 seconds repeat
+    startRepeatingAlarmLoop();
   }
+}
+
+/**
+ * Arm the 10s repeat loop WITHOUT an immediate cue. Used when the arrival cue
+ * already supplied the audible signal for this ticket (see
+ * playKDSArrivalCue) — starting the loop with its own chime would double-fire.
+ */
+function startRepeatingAlarmLoop(): void {
+  if (repeatIntervalId) return;
+  repeatIntervalId = setInterval(() => {
+    // Tick against the live pending count captured at the last sync — the
+    // loop self-stops the moment the kitchen clears the makeline.
+    if (!isKDSAudioMuted() && currentPendingCount > 0) {
+      playKDSChime();
+      void triggerKDSHaptic();
+    } else {
+      stopRepeatingKDSAlarm();
+    }
+  }, KDS_ALARM_REPEAT_MS); // 10 seconds repeat
 }
 
 /**
@@ -174,6 +184,12 @@ export function syncKDSAlarmState(pendingCount: number): void {
  * at all until a third ticket arrives. When syncKDSAlarmState does play its own
  * immediate chime (loop starting from rest, or the count rising past the
  * acknowledged level) this is a no-op — playing both was the 0→N double-fire.
+ *
+ * F3: a new ticket that only REFILLS the acknowledged count (A+B acknowledged,
+ * A bumped to preparing, C arrives → 2 again) must do more than chime once.
+ * Clearing the latch here and arming the repeat loop means the kitchen keeps
+ * being reminded while C is still pending; previously the count-based latch
+ * stayed set and the 10s loop never re-armed.
  */
 export function playKDSArrivalCue(hasNewOrder: boolean, pendingCount: number): void {
   if (!hasNewOrder) return;
@@ -181,6 +197,12 @@ export function playKDSArrivalCue(hasNewOrder: boolean, pendingCount: number): v
     acknowledgedPendingCount !== null && pendingCount <= acknowledgedPendingCount;
   if (isKDSAlarmRepeating() || silencedByAcknowledge) {
     playKDSChime();
+  }
+  if (silencedByAcknowledge) {
+    acknowledgedPendingCount = null;
+    // Arm silently: the cue above is this ticket's immediate signal, and the
+    // follow-up syncKDSAlarmState must not chime again.
+    startRepeatingAlarmLoop();
   }
 }
 

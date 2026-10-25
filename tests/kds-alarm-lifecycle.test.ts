@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+﻿import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * Leaving /kds must silence the module-level 10s repeating alarm. The alarm is
@@ -16,6 +16,8 @@ vi.mock('react', async (original) => ({
   useState: (initial: any) => [typeof initial === 'function' ? initial() : initial, () => undefined],
   useRef: (current: any) => ({ current }),
   useCallback: (fn: any) => fn,
+    useMemo: (fn: any) => fn(),
+  useMemo: (fn: any) => fn(),
   useEffect: (effect: () => any) => {
     const cleanup = effect();
     if (typeof cleanup === 'function') h.cleanups.push(cleanup);
@@ -65,7 +67,7 @@ import {
 } from '../src/utils/kdsAudio';
 import { useKDSRealtimeStream } from '../src/features/kds/hooks/useKDSRealtimeStream';
 
-describe('KDS alarm lifecycle — the makeline owns the repeating alarm', () => {
+describe('KDS alarm lifecycle â€” the makeline owns the repeating alarm', () => {
   beforeEach(() => {
     h.cleanups.length = 0;
     __resetKDSAudioStateForTests();

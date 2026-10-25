@@ -21,6 +21,7 @@ vi.mock('react', async (original) => ({
   ],
   useRef: (current: any) => ({ current }),
   useCallback: (fn: any) => fn,
+  useMemo: (fn: any) => fn(),
   // Run only the listener effect below; do not start alarms/outbox work.
   useEffect: (effect: () => any) => { h.effects.push(effect); },
 }));

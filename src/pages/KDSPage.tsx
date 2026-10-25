@@ -17,6 +17,7 @@ import {
   isKDSAudioUnlocked,
   acknowledgeKDSAlarm,
 } from '@/utils/kdsAudio';
+import { scopeTruncationNotice } from '@/utils/branchScope';
 import {
   Flame,
   ChefHat,
@@ -55,7 +56,11 @@ export function KDSPage() {
     lastBumpedOrder,
     refresh,
     lastRefreshAt,
+    scopeBranchIds,
   } = useKDSRealtimeStream();
+  // F6: the Firestore `in` cap covers only the first 10 assigned outlets —
+  // state that on the header instead of silently hiding the remaining ones.
+  const scopeNotice = scopeTruncationNotice(scopeBranchIds);
   const [nowTick, setNowTick] = useState(0);
   useEffect(() => {
     const t = window.setInterval(() => setNowTick(Date.now()), 15000);
@@ -394,6 +399,16 @@ export function KDSPage() {
             {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
           </button>
         </div>
+
+        {/* F6: scoped reads stop at the Firestore `in` cap — never silent. */}
+        {scopeNotice && (
+          <div
+            role="note"
+            className="w-full rounded-lg border border-amber-500/40 bg-amber-950/40 px-3 py-2 text-[11px] font-bold text-amber-200"
+          >
+            {scopeNotice}
+          </div>
+        )}
       </header>
 
       {/* Main 3-Column Makeline Kanban Grid */}

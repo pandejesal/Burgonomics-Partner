@@ -48,6 +48,13 @@ import { canTriggerBoardRefund } from "./refundRoles";
 import { useAdmin } from "@/admin/hooks/useAdmin";
 import { useStores } from "@/admin/dashboard/hooks/useDashboardData";
 import { logger } from "@/core/logging/logger";
+import {
+  isGlobalRole,
+  resolveBoardStoreFilter,
+  scopeTruncationNotice,
+} from "@/utils/branchScope";
+import { isStaleOrderConflict } from "@/utils/orderConflict";
+import type { UserRole } from "@/types";
 
 interface AdminOrdersPageProps {
   defaultTab?: "live" | "history";
@@ -99,6 +106,42 @@ export async function copyTextWithFeedback(
     toast.error("Could not copy ticket text — copy it manually.");
     return false;
   }
+}
+
+/**
+ * F1: the bulk action only cancels. It never calls the refund API, so the copy
+ * must never imply money moves. Paid orders in the selection get an explicit
+ * "no refund" warning and a pointer to the per-order refund control.
+ */
+export const BULK_CANCEL_LABEL = "Cancel selected — no refund";
+
+/** Orders the bulk cancel may actually touch (terminal states are skipped). */
+export function selectBulkCancellable<
+  T extends { orderStatus: string; paymentStatus: string },
+>(selected: T[]): T[] {
+  return selected.filter(
+    (o) =>
+      o.orderStatus !== "Completed" &&
+      o.orderStatus !== "Cancelled" &&
+      o.orderStatus !== "Refunded" &&
+      o.orderStatus !== "Needs Review",
+  );
+}
+
+/** Confirmation copy for a bulk cancel; states plainly that money stays put. */
+export function bulkCancelDescription(
+  selected: Array<{ paymentStatus: string }>,
+): string {
+  const paidCount = selected.filter((o) => o.paymentStatus === "Paid").length;
+  const base =
+    `This cancels ${selected.length} selected order${selected.length === 1 ? "" : "s"} ` +
+    "and stops their kitchen queue. No refund is issued by this action.";
+  if (paidCount === 0) return base;
+  return (
+    `${base} ${paidCount} of them ${paidCount === 1 ? "is" : "are"} already PAID — ` +
+    "money is NOT moved and the customer is NOT refunded. Use the per-order " +
+    '"Trigger Gateway Refund" action to return funds.'
+  );
 }
 
 // Sound Synthesizer Engine using Web Audio API to bypass asset file dependencies.
@@ -164,21 +207,18 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
   defaultOrderId,
 }) => {
   // Single sign-in: role comes from the unified partner session.
-  const { admin } = useAdmin();
+  const { admin, assignedStoreIds = [] } = useAdmin();
   const selectedRole = admin?.role?.name ?? "";
 
   // M4: real authorized store directory (brand-readable admin_stores), never a
   // hardcoded outlet list.
   const { data: storeDirectory = [] } = useStores();
 
-  // Real apps might store the assigned store in the user profile/claims
-  // Loop 49/120: no hardcoded fallback store — an unassigned manager used
-  // to silently view Delhi's orders as their own. Null = unfiltered.
-  const managerAssignedStoreId = admin?.assignedStoreId || null;
-
   // Main states
   const [orders, setOrders] = useState<RichOrder[]>([]);
   const [streamError, setStreamError] = useState<string | null>(null);
+  // Bumping this resubscribes the live listener after a lost-update conflict.
+  const [streamEpoch, setStreamEpoch] = useState(0);
   const [isSimulatorEnabled, setIsSimulatorEnabled] = useState(false);
   const [viewMode, setViewMode] = useState<"live" | "history">(defaultTab);
   const [selectedOrder, setSelectedOrder] = useState<RichOrder | null>(null);
@@ -192,20 +232,31 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
   const [filterFulfillment, setFilterFulfillment] = useState<string>("all");
   const [filterPayment, setFilterPayment] = useState<string>("all");
 
+  // F8: scoped roles read the FULL assigned scope; the outlet filter narrows
+  // within it. The old clamp to branchIds[0] made the filter inert — a
+  // branch_owner with two outlets could never see the second one.
+  const boardStoreFilter = useMemo(
+    () =>
+      resolveBoardStoreFilter(
+        (selectedRole || undefined) as UserRole | undefined,
+        assignedStoreIds,
+        filterStore,
+      ),
+    [selectedRole, assignedStoreIds, filterStore],
+  );
+
+  // F6: the Firestore `in` cap truncates scoped reads to 10 outlets — say so
+  // instead of silently hiding the rest.
+  const scopeNotice = isGlobalRole((selectedRole || undefined) as UserRole | undefined)
+    ? null
+    : scopeTruncationNotice(assignedStoreIds);
+
   // Fetch Live Orders
   useEffect(() => {
     if (viewMode !== "live") return;
 
-    // If user is Store Manager, restrict to their store. Otherwise, follow the filterStore UI selection.
-    const effectiveStoreFilter =
-      selectedRole === "branch_owner"
-        ? managerAssignedStoreId
-        : filterStore === "all"
-          ? null
-          : filterStore;
-
     const unsubscribe = adminOrdersService.listenLiveOrders(
-      effectiveStoreFilter,
+      boardStoreFilter,
       (liveOrders) => {
         setStreamError(null);
         setOrders(liveOrders);
@@ -215,26 +266,19 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
     );
 
     return () => unsubscribe();
-  }, [viewMode, filterStore, selectedRole, managerAssignedStoreId]);
+  }, [viewMode, boardStoreFilter, streamEpoch]);
 
   // Fetch Historical Orders
   useEffect(() => {
     if (viewMode !== "history") return;
 
-    const effectiveStoreFilter =
-      selectedRole === "branch_owner"
-        ? managerAssignedStoreId
-        : filterStore === "all"
-          ? null
-          : filterStore;
-
     adminOrdersService
-      .getHistory(effectiveStoreFilter, 50)
+      .getHistory(boardStoreFilter, 50)
       .then(setOrders)
       .catch((err) =>
         setStreamError(err?.message || "Order history failed to load — retry."),
       );
-  }, [viewMode, filterStore, selectedRole, managerAssignedStoreId]);
+  }, [viewMode, boardStoreFilter, streamEpoch]);
 
   // Confirm actions
   const [confirmAction, setConfirmAction] = useState<{
@@ -250,6 +294,10 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
       | "petpooja";
     orderId: string;
   } | null>(null);
+
+  // F1: bulk cancel is destructive and moves NO money. It is staged here so a
+  // confirmation dialog — with explicit paid-order copy — gates the writes.
+  const [bulkCancelSelection, setBulkCancelSelection] = useState<RichOrder[] | null>(null);
 
   // Printing Receipt Modal state
   const [printReceiptData, setPrintReceiptData] = useState<{
@@ -304,7 +352,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
     nextStatus: RichOrder["orderStatus"],
     actor: string = "Store Manager",
     descOverride?: string,
-  ) => {
+  ): Promise<boolean> => {
     try {
       await adminOrdersService.updateOrderStatus(orderId, nextStatus, {
         title: `Order status: ${nextStatus}`,
@@ -327,6 +375,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
         orderIdSuffix: orderId.slice(-6),
         nextStatus,
       });
+      return true;
     } catch (error) {
       // Loud failure: the old code only console.error'd, so operators
       // believed the bump worked while the server write failed.
@@ -335,7 +384,17 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
         orderIdSuffix: orderId.slice(-6),
         message,
       });
-      toast.error("Status update failed — order unchanged", { description: message });
+      if (isStaleOrderConflict(error)) {
+        // F11: the order DID change — another terminal won the race. Refresh
+        // the board instead of claiming it is unchanged.
+        toast.error("Another terminal already moved this order — refreshing", {
+          description: "Your update was not applied. Loading the latest status.",
+        });
+        setStreamEpoch((epoch) => epoch + 1);
+      } else {
+        toast.error("Status update failed — order unchanged", { description: message });
+      }
+      return false;
     }
   };
 
@@ -536,6 +595,16 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
         description="The live operational heart of the kitchens. Confirm, prepare, route, and audit orders in real time."
         breadcrumbs={[{ label: "Operations Control" }, { label: "OMS Core" }]}
       />
+
+      {/* F6: never silently hide outlets beyond the Firestore `in` cap. */}
+      {scopeNotice && (
+        <div
+          role="note"
+          className="rounded-2xl border border-amber-500/40 bg-amber-50 dark:bg-amber-950/20 px-4 py-3 text-xs font-bold text-amber-800 dark:text-amber-200"
+        >
+          {scopeNotice}
+        </div>
+      )}
 
       {/* Stats Display Grid */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -902,23 +971,17 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
               },
             },
             {
-              label: "Force Refund/Cancel Selected",
+              // F1: cancels only — no refund call exists on this path, and the
+              // label must not pretend otherwise.
+              label: BULK_CANCEL_LABEL,
               variant: "danger",
               onClick: (selected) => {
-                selected.forEach((o) => {
-                  if (
-                    o.orderStatus !== "Completed" &&
-                    o.orderStatus !== "Cancelled" &&
-                    o.orderStatus !== "Needs Review"
-                  ) {
-                    handleUpdateStatus(
-                      o.id,
-                      "Cancelled",
-                      "Bulk Operations Panel",
-                      "Bulk force cancellation",
-                    );
-                  }
-                });
+                const cancellable = selectBulkCancellable(selected);
+                if (cancellable.length === 0) {
+                  toast.info("Nothing to cancel — selected orders are already settled.");
+                  return;
+                }
+                setBulkCancelSelection(cancellable);
               },
             },
           ]}
@@ -1281,25 +1344,15 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                       >
                         Push to POS
                       </button>
-                      <button
-                        onClick={() => {
-                          setOrders((prev) =>
-                            prev.map((o) =>
-                              o.id === selectedOrder.id ? { ...o, petpoojaStatus: "Bypassed" } : o,
-                            ),
-                          );
-                          setSelectedOrder((prev) =>
-                            prev ? { ...prev, petpoojaStatus: "Bypassed" } : null,
-                          );
-                          console.log(
-                            `[OMS] Petpooja POS integration bypassed for order ${selectedOrder.id}`,
-                          );
-                        }}
-                        className="py-2 px-3 text-[10px] font-black uppercase rounded-xl border border-gray-200 text-gray-500 hover:bg-gray-50 transition-all"
-                      >
-                        Bypass POS
-                      </button>
                     </div>
+                    {/* F2: POS sync state is server-owned. The old local
+                        bypass button flipped a React flag to a fabricated
+                        "Bypassed" badge that vanished on the next snapshot, so
+                        it is gone. This note states the real constraint. */}
+                    <p className="text-[10px] font-medium text-gray-400 leading-relaxed">
+                      POS sync state is written by the server only. Skipping the POS for this
+                      order must be recorded server-side — this screen cannot mark it bypassed.
+                    </p>
                   </div>
 
                   {/* Delivery partner panel (Only if delivery and dispatch state) */}
@@ -1464,6 +1517,37 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
           </>
         )}
       </AnimatePresence>
+
+      {/* F1: bulk cancel confirmation gate — cancels only, never refunds. */}
+      {bulkCancelSelection && (
+        <ConfirmDialog
+          isOpen={true}
+          isDestructive={true}
+          onClose={() => setBulkCancelSelection(null)}
+          onConfirm={async () => {
+            const selection = bulkCancelSelection;
+            const results = await Promise.all(
+              selection.map((o) =>
+                handleUpdateStatus(
+                  o.id,
+                  "Cancelled",
+                  "Bulk Operations Panel",
+                  "Bulk cancellation — no refund issued",
+                ),
+              ),
+            );
+            const cancelled = results.filter(Boolean).length;
+            if (cancelled > 0) {
+              toast.success(
+                `${cancelled} order${cancelled === 1 ? "" : "s"} cancelled — no refund was issued.`,
+              );
+            }
+          }}
+          title={`Cancel ${bulkCancelSelection.length} selected order${bulkCancelSelection.length === 1 ? "" : "s"}?`}
+          description={bulkCancelDescription(bulkCancelSelection)}
+          confirmLabel="Cancel orders — no refund"
+        />
+      )}
 
       {/* Confirmation Dialog overlays */}
       {confirmAction && (

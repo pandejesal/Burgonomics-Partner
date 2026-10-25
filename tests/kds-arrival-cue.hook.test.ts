@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+﻿import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * Hook-level arrival cue: the audio helper's own tests cannot prove the hook
@@ -46,6 +46,8 @@ vi.mock('react', async (original) => {
       return h.refs[idx];
     },
     useCallback: (fn: any) => fn,
+    useMemo: (fn: any) => fn(),
+    useMemo: (fn: any) => fn(),
     useEffect: (run: () => any, deps?: any[]) => {
       const idx = h.hookIndex++;
       const prev = h.effects[idx];
@@ -207,7 +209,7 @@ function unmount() {
   h.hookIndex = 0;
 }
 
-describe('useKDSRealtimeStream — one arrival cue after an acknowledge', () => {
+describe('useKDSRealtimeStream â€” one arrival cue after an acknowledge', () => {
   beforeEach(() => {
     h.hookIndex = 0;
     h.states = [];
@@ -234,7 +236,7 @@ describe('useKDSRealtimeStream — one arrival cue after an acknowledge', () => 
     delete (globalThis as any).localStorage;
   });
 
-  it('cues C exactly once after acknowledge + A→preparing, and keeps the loop stopped', async () => {
+  it('cues C exactly once after acknowledge + Aâ†’preparing, and re-arms the loop', async () => {
     // Initial makeline: A and B pending, primed without a manual cue, then the
     // alarm arms on the next pass.
     await emit([order('A', 'pending'), order('B', 'pending')]);
@@ -252,16 +254,18 @@ describe('useKDSRealtimeStream — one arrival cue after an acknowledge', () => 
     expect(isKDSAlarmRepeating()).toBe(false);
 
     // C arrives: pending is back at the acknowledged level, so the alarm stays
-    // silent and the arrival cue must provide the only audible signal.
+    // silent for this snapshot and the arrival cue provides exactly one
+    // audible signal.
     await emit([order('A', 'preparing'), order('B', 'pending'), order('C', 'pending')]);
     expect(createdOscillators).toHaveLength(2);
-    expect(isKDSAlarmRepeating()).toBe(false);
+    // F3: the latch is released so C keeps being chased by the 10s loop.
+    expect(isKDSAlarmRepeating()).toBe(true);
 
-    // An unchanged snapshot must not cue again.
+    // An unchanged snapshot must not cue again; only the loop's own tick sounds.
     createdOscillators.length = 0;
     await emit([order('A', 'preparing'), order('B', 'pending'), order('C', 'pending')]);
     expect(createdOscillators).toHaveLength(0);
-    expect(isKDSAlarmRepeating()).toBe(false);
+    expect(isKDSAlarmRepeating()).toBe(true);
   });
 
   it('an outlet switch clears the acknowledge latch so the new outlet alarms', async () => {
@@ -275,7 +279,7 @@ describe('useKDSRealtimeStream — one arrival cue after an acknowledge', () => 
     createdOscillators.length = 0;
 
     // Switch outlet and deliver its makeline in the same commit, so the latch
-    // can only be cleared by the scope boundary — not by a transient 0 count.
+    // can only be cleared by the scope boundary â€” not by a transient 0 count.
     h.selectedBranchId = 'branch_2';
     await emit([
       order('D', 'pending', 'branch_2'),
