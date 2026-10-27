@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { NotificationBell } from './NotificationBell';
 import { BranchSwitcher } from './BranchSwitcher';
 import { PetpoojaStatusBadge } from '@/components/ui/PetpoojaStatusBadge';
+import { Logo } from '@/components/ui/Logo';
 
 export function Header() {
   const { toggleSidebar, selectedBranchId } = useAppStore();
@@ -16,7 +17,11 @@ export function Header() {
   return (
     <header className="h-16 bg-bg border-b border-[#1E3A24] flex items-center justify-between px-3 sm:px-4 lg:px-6 sticky top-0 z-30 shadow-md pt-safe">
       {/* Left: Mobile menu + Outlet Switcher + Welcome */}
-      <div className="flex min-w-0 flex-1 items-center gap-1 sm:gap-4">
+      <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-4">
+        {/* The Delivery mascot must stay visible even when the mobile drawer is closed. */}
+        <Link to="/dashboard" aria-label="Burgonomics Partner dashboard" className="shrink-0">
+          <Logo size={30} showText={false} className="shrink-0" />
+        </Link>
         <button
           onClick={toggleSidebar}
           className="lg:hidden p-2 hover:bg-surface rounded-xl text-zinc-300 hover:text-white cursor-pointer shrink-0"

@@ -197,6 +197,24 @@ dependencies {
 
 apply from: 'capacitor.build.gradle'
 
+// Android artifact guard. CI and release paths call `npx cap sync android`
+// directly, so a package-script preflight alone is bypassable. This Exec task
+// runs the same value-blind Node preflight in explicit android mode before
+// preBuild, making a missing/mismatched google-services.json or web project a
+// hard build failure instead of another broken APK/AAB.
+def mobilePreflightScript = rootProject.file('../scripts/mobile-config-preflight.mjs')
+def verifyMobileFirebaseConfig = tasks.register('verifyMobileFirebaseConfig', Exec) {
+    group = 'verification'
+    description = 'Fail closed if public web/native Firebase config is incomplete or mismatched.'
+    workingDir rootProject.projectDir.parentFile
+    commandLine 'node', mobilePreflightScript.absolutePath, '--platform=android'
+}
+afterEvaluate {
+    tasks.named('preBuild').configure {
+        dependsOn verifyMobileFirebaseConfig
+    }
+}
+
 try {
     def servicesJSON = file('google-services.json')
     if (servicesJSON.text) {
