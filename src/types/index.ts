@@ -238,7 +238,7 @@ export type TicketCategory =
   | 'other';
 
 export type TicketPriority = 'urgent' | 'high' | 'medium' | 'low';
-export type TicketStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
+export type TicketStatus = 'open' | 'in_progress' | 'escalated' | 'resolved' | 'closed';
 
 export type TicketType = TicketCategory;
 

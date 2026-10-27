@@ -129,6 +129,53 @@ export interface TeamUser {
   updatedAt?: any;
 }
 
+/** Text fields arrive from Firestore as unknown — null/numbers must not reach
+ * `.toLowerCase()` or `.charAt()` in the roster render. Numbers are shown as
+ * text; objects/booleans are not a name/email and collapse to an empty string. */
+function asTeamText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'bigint') return String(value);
+  return '';
+}
+
+function asTeamStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === 'string');
+}
+
+/**
+ * Normalizes one raw `users/{uid}` document into the roster contract.
+ *
+ * This is display normalization only: an unknown/blank role is preserved as
+ * empty/unknown for the generic badge and never promoted to a known role, so
+ * no RBAC claim is fabricated. Missing active/pinSet retain the legacy
+ * optimistic defaults; explicit false stays false.
+ */
+export function normalizeTeamUserDoc(id: string, raw: unknown): TeamUser {
+  const data =
+    raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : ({} as Record<string, unknown>);
+
+  return {
+    id: asTeamText(id) || asTeamText(data.id),
+    name: asTeamText(data.name),
+    email: asTeamText(data.email),
+    phone: asTeamText(data.phone),
+    // Preserve the raw role string for display; do not map an unknown role to a
+    // privileged one. RolePermissionBadge falls back to "Staff".
+    role: (typeof data.role === 'string' ? data.role : '') as UserRole,
+    branchIds: asTeamStringArray(data.branchIds),
+    cityIds: asTeamStringArray(data.cityIds),
+    active: 'active' in data ? Boolean(data.active) : true,
+    pinSet: 'pinSet' in data ? Boolean(data.pinSet) : true,
+    pin: asTeamText(data.pin) || undefined,
+    hashedPin: asTeamText(data.hashedPin) || undefined,
+    lastActiveAt: data.lastActiveAt,
+    createdAt: data.createdAt,
+    invitedBy: asTeamText(data.invitedBy) || undefined,
+    updatedAt: data.updatedAt,
+  };
+}
+
 export function useUsers() {
   const { user } = useAuthStore();
   const queryClient = useQueryClient();
@@ -162,12 +209,18 @@ export function useUsers() {
         return demoSeedRoster();
       }
 
-      return usersSnap.docs.map((d) => ({
-        id: d.id,
-        active: true,
-        pinSet: true,
-        ...d.data(),
-      })) as TeamUser[];
+      // Per-document isolation: one malformed staff row must not blank the
+      // whole roster. The normalizer keeps real ids/roles and turns missing
+      // text into safe strings instead of letting null reach the render.
+      const normalizedUsers: TeamUser[] = [];
+      usersSnap.docs.forEach((d) => {
+        try {
+          normalizedUsers.push(normalizeTeamUserDoc(d.id, d.data()));
+        } catch (err) {
+          console.error(`[useUsers] Skipping unreadable user document ${d.id}:`, err);
+        }
+      });
+      return normalizedUsers;
     },
     enabled: !!user,
   });

@@ -187,10 +187,8 @@ export function ManualOrderCreateModal({
       status: toDeliveryStatusMeta('pending') as unknown as OrderStatus,
       paymentMethod,
       paymentStatus: 'completed',
-      // Loop 49/120 honesty: no fabricated POS sync — the KOT reaches
-      // Petpooja only through the real push flow (row-level sync), and the
-      // kitchen prints from KDS. Claiming synced+printed here faked both.
-      petpoojaSyncStatus: 'pending',
+      // Petpooja sync state is server-owned (orderPush). The client cannot
+      // observe a push from here, so it must not plant any sync claim at birth.
       specialInstructions,
       createdAt: Timestamp.now(),
       updatedAt: Timestamp.now(),
@@ -220,8 +218,16 @@ export function ManualOrderCreateModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-[#0F0F0F] border border-neutral-800 rounded-3xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+    <div
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center overflow-y-auto p-4"
+      style={{
+        // Fixed overlays sit outside #root's bottom inset. Use max() so the
+        // fallback 1rem is not added on top of the device inset (no doubling).
+        paddingTop: "max(1rem, env(safe-area-inset-top, 0px))",
+        paddingBottom: "max(1rem, env(safe-area-inset-bottom, 0px))",
+      }}
+    >
+      <div className="bg-[#0F0F0F] border border-neutral-800 rounded-3xl w-full max-w-2xl max-h-full flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         {/* Header */}
         <div className="p-4 sm:p-5 bg-neutral-900/90 border-b border-neutral-800 flex items-center justify-between">
           <div>

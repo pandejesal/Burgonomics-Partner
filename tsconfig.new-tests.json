@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "vite/client"]
+  },
+  "include": [
+    "tests/prod-branch-honesty.test.ts",
+    "tests/kds-channel-filter-empty.test.tsx",
+    "tests/kds-freshness-stamp.test.tsx",
+    "tests/kds-live-indicator.test.tsx",
+    "tests/order-detail-cancel-gate.test.tsx",
+    "tests/partner-admin-ux-fixes.test.tsx",
+    "tests/safe-area-inset-single-apply.test.ts"
+  ]
+}

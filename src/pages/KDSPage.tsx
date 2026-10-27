@@ -67,7 +67,9 @@ export function KDSPage() {
     return () => window.clearInterval(t);
   }, []);
   void nowTick;
-  const refreshAgeSec = Math.max(0, Math.round((Date.now() - lastRefreshAt) / 1000));
+  // Age of the BOARD's own data: stamped only when a makeline snapshot is
+  // ingested, so it never speaks for an upstream provider or an HTTP poll.
+  const boardAgeSec = Math.max(0, Math.round((Date.now() - lastRefreshAt) / 1000));
 
   // Channel filter: 'all' | 'delivery' | 'takeaway' | 'dinein'
   const [channelFilter, setChannelFilter] = useState<OrderType | 'all'>('all');
@@ -234,6 +236,51 @@ export function KDSPage() {
     return readyOrders.filter((o) => o.orderType === channelFilter);
   }, [readyOrders, channelFilter]);
 
+  // Honest filtered-empty copy: a column whose selected channel is empty must
+  // not claim the kitchen is clear while other channels hold tickets. Each
+  // column reports its OWN hidden count (pending/preparing/ready differ) and
+  // offers a one-tap way back to every ticket.
+  const channelFilterLabel: string | null =
+    channelFilter === 'delivery'
+      ? 'Delivery'
+      : channelFilter === 'takeaway'
+        ? 'Takeaway'
+        : channelFilter === 'dinein'
+          ? 'Dine-In'
+          : null;
+  const hiddenPending = pendingOrders.length - filteredPending.length;
+  const hiddenPreparing = preparingOrders.length - filteredPreparing.length;
+  const hiddenReady = readyOrders.length - filteredReady.length;
+
+  // `columnLabel` completes the accessible name only: three columns render a
+  // "Show all" button on the same screen, so a screen-reader user must hear
+  // which column each one restores. The visible text stays short (WCAG 2.5.3:
+  // the accessible name still starts with the visible label).
+  // `min-h-48`, not `h-48`: a fixed height clips this three-line block plus
+  // its button once the reader's text size reaches 200%.
+  const renderFilteredEmpty = (
+    icon: React.ReactNode,
+    hidden: number,
+    title: string,
+    columnLabel: string
+  ) => (
+    <div className="min-h-48 rounded-xl border border-dashed border-amber-500/40 bg-amber-950/20 flex flex-col items-center justify-center text-center p-4 text-amber-200">
+      {icon}
+      <p className="text-xs font-bold">{title}</p>
+      <p className="text-[11px] text-amber-300">
+        {hidden} hidden by {channelFilterLabel} filter
+      </p>
+      <button
+        type="button"
+        onClick={() => setChannelFilter('all')}
+        aria-label={`Show all ${columnLabel}`}
+        className="mt-2 px-3 py-1.5 rounded-lg bg-neutral-900 border border-neutral-700 text-white text-xs font-bold hover:bg-neutral-800 transition-colors cursor-pointer"
+      >
+        Show all
+      </button>
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-[#050505] text-white flex flex-col font-sans select-none pt-safe">
       {/* Offline Loss Alert Banner */}
@@ -268,12 +315,26 @@ export function KDSPage() {
           </Link>
 
           <div className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-full bg-emerald-500 animate-ping" />
+            {/* Live dot = source readiness only (online + no stream error +
+                board loaded). A quiet Firestore listener is still live; a
+                dead one never keeps the emerald pulse. */}
+            {isOnline && !streamError && !isLoading ? (
+              <span className="w-3 h-3 rounded-full bg-emerald-500 animate-ping" aria-hidden="true" />
+            ) : (
+              <span
+                className={`w-3 h-3 rounded-full ${!isOnline || streamError ? 'bg-rose-500' : 'bg-neutral-600'}`}
+                aria-hidden="true"
+              />
+            )}
             <h1 className="text-lg sm:text-xl font-black tracking-tight text-white flex items-center gap-2">
               <span>Burgonomics KDS</span>
               {streamError ? (
                 <span className="text-xs px-2 py-0.5 rounded-full bg-rose-950 border border-rose-500/40 text-rose-300 font-bold">
                   Stream Error
+                </span>
+              ) : !isOnline ? (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-rose-950 border border-rose-500/40 text-rose-300 font-bold">
+                  Offline
                 </span>
               ) : isLoading ? (
                 <span className="text-xs px-2 py-0.5 rounded-full bg-neutral-800 border border-neutral-700 text-neutral-400 font-bold">
@@ -285,8 +346,11 @@ export function KDSPage() {
                 </span>
               )}
             </h1>
-            <span className="text-[10px] font-mono text-neutral-500" title="Age of the last successfully fetched order data">
-              data {refreshAgeSec < 60 ? `${refreshAgeSec}s old` : `${Math.floor(refreshAgeSec / 60)}m old`}
+            <span
+              className="text-[10px] font-mono text-neutral-500"
+              title="Time since the last order update landed on this board"
+            >
+              Last update {boardAgeSec < 60 ? `${boardAgeSec}s ago` : `${Math.floor(boardAgeSec / 60)}m ago`}
             </span>
             <button
               type="button"
@@ -449,6 +513,13 @@ export function KDSPage() {
                   Retry
                 </button>
               </div>
+            ) : filteredPending.length === 0 && hiddenPending > 0 ? (
+              renderFilteredEmpty(
+                <ChefHat className="w-8 h-8 stroke-1 text-amber-500/80 mb-1" />,
+                hiddenPending,
+                `No ${channelFilterLabel} orders waiting.`,
+                'New KOTs orders'
+              )
             ) : filteredPending.length === 0 ? (
               <div className="h-48 rounded-xl border border-dashed border-neutral-800 flex flex-col items-center justify-center text-center p-4 text-neutral-600">
                 <ChefHat className="w-8 h-8 stroke-1 text-neutral-700 mb-1" />
@@ -505,6 +576,13 @@ export function KDSPage() {
                   Retry
                 </button>
               </div>
+            ) : filteredPreparing.length === 0 && hiddenPreparing > 0 ? (
+              renderFilteredEmpty(
+                <Flame className="w-8 h-8 stroke-1 text-amber-500/80 mb-1" />,
+                hiddenPreparing,
+                `No ${channelFilterLabel} orders on the grill.`,
+                'orders on the grill'
+              )
             ) : filteredPreparing.length === 0 ? (
               <div className="h-48 rounded-xl border border-dashed border-neutral-800 flex flex-col items-center justify-center text-center p-4 text-neutral-600">
                 <Flame className="w-8 h-8 stroke-1 text-neutral-700 mb-1" />
@@ -561,6 +639,13 @@ export function KDSPage() {
                   Retry
                 </button>
               </div>
+            ) : filteredReady.length === 0 && hiddenReady > 0 ? (
+              renderFilteredEmpty(
+                <CheckCircle2 className="w-8 h-8 stroke-1 text-amber-500/80 mb-1" />,
+                hiddenReady,
+                `No ${channelFilterLabel} orders ready for handover.`,
+                'ready orders'
+              )
             ) : filteredReady.length === 0 ? (
               <div className="h-48 rounded-xl border border-dashed border-neutral-800 flex flex-col items-center justify-center text-center p-4 text-neutral-600">
                 <CheckCircle2 className="w-8 h-8 stroke-1 text-neutral-700 mb-1" />

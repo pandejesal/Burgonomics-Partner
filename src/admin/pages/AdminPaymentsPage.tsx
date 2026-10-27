@@ -31,24 +31,47 @@ import { StatusBadge } from "../components/Badges";
 import { paymentStorage, PaymentTransaction, TransactionDetails } from "./paymentsData";
 import { adminPaymentsService } from "../services/adminPaymentsService";
 import { useAdmin } from "../hooks/useAdmin";
+import { useStores } from "../dashboard/hooks/useDashboardData";
+import { buildStoreOptions } from "./AdminOrdersPage";
 import { toast } from "sonner";
 
-export const AdminPaymentsPage: React.FC = () => {
+export interface AdminPaymentsPageProps {
+  initialTxns?: TransactionDetails[];
+  initialStreamError?: string | null;
+}
+
+export const AdminPaymentsPage: React.FC<AdminPaymentsPageProps> = ({
+  initialTxns,
+  initialStreamError = null,
+}) => {
   const { role, isDeveloper } = useAdmin();
 
   // Real-time state subscription
-  const [txns, setTxns] = useState<TransactionDetails[]>([]);
+  const [txns, setTxns] = useState<TransactionDetails[]>(initialTxns || []);
+  const [streamError, setStreamError] = useState<string | null>(initialStreamError);
   useEffect(() => {
+    if (initialTxns) return;
     const unsubscribe = adminPaymentsService.listenLiveTransactions(
-      (data) => setTxns(data),
+      (data) => {
+        setTxns(data);
+        setStreamError(null);
+      },
       (err) => {
         console.error("Live transaction listener error:", err);
+        const msg = err instanceof Error ? err.message : "Failed to connect to live payment stream.";
+        setStreamError(msg);
         toast.error("Failed to connect to live payment stream.");
       },
       200,
     );
     return () => unsubscribe();
-  }, []);
+  }, [initialTxns]);
+
+  const { data: storeDirectory = [] } = useStores();
+  const storeOptions = useMemo(
+    () => buildStoreOptions(storeDirectory, txns),
+    [storeDirectory, txns],
+  );
 
   // Search & Filters state
   const [searchQuery, setSearchQuery] = useState("");
@@ -176,9 +199,9 @@ export const AdminPaymentsPage: React.FC = () => {
     isStoreManager,
   ]);
 
-  // Aggregate Metrics based on filtered/unfiltered list
+  // Aggregate Metrics based on filtered list
   const metrics = useMemo(() => {
-    const list = isStoreManager ? txns.filter((t) => t.store.id === managerStoreId) : txns;
+    const list = filteredTxns;
 
     const todayRevenue =
       list
@@ -240,7 +263,7 @@ export const AdminPaymentsPage: React.FC = () => {
       gatewaySuccessRate,
       revenueDeltaPct,
     };
-  }, [txns, isStoreManager]);
+  }, [filteredTxns, todayStr, yesterdayStr]);
 
   // F10: the drill-down route (/admin/payments/:id) resolves its record from
   // the local demo fixture store, never from the live row rendered above — so
@@ -273,34 +296,41 @@ export const AdminPaymentsPage: React.FC = () => {
 
         {/* Real-time Indicator Panel */}
         <div className="flex flex-wrap items-center gap-3 self-start md:self-center">
-          <div
-            className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-bold transition-all ${
-              isLiveActive
-                ? "border-green-200 bg-green-50 text-green-700 dark:border-green-900/30 dark:bg-green-900/20 dark:text-green-400"
-                : "border-gray-200 bg-gray-50 text-gray-500 dark:border-gray-800 dark:bg-gray-800/50 dark:text-gray-400"
-            }`}
-          >
-            <div className="relative flex h-2 w-2">
-              {isLiveActive && (
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75"></span>
-              )}
-              <span
-                className={`relative inline-flex h-2 w-2 rounded-full ${isLiveActive ? "bg-green-500" : "bg-gray-400"}`}
-              ></span>
+          {streamError ? (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/30 dark:bg-rose-900/20 dark:text-rose-400 text-xs font-bold">
+              <span className="w-2 h-2 rounded-full bg-rose-500" />
+              <span>Offline / Restricted</span>
             </div>
-            <span
-              className={`font-mono transition-all ${pulseLive ? "text-accent dark:text-accent-light scale-110 font-black" : "text-gray-900 dark:text-white"}`}
+          ) : (
+            <div
+              className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-bold transition-all ${
+                isLiveActive
+                  ? "border-green-200 bg-green-50 text-green-700 dark:border-green-900/30 dark:bg-green-900/20 dark:text-green-400"
+                  : "border-gray-200 bg-gray-50 text-gray-500 dark:border-gray-800 dark:bg-gray-800/50 dark:text-gray-400"
+              }`}
             >
-              Live
-            </span>
-            <button
-              onClick={() => setIsLiveActive(!isLiveActive)}
-              className="ml-2 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
-              title={isLiveActive ? "Pause auto refresh" : "Resume auto refresh"}
-            >
-              {isLiveActive ? <Pause size={12} /> : <Play size={12} />}
-            </button>
-          </div>
+              <div className="relative flex h-2 w-2">
+                {isLiveActive && (
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75"></span>
+                )}
+                <span
+                  className={`relative inline-flex h-2 w-2 rounded-full ${isLiveActive ? "bg-green-500" : "bg-gray-400"}`}
+                ></span>
+              </div>
+              <span
+                className={`font-mono transition-all ${pulseLive ? "text-accent dark:text-accent-light scale-110 font-black" : "text-gray-900 dark:text-white"}`}
+              >
+                Live
+              </span>
+              <button
+                onClick={() => setIsLiveActive(!isLiveActive)}
+                className="ml-2 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+                title={isLiveActive ? "Pause auto refresh" : "Resume auto refresh"}
+              >
+                {isLiveActive ? <Pause size={12} /> : <Play size={12} />}
+              </button>
+            </div>
+          )}
 
           <AdminButton variant="outline" size="sm" onClick={handleForceSync} className="h-9">
             <RefreshCw size={12} className="mr-1" />
@@ -308,6 +338,25 @@ export const AdminPaymentsPage: React.FC = () => {
           </AdminButton>
         </div>
       </div>
+
+      {streamError && (
+        <div
+          role="alert"
+          className="p-4 rounded-2xl bg-rose-950/30 border border-rose-800/50 text-xs text-rose-300 flex items-center justify-between shadow-sm"
+        >
+          <div className="flex items-center gap-2">
+            <AlertOctagon size={16} className="text-rose-400 shrink-0" />
+            <div>
+              <p className="font-bold">Live Payment Stream Unavailable</p>
+              <p className="text-[11px] text-rose-400/90 mt-0.5">
+                {streamError.includes("permission") || streamError.includes("PERMISSION_DENIED")
+                  ? "Access restricted: Your account does not have permission to stream live transaction data."
+                  : streamError}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Honesty notice: what this board actually reads vs. what is fixture */}
       <div className="flex gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
@@ -334,18 +383,21 @@ export const AdminPaymentsPage: React.FC = () => {
             TODAY'S REVENUE
           </span>
           <span className="block text-3xl font-black font-mono tracking-tight text-gray-900 dark:text-white mt-1">
-            ₹
-            {metrics.todayRevenue.toLocaleString("en-IN", {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
-            })}
+            {streamError
+              ? "—"
+              : `₹${metrics.todayRevenue.toLocaleString("en-IN", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}`}
           </span>
           <div className="flex items-center gap-1 text-[10px] font-black text-primary dark:text-emerald-400 uppercase tracking-wider font-sans mt-3">
             <TrendingUp size={11} />
             <span>
-              {metrics.revenueDeltaPct === null
-                ? "No prior-day data"
-                : `${Number(metrics.revenueDeltaPct) >= 0 ? "+" : ""}${metrics.revenueDeltaPct}% vs yesterday`}
+              {streamError
+                ? "Stream Unavailable"
+                : metrics.revenueDeltaPct === null
+                  ? "No prior-day data"
+                  : `${Number(metrics.revenueDeltaPct) >= 0 ? "+" : ""}${metrics.revenueDeltaPct}% vs yesterday`}
             </span>
           </div>
         </AdminCard>
@@ -357,17 +409,23 @@ export const AdminPaymentsPage: React.FC = () => {
           </span>
           <div className="flex items-baseline gap-2 mt-1">
             <span className="text-3xl font-black font-mono tracking-tight text-gray-900 dark:text-white">
-              {metrics.successfulCount}
+              {streamError ? "—" : metrics.successfulCount}
             </span>
-            <span className="text-xs font-semibold text-gray-400">Captured</span>
+            <span className="text-xs font-semibold text-gray-400">{streamError ? "" : "Captured"}</span>
           </div>
           <div className="flex items-center gap-3 text-[10px] font-bold text-gray-400 mt-3 font-mono">
-            <span className="text-amber-500 flex items-center gap-0.5">
-              <Clock size={10} /> {metrics.pendingCount} Pending
-            </span>
-            <span className="text-red-500 flex items-center gap-0.5">
-              <AlertOctagon size={10} /> {metrics.failedCount} Failed
-            </span>
+            {streamError ? (
+              <span className="text-rose-400">Unavailable</span>
+            ) : (
+              <>
+                <span className="text-amber-500 flex items-center gap-0.5">
+                  <Clock size={10} /> {metrics.pendingCount} Pending
+                </span>
+                <span className="text-red-500 flex items-center gap-0.5">
+                  <AlertOctagon size={10} /> {metrics.failedCount} Failed
+                </span>
+              </>
+            )}
           </div>
         </AdminCard>
 
@@ -377,10 +435,10 @@ export const AdminPaymentsPage: React.FC = () => {
             REFUNDS OUTFLOW
           </span>
           <span className="block text-3xl font-black font-mono tracking-tight text-gray-900 dark:text-white mt-1">
-            ₹{metrics.refundedAmt.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+            {streamError ? "—" : `₹${metrics.refundedAmt.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`}
           </span>
           <div className="flex items-center gap-2 text-[10px] font-black text-accent dark:text-accent-light uppercase tracking-wider font-mono mt-3">
-            <span>● {metrics.refundRequestsCount} ACTIVE REQUESTS</span>
+            <span>{streamError ? "● UNAVAILABLE" : `● ${metrics.refundRequestsCount} ACTIVE REQUESTS`}</span>
           </div>
         </AdminCard>
 
@@ -390,10 +448,10 @@ export const AdminPaymentsPage: React.FC = () => {
             KPI SUCCESS RATE
           </span>
           <span className="block text-3xl font-black font-mono tracking-tight text-white mt-1">
-            {metrics.gatewaySuccessRate}%
+            {streamError ? "—" : `${metrics.gatewaySuccessRate}%`}
           </span>
           <div className="flex items-center justify-between text-[10px] font-bold text-green-200 uppercase tracking-wider font-sans mt-3">
-            <span>Live from Firestore</span>
+            <span>{streamError ? "Stream Unavailable" : "Live from Firestore"}</span>
           </div>
         </AdminCard>
       </div>
@@ -450,11 +508,11 @@ export const AdminPaymentsPage: React.FC = () => {
                 className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-50 dark:border-gray-800/80 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none dark:text-white disabled:opacity-50"
               >
                 <option value="all">All Outlets</option>
-                <option value="str_001">Burgonomics Navrangpura</option>
-                <option value="str_002">Burgonomics Nehrunagar</option>
-                <option value="str_003">Burgonomics Mansi Circle</option>
-                <option value="str_004">Burgonomics Science City</option>
-                <option value="str_005">Burgonomics Gota</option>
+                {storeOptions.map((opt) => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.name}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -561,10 +619,14 @@ export const AdminPaymentsPage: React.FC = () => {
               <CreditCard size={20} />
             </div>
             <h5 className="text-xs font-bold text-gray-900 dark:text-white">
-              No Transactions Match Filter Criteria
+              {streamError
+                ? "Live Transaction Stream Unavailable"
+                : "No Transactions Match Filter Criteria"}
             </h5>
             <p className="text-[10px] text-gray-400 mt-1 max-w-sm">
-              Try broadening your ledger query or adjusting the store selectors.
+              {streamError
+                ? "Live payments data could not be retrieved from Firestore. Check permissions or network connection."
+                : "Try broadening your ledger query or adjusting the store selectors."}
             </p>
           </div>
         ) : (

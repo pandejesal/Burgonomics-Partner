@@ -1537,6 +1537,9 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
               ),
             );
             const cancelled = results.filter(Boolean).length;
+            if (cancelled === 0 && selection.length > 0) {
+              throw new Error("Bulk cancellation failed — no orders were cancelled.");
+            }
             if (cancelled > 0) {
               toast.success(
                 `${cancelled} order${cancelled === 1 ? "" : "s"} cancelled — no refund was issued.`,
@@ -1559,7 +1562,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
             confirmAction.type === "refund"
           }
           onClose={() => setConfirmAction(null)}
-          onConfirm={() => {
+          onConfirm={async () => {
             // Loop 32/120: money/sync actions MUST hit the server (see refund
             // + petpooja branches below) — never local flips with fake logs.
             // Audit actor is the signed-in operator, never a hardcoded name.
@@ -1567,28 +1570,37 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
               admin?.fullName && selectedRole
                 ? `${admin.fullName} (${selectedRole})`
                 : selectedRole || "Staff";
-            const doConfirm = async () => {
-              if (confirmAction.type === "accept") {
-                handleUpdateStatus(
-                  confirmAction.orderId,
-                  "Accepted",
-                  actorLabel,
-                  "Accepted order and pushed to kitchen printer",
-                );
-              } else if (confirmAction.type === "reject") {
-                handleUpdateStatus(
-                  confirmAction.orderId,
-                  "Cancelled",
-                  actorLabel,
-                  "Store manager rejected order due to high operational volume",
-                );
-              } else if (confirmAction.type === "cancel") {
-                handleUpdateStatus(
-                  confirmAction.orderId,
-                  "Cancelled",
-                  actorLabel,
-                  "Voided and cancelled session",
-                );
+
+            if (confirmAction.type === "accept") {
+              const ok = await handleUpdateStatus(
+                confirmAction.orderId,
+                "Accepted",
+                actorLabel,
+                "Accepted order and pushed to kitchen printer",
+              );
+              if (!ok) {
+                throw new Error("Failed to accept order.");
+              }
+            } else if (confirmAction.type === "reject") {
+              const ok = await handleUpdateStatus(
+                confirmAction.orderId,
+                "Cancelled",
+                actorLabel,
+                "Store manager rejected order due to high operational volume",
+              );
+              if (!ok) {
+                throw new Error("Failed to reject order.");
+              }
+            } else if (confirmAction.type === "cancel") {
+              const ok = await handleUpdateStatus(
+                confirmAction.orderId,
+                "Cancelled",
+                actorLabel,
+                "Voided and cancelled session",
+              );
+              if (!ok) {
+                throw new Error("Failed to cancel order.");
+              }
             } else if (confirmAction.type === "refund") {
               const target = orders.find((o) => o.id === confirmAction.orderId);
               if (!target || !canTriggerBoardRefund(selectedRole, target)) {
@@ -1596,6 +1608,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                   description:
                     "Refunds are released by brand admins from a Completed, Paid order.",
                 });
+                throw new Error("This account cannot release this refund from the order board.");
               } else {
                 const request = buildOpsRefundRequest(target);
                 if (!request) {
@@ -1603,6 +1616,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                     description:
                       "A brand admin must locate the capture in Payments and release the refund manually.",
                   });
+                  throw new Error("No Razorpay payment id on this order.");
                 } else {
                   try {
                     const res = await partnerFunctionsApi.releaseRefund(request);
@@ -1611,6 +1625,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                     toast.error("Refund NOT issued — no money moved.", {
                       description: err instanceof Error ? err.message : String(err),
                     });
+                    throw err;
                   }
                 }
               }
@@ -1631,17 +1646,16 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                   toast.success("KOT pushed to Petpooja (server confirmed).");
                 } else {
                   toast.error("Petpooja push NOT confirmed by the server.");
+                  throw new Error("Petpooja push NOT confirmed by the server.");
                 }
               } catch (err) {
                 toast.error("Petpooja push failed — nothing was sent.", {
                   description: err instanceof Error ? err.message : String(err),
                 });
+                throw err;
               }
             }
-            setConfirmAction(null);
-            };
-            void doConfirm();
-            }}
+          }}
           title={
             confirmAction.type === "accept"
               ? "Accept Incoming Order?"

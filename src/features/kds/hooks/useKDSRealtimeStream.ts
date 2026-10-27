@@ -524,12 +524,11 @@ export function useKDSRealtimeStream() {
   // dot whenever Firestore stalled. This branch-scoped, RBAC-clamped
   // onSnapshot replaces the poll; every snapshot is truth. lastRefreshAt
   // tracks the last successful stream delivery — never a manual tap
-  // (refresh() resubscribes to force a fresh snapshot).
+  // (refresh() resubscribes to force a fresh snapshot) and NEVER the
+  // background HTTP poll: a successful useOrders refetch proves the REST
+  // read worked, not that the displayed makeline moved, so stamping it here
+  // is exactly the frozen-board lie this field exists to prevent.
   const [lastRefreshAt, setLastRefreshAt] = useState<number>(Date.now());
-
-  useEffect(() => {
-    if (!isLoading && !ordersError) setLastRefreshAt(Date.now());
-  }, [isLoading, ordersError, orders]);
 
   useEffect(() => {
     if (!user) return;

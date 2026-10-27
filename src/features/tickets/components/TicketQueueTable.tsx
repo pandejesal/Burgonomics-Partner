@@ -12,9 +12,14 @@ import {
 } from 'lucide-react';
 import { EscalationTierBadge } from './EscalationTierBadge';
 import type { Ticket, TicketPriority } from '@/types';
+import { resolveTicketTier } from '@/utils/ticketContract';
 
 interface TicketQueueTableProps {
   tickets: Ticket[];
+  isLoading?: boolean;
+  error?: Error | unknown | null;
+  warnings?: string[];
+  onRetry?: () => void;
   onOpenResolveModal: (ticket: Ticket) => void;
   onQuickEscalate: (ticket: Ticket) => void;
   onClearFilters?: () => void;
@@ -37,10 +42,57 @@ const CATEGORY_ICONS: Record<string, string> = {
 
 export function TicketQueueTable({
   tickets,
+  isLoading = false,
+  error = null,
+  warnings = [],
+  onRetry,
   onOpenResolveModal,
   onQuickEscalate,
   onClearFilters,
 }: TicketQueueTableProps) {
+  if (isLoading) {
+    return (
+      <div
+        data-testid="tickets-loading"
+        className="rounded-3xl border border-neutral-800 bg-[#090909] p-12 text-center shadow-xl"
+      >
+        <div className="inline-block animate-spin rounded-full h-8 w-8 border-2 border-emerald-500 border-t-transparent mb-3" />
+        <h3 className="font-bold text-white text-base">Loading Support Queue...</h3>
+        <p className="text-xs text-neutral-400 mt-1">Connecting to live branch tickets</p>
+      </div>
+    );
+  }
+
+  if (error || (warnings && warnings.length > 0 && tickets.length === 0)) {
+    const errorMessage =
+      error instanceof Error
+        ? error.message
+        : error
+          ? String(error)
+          : warnings?.[0] || "Failed to load support tickets";
+
+    return (
+      <div
+        role="alert"
+        data-testid="tickets-error"
+        className="text-center py-12 bg-rose-950/20 rounded-3xl border border-rose-800/40 p-8 shadow-xl"
+      >
+        <AlertCircle className="w-10 h-10 mx-auto text-rose-500 mb-2" />
+        <h3 className="font-bold text-white text-base">Unable to Load Support Queue</h3>
+        <p className="text-xs text-rose-300 mt-1 max-w-md mx-auto">{errorMessage}</p>
+        {onRetry && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-4 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition-colors cursor-pointer min-h-[44px]"
+          >
+            Retry Loading Queue
+          </button>
+        )}
+      </div>
+    );
+  }
+
   if (tickets.length === 0) {
     return (
       <div className="text-center py-16 bg-neutral-900/40 rounded-3xl border border-dashed border-neutral-800 p-8">
@@ -84,11 +136,7 @@ export function TicketQueueTable({
               const orderId = t.orderId || (t as any).orderShortCode;
               const isResolved = t.status === 'resolved' || t.status === 'closed';
 
-              const level =
-                (t as any).escalationLevel ||
-                (t as any).assignedToTier ||
-                (t as any).assignedTo?.tier ||
-                'L1_STORE';
+              const level = resolveTicketTier(t);
 
               return (
                 <tr key={t.id} className="hover:bg-neutral-900/50 transition-colors">

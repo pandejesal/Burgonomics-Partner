@@ -15,7 +15,9 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "typecheck:test-harness": "tsc --noEmit -p tsconfig.test-harness.json",
+    "typecheck:new-tests": "tsc --noEmit -p tsconfig.new-tests.json"
   },
   "dependencies": {
     "@aparajita/capacitor-secure-storage": "^8.0.0",

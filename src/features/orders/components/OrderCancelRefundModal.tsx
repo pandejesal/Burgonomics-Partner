@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, AlertTriangle, RefreshCw, ShieldAlert, CheckCircle2 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { canReleaseRefund } from '@/admin/pages/refundRoles';
+import { canCancelOrder } from '@/features/orders/orderCancelRoles';
 import type { Order } from '@/types';
 
 interface OrderCancelRefundModalProps {
@@ -56,13 +57,13 @@ export function OrderCancelRefundModal({
 
   if (!isOpen) return null;
 
-  // RBAC Permission Check — fail CLOSED. The old list named roles that do
+  // RBAC Permission Check — fail CLOSED, single source shared with the order
+  // detail action (orderCancelRoles). The old local list named roles that do
   // not exist ('superadmin', 'branch_manager') and granted access when the
   // role was MISSING entirely. branch_staff is allowed to cancel: the server
   // route enforces same-branch scope, so a staff member can only cancel their
-  // own outlet's orders.
-  const allowedRoles = ['brand_owner', 'developer', 'branch_owner', 'branch_staff'];
-  const hasPermission = !!user?.role && allowedRoles.includes(user.role);
+  // own outlet's orders. Refund release stays a separate, stricter matrix.
+  const hasPermission = canCancelOrder(user?.role);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

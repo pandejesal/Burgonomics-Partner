@@ -67,19 +67,26 @@ export interface TransactionDetails {
   }>;
 }
 
+export type RefundStatus = "PENDING" | "COMPLETED" | "FAILED" | "REJECTED" | "UNKNOWN";
+
 export interface RefundDetails {
   id: string;
   paymentId: string;
   orderId: string;
   customerName: string;
   storeName: string;
-  amountPaise: number;
+  amountPaise: number | null;
   reason: string;
-  status: "PENDING" | "COMPLETED" | "FAILED";
+  status: RefundStatus;
   processedBy: string;
+  /** Where the request came from (e.g. POS auto-cancel), distinct from who acted. */
+  source?: string | null;
   gatewayStatus: string;
   createdAt: string;
   completedAt: string | null;
+  razorpayPaymentId?: string;
+  branchId?: string | null;
+  detail?: string | null;
 }
 
 export interface DiscrepancyDetails {
@@ -1021,7 +1028,7 @@ class PaymentDataStorage {
       txn.timeline.push({
         status: "refunded",
         title: "Refund Approved by Manager",
-        description: `₹${(r.amountPaise / 100).toFixed(2)} settled. Reason: ${r.reason}`,
+        description: `${r.amountPaise != null ? `₹${(r.amountPaise / 100).toFixed(2)}` : "Amount unspecified"} settled. Reason: ${r.reason}`,
         time: new Date().toISOString().slice(0, 19).replace("T", " "),
       });
     }

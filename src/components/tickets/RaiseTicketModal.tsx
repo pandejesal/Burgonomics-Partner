@@ -114,8 +114,16 @@ export const RaiseTicketModal: React.FC<RaiseTicketModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm select-none">
-      <div className="bg-surface border border-border rounded-2xl w-full max-w-xl overflow-hidden shadow-2xl text-white">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4 bg-black/80 backdrop-blur-sm select-none"
+      style={{
+        // Fixed overlays sit outside #root's bottom inset. max() avoids
+        // stacking the fallback 1rem on top of the device inset.
+        paddingTop: "max(1rem, env(safe-area-inset-top, 0px))",
+        paddingBottom: "max(1rem, env(safe-area-inset-bottom, 0px))",
+      }}
+    >
+      <div className="bg-surface border border-border rounded-2xl w-full max-w-xl max-h-full flex flex-col overflow-hidden shadow-2xl text-white">
         {/* Header */}
         <div className="p-5 border-b border-border flex items-center justify-between">
           <div className="flex items-center space-x-3">
@@ -161,7 +169,7 @@ export const RaiseTicketModal: React.FC<RaiseTicketModalProps> = ({
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="p-5 space-y-3.5 max-h-[calc(100vh-14rem)] overflow-y-auto">
+        <form onSubmit={handleSubmit} className="p-5 space-y-3.5 flex-1 min-h-0 overflow-y-auto">
           {formError && (
             <div role="alert" className="p-3 rounded-xl bg-rose-950/60 border border-rose-800/60 text-rose-300 text-xs">{formError}</div>
           )}

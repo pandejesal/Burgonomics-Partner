@@ -36,7 +36,13 @@
 html, body, #root {
   background: var(--color-bg);
   color: var(--color-text-primary);
-  /* safe-area for notches / gesture nav — India devices with punch-hole notches */
+}
+/* Safe-area for notches / gesture nav — applied ONCE, on the app root only.
+   Nested padding stacks (html > body > #root), so repeating the inset on all
+   three boxes multiplied a 34px gesture bar into ~102px of dead space on
+   every route. Top inset stays per-surface via .pt-safe (header heights
+   unchanged). */
+#root {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 body {

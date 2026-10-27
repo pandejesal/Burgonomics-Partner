@@ -26,6 +26,8 @@ import {
   FlaskConical,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAuthStore } from '@/stores/authStore';
+import { canCancelOrder } from '@/features/orders/orderCancelRoles';
 import type { OrderStatus } from '@/types';
 import { ConfirmDialog } from '../admin/components/Utilities';
 import { DeliveryOtpModal } from '@/components/DeliveryOtpModal';
@@ -38,6 +40,7 @@ export function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { user } = useAuthStore();
 
   const {
     order,
@@ -444,17 +447,23 @@ export function OrderDetailPage() {
             <span>Petpooja Test Lab</span>
           </button>
 
-          {/* Cancel Order */}
-          {order.status !== 'cancelled' && order.status !== 'delivered' && (
-            <button
-              type="button"
-              onClick={() => setShowCancelModal(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900 border border-rose-800/60 text-rose-300 font-bold text-xs transition-colors cursor-pointer"
-            >
-              <XCircle className="w-4 h-4" />
-              <span>Cancel / Refund</span>
-            </button>
-          )}
+          {/* Cancel Order — gated by the SAME shared role matrix the modal
+              enforces: support/regional_manager can open /orders but the
+              server refuses their cancel, so offering the button only led to
+              a dead-end authorization wall. Unauthorized roles see a truthful
+              read-only view with no destructive option. */}
+          {order.status !== 'cancelled' &&
+            order.status !== 'delivered' &&
+            canCancelOrder(user?.role) && (
+              <button
+                type="button"
+                onClick={() => setShowCancelModal(true)}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900 border border-rose-800/60 text-rose-300 font-bold text-xs transition-colors cursor-pointer"
+              >
+                <XCircle className="w-4 h-4" />
+                <span>Cancel / Refund</span>
+              </button>
+            )}
         </div>
       </div>
 
