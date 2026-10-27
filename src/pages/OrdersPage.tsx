@@ -84,7 +84,9 @@ export function OrdersPage() {
       { header: 'Delivery Fee (INR)', accessor: (o) => o.deliveryFee },
       { header: 'Total (INR)', accessor: (o) => o.total },
       { header: 'Petpooja POS ID', accessor: (o) => o.petpoojaOrderId || 'N/A' },
-      { header: 'Petpooja Sync', accessor: (o) => o.petpoojaSyncStatus || 'synced' },
+      // Absence is not proof of sync: the POS state is server-owned and a
+      // just-created walk-in order has no state until orderPush writes it.
+      { header: 'Petpooja Sync', accessor: (o) => o.petpoojaSyncStatus || 'pending' },
     ]);
   };
 
