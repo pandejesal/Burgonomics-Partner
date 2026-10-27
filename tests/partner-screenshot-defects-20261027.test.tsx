@@ -150,6 +150,18 @@ describe('Team & Staff — raw Firestore rows cannot crash the roster', () => {
     expect(user.pinSet).toBe(false);
   });
 
+  it('turns a Firestore Timestamp lastActiveAt into safe display text', () => {
+    const user = normalizeTeamUserDoc('usr_timestamp', {
+      name: 'Timestamp Staff',
+      email: 'timestamp@example.com',
+      role: 'branch_staff',
+      lastActiveAt: { seconds: 1793088000, nanoseconds: 0 },
+    });
+
+    expect(user.lastActiveAt).toBe('2026-10-27T08:00:00.000Z');
+    expect(typeof user.lastActiveAt).toBe('string');
+  });
+
   it('preserves a real unknown role string for the generic badge instead of granting a known role', () => {
     const user = normalizeTeamUserDoc('usr_unknown_role', {
       name: 'Mystery Staff',
@@ -283,16 +295,21 @@ describe('Admin payments — raw snapshot rows are normalized or dropped', () =>
   });
 });
 
-describe('Delivery Queue heading — theme-aware on the light admin frame', () => {
-  it('uses a dark heading on light and white only under dark mode', () => {
+describe('Delivery Queue heading — dark-native page and admin canvas', () => {
+  it('keeps a white heading for the dark partner console and wraps the admin mount', () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
         <DeliveryQueuePage />
       </MemoryRouter>,
     );
+    const adminRoutes = readFileSync(
+      new URL('../src/pages/admin/AdminRoutes.tsx', import.meta.url),
+      'utf8',
+    );
 
-    expect(html).toMatch(/<h1[^>]*class="[^"]*text-gray-900[^"]*"/);
-    expect(html).toMatch(/<h1[^>]*class="[^"]*dark:text-white[^"]*"/);
+    expect(html).toMatch(/<h1[^>]*class="[^"]*text-white[^"]*"/);
+    expect(html).not.toContain('text-gray-900');
+    expect(adminRoutes).toContain('bg-[#0a0f0c] p-4 text-gray-200');
   });
 });
 

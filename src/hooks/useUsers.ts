@@ -123,7 +123,7 @@ export interface TeamUser {
   pin?: string;
   hashedPin?: string;
   pinSet?: boolean;
-  lastActiveAt?: any;
+  lastActiveAt?: string;
   createdAt?: any;
   invitedBy?: string;
   updatedAt?: any;
@@ -141,6 +141,29 @@ function asTeamText(value: unknown): string {
 function asTeamStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is string => typeof entry === 'string');
+}
+
+/** Firestore Timestamp / Date / number -> render-safe ISO string. Never let a
+ * Timestamp object reach a React child (`Objects are not valid as a React child`). */
+function asTeamTime(value: unknown): string | undefined {
+  if (value == null) return undefined;
+  if (typeof value === 'string') return value || undefined;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return new Date(value).toISOString();
+  }
+  const candidate = value as { toDate?: () => unknown; seconds?: unknown };
+  try {
+    if (typeof candidate.toDate === 'function') {
+      const date = candidate.toDate();
+      if (date instanceof Date && Number.isFinite(date.getTime())) return date.toISOString();
+    }
+    if (typeof candidate.seconds === 'number' && Number.isFinite(candidate.seconds)) {
+      return new Date(candidate.seconds * 1000).toISOString();
+    }
+  } catch {
+    // fall through to undefined
+  }
+  return undefined;
 }
 
 /**
@@ -169,7 +192,7 @@ export function normalizeTeamUserDoc(id: string, raw: unknown): TeamUser {
     pinSet: 'pinSet' in data ? Boolean(data.pinSet) : true,
     pin: asTeamText(data.pin) || undefined,
     hashedPin: asTeamText(data.hashedPin) || undefined,
-    lastActiveAt: data.lastActiveAt,
+    lastActiveAt: asTeamTime(data.lastActiveAt),
     createdAt: data.createdAt,
     invitedBy: asTeamText(data.invitedBy) || undefined,
     updatedAt: data.updatedAt,

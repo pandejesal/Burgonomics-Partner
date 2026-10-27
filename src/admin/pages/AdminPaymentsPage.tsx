@@ -171,9 +171,11 @@ export const AdminPaymentsPage: React.FC<AdminPaymentsPageProps> = ({
         if (selectedGateway === "Netbanking" && !t.gateway.includes("Netbanking")) return false;
       }
 
-      // Date Filter
+      // Date Filter — normalized rows carry ISO-8601 (`YYYY-MM-DD...`), so the
+      // old space split never matched. Compare the same date prefix the KPI
+      // cards use.
       if (selectedDate !== "all") {
-        const datePart = t.createdAt.split(" ")[0];
+        const datePart = typeof t.createdAt === "string" ? t.createdAt.slice(0, 10) : "";
         if (selectedDate === "today" && datePart !== todayStr) return false;
         if (selectedDate === "yesterday" && datePart !== yesterdayStr) return false;
       }

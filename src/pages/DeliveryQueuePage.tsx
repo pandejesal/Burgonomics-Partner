@@ -107,7 +107,7 @@ export function DeliveryQueuePage() {
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
         <div>
-          <h1 className="text-2xl font-black text-gray-900 dark:text-white tracking-wide flex items-center gap-2.5">
+          <h1 className="text-2xl font-black text-white tracking-wide flex items-center gap-2.5">
             <span>Delivery Queue & Courier Dispatch</span>
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-orange-950 border border-orange-500/40 text-orange-400 font-bold">
               3PL Dispatch

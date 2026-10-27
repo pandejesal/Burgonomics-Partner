@@ -325,7 +325,13 @@ export function AdminRoutes() {
           path="delivery-queue"
           element={
             <PetpoojaOperationsLayout>
-              <DeliveryQueuePage />
+              {/* The delivery queue is dark-native in the partner console.
+                  Admin ThemeProvider does not add `.dark`, so give the light
+                  admin frame an explicit dark canvas instead of rewriting the
+                  whole page's palette for one mount. */}
+              <div className="rounded-2xl bg-[#0a0f0c] p-4 text-gray-200">
+                <DeliveryQueuePage />
+              </div>
             </PetpoojaOperationsLayout>
           }
         />

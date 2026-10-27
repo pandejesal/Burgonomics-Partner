@@ -115,9 +115,14 @@ export function normalizeTransactionSnapshotDoc(docSnap: {
 }): TransactionDetails | null {
   try {
     const raw = asPaymentRecord(docSnap.data());
-    const amountPaise = normalizePaymentAmountPaise(raw.amountPaise);
+    const amountPaise = normalizePaymentAmountPaise(raw.amountPaise ?? raw.amount_paise);
     const status = normalizePaymentStatus(raw.status);
-    if (!amountPaise || !status) return null;
+    if (!amountPaise || !status) {
+      console.warn(
+        `[adminPaymentsService] Dropped payment ${docSnap.id}: amount=${String(raw.amountPaise)} status=${String(raw.status)}`,
+      );
+      return null;
+    }
 
     const customer = asPaymentRecord(raw.customer);
     const store = asPaymentRecord(raw.store);
