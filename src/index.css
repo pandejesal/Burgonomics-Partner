@@ -2,6 +2,14 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/InterVariable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 @theme {
   /* STRICT 60-30-10: Forest Green #0E4825 (30%), Vibrant Orange #C2410C (10%), India Dark Canvas */
   --color-primary: #0E4825;
@@ -11,11 +19,23 @@
   --color-secondary: #0E4825;
   --color-secondary-light: #145830;
   --color-secondary-dark: #132A17;
-  /* accent = contrast-safe (AA) orange: fills + light-surface text + borders
-     accent-light = bright twin for text on dark surfaces */
+  /* READABLE CTA PAIR (ratios in tests/token-accessibility.test.ts):
+     --color-accent is the 10% orange as a FILL / border, and its label is
+     white (--color-accent-foreground, same value, named so the pair is
+     explicit): white on it is 5.18:1, on the hover fill 7.31:1.
+     --color-accent as TEXT on the dark canvas is only 3.36-3.82:1, so that
+     role belongs to --color-accent-light (#FF802B, 6.34-7.90:1 on dark
+     surfaces; it must NOT be used on the light-styled admin inputs — 2.51:1).
+     Decorative/legacy brand orange #FF6600 (2.94:1 on white) is never a text
+     or fill-with-label token in this app. */
   --color-accent: #C2410C;
   --color-accent-hover: #9A3412;
+  --color-accent-foreground: #FFFFFF;
   --color-accent-light: #FF802B;
+  /* Focus ring: clears the 3:1 non-text bar on BOTH the dark canvas
+     (#0A0A0A: 3.82:1, #1A1A1A: 3.36:1) and the light-styled admin inputs
+     (#FFFFFF: 5.18:1). --color-accent-light would fail the white ones. */
+  --color-ring: #C2410C;
   --color-bg: #0A0A0A;
   --color-surface: #1A1A1A;
   --color-surface-hover: #222222;
@@ -29,22 +49,80 @@
   --color-error: #DC2626;
   /* legacy aliases */
   --color-brand: #0E4825;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 * { border-color: var(--color-border); }
+
+/* B01: one global keyboard focus indicator.
+   Partner inputs/buttons ship `focus:outline-none` in several places, so the
+   ring is defined once here with !important and cannot be deleted downstream.
+   2px outline + 2px offset keeps it outside the control's own fill, where
+   --color-ring clears 3:1 against every surface it can land on (SC 2.4.7
+   visible focus, SC 1.4.11 non-text contrast). Not gated behind a fine-pointer
+   media query: an operator can pair a tablet with a hardware keyboard, and
+   :focus-visible already stays off plain touch/mouse activation. */
+*:focus-visible {
+  outline: 2px solid var(--color-ring) !important;
+  outline-offset: 2px !important;
+}
 
 html, body, #root {
   background: var(--color-bg);
   color: var(--color-text-primary);
   /* safe-area for notches / gesture nav — India devices with punch-hole notches */
-  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
+/* Consume the bottom inset once, not on three nested ancestors. Capacitor's
+   legacy WebView branch consumes insets natively and injects zero CSS vars. */
+#root { padding-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)); }
 body {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  font-family: var(--font-sans);
   -webkit-tap-highlight-color: transparent;
   -webkit-font-smoothing: antialiased;
 }
 /* safe-area utilities for KDS fullscreen / headers */
-.pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
-.pt-safe { padding-top: env(safe-area-inset-top, 0px); }
-.top-safe { top: env(safe-area-inset-top, 0px); }
+.pb-safe { padding-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)); }
+.pt-safe { padding-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px)); }
+.top-safe { top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px)); }
+
+/* ==========================================================================
+   Reduced motion — bounded, not blanket (B01).
+
+   `prefers-reduced-motion` is a CSS Media Queries Level 5 user preference, not
+   a WCAG success criterion; honouring it here means removing the large-scale
+   movement that triggers vestibular symptoms WITHOUT deleting the feedback
+   that tells an operator a background job is still alive.
+
+   - Movement collapses: transform/position/scale transitions leave the
+     transition list (they jump instead of sliding), decorative loops run one
+     120ms cycle and stop.
+   - State feedback survives: colour/background/border/outline/opacity/shadow
+     transitions keep running, capped at 120ms.
+   - Operational status animation is exempt and keeps running at a normalised
+     rate — a sync spinner or live dot that freezes reads as "job died", which
+     is worse feedback than no animation at all.
+   JS-driven motion (motion/React) is not addressable from this stylesheet and
+   is unchanged; reduced-motion handling there stays a component concern.
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 120ms !important;
+    animation-iteration-count: 1 !important;
+    transition-property: color, background-color, border-color, outline-color, opacity, box-shadow !important;
+    transition-duration: 120ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Operational status feedback — exempt from the bound above (B01):
+     .animate-spin = KDS/Petpooja sync + refresh spinners,
+     .animate-pulse = live/streaming dots and health widgets,
+     .animate-ping = status radar pings. */
+  .animate-spin,
+  .animate-ping,
+  .animate-pulse {
+    animation-duration: 1.6s !important;
+    animation-iteration-count: infinite !important;
+  }
+}
