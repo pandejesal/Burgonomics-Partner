@@ -85,7 +85,7 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0A0A0A] flex items-center justify-center p-4 text-white font-sans antialiased selection:bg-[#FF6600] selection:text-white">
+    <main className="min-h-screen bg-[#0A0A0A] flex items-center justify-center p-4 text-white font-sans antialiased selection:bg-[#FF6600] selection:text-white">
       <div className="w-full max-w-md space-y-6">
         {/* Brand Header */}
         <div className="text-center space-y-3">
@@ -165,7 +165,7 @@ export function LoginPage() {
                   onClick={() => setShowPassword(!showPassword)}
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                   aria-pressed={showPassword}
-                  className="absolute right-3 top-3 text-zinc-500 hover:text-zinc-300 transition-colors"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 min-h-6 min-w-6 inline-flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-300 transition-colors"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -198,7 +198,7 @@ export function LoginPage() {
           </form>
         </div>
       </div>
-    </div>
+    </main>
   );
 }
 

@@ -1,5 +1,5 @@
 import { BrowserRouter, HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { QueryClient, QueryClientProvider, QueryCache, MutationCache } from '@tanstack/react-query';
 import { LoginPage } from '@/pages/LoginPage';
@@ -22,6 +22,7 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { ProtectedRoute } from '@/core/auth/ProtectedRoute';
 import { AdminRoutes, ADMIN_PORTAL_ROLES } from '@/pages/admin/AdminRoutes';
 import { ChatPage } from '@/pages/ChatPage';
+import { titleForPath } from '@/utils/routeTitle';
 
 import { AuthProvider } from '@/core/auth/AuthContext';
 import { Toaster, toast } from 'sonner';
@@ -71,12 +72,25 @@ function RouteErrorBoundary({ children }: { children: ReactNode }) {
   return <AppErrorBoundary key={location.pathname}>{children}</AppErrorBoundary>;
 }
 
+/**
+ * One central place for the document title (A11Y-L5): every route used to
+ * render the static "Burgonomics Partner" title from index.html.
+ */
+function RouteTitle() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    document.title = titleForPath(pathname);
+  }, [pathname]);
+  return null;
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <AppErrorBoundary>
           <Router>
+          <RouteTitle />
           <RouteErrorBoundary>
           <Routes>
           {/* Public routes — single sign-in lives here. The legacy
