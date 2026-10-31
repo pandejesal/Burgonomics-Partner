@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.glassdoorsstudio.burgonomics.partner',
+  appId: 'com.burgonomics.partner',
   appName: 'Burgonomics Partner',
   webDir: 'dist',
   bundledWebRuntime: false,

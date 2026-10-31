@@ -15,17 +15,15 @@ import type { MenuItem, MenuCategory } from '@/types';
 import {
   syncPetpoojaMenuForBranch,
   checkAndAutoSyncMenu,
-  BURGONOMICS_DEFAULT_CATEGORIES,
   BURGONOMICS_63_ITEMS,
 } from '@/services/petpoojaSync';
 
 /**
- * Seed catalog is DEV-only (Runbook §8). Production with an empty/errored
- * menu backend shows an empty menu — never 63 invented items.
+ * Seed catalog is DEV-only (Runbook §8) and gate to a GENUINELY empty
+ * backend. Production with an empty/errored menu backend shows an honest
+ * empty/error menu — never 63 invented items; a failed read never seeds.
  */
 const ALLOW_SEED_CATALOG = import.meta.env.DEV;
-const SEED_CATEGORIES: MenuCategory[] = ALLOW_SEED_CATALOG ? BURGONOMICS_DEFAULT_CATEGORIES : [];
-const SEED_ITEMS: MenuItem[] = ALLOW_SEED_CATALOG ? (BURGONOMICS_63_ITEMS as MenuItem[]) : [];
 
 /**
  * Canonical menu source: the `products` collection (written by server
@@ -61,6 +59,21 @@ function mapProductDoc(id: string, data: Record<string, any>): MenuItem {
   } as MenuItem;
 }
 
+/**
+ * Dev-only demo menu for a GENUINELY EMPTY backend (Runbook §8). Copied from
+ * the default demo catalog with [DEMO]-prefixed names and NO invented
+ * backend-state claims — no fabricated POS-sync timestamps so a row never
+ * reads as "synced from Petpooja". Availability toggles on these fallback
+ * items reject loudly (updateDoc on a non-existent doc id, F16 no-create).
+ */
+export function demoSeedMenuItems(): MenuItem[] {
+  return (BURGONOMICS_63_ITEMS as MenuItem[]).map((item) => ({
+    ...item,
+    name: item.name?.startsWith('[DEMO]') ? item.name : `[DEMO] ${item.name}`,
+    lastSyncedAt: undefined,
+  }));
+}
+
 export function useMenu() {
   const { user } = useAuth();
   const { selectedBranchId } = useAppStore();
@@ -83,8 +96,9 @@ export function useMenu() {
     queryKey: ['menuItems', branchId],
     queryFn: async () => {
       if (!branchId) {
-        if (!ALLOW_SEED_CATALOG) throw new Error('No branch selected');
-        return SEED_ITEMS;
+        // Without a branch there is no menu to read — an honest throw/error
+        // in dev too (the demo catalog belongs to a selected outlet only).
+        throw new Error('No branch selected');
       }
 
       try {
@@ -107,15 +121,13 @@ export function useMenu() {
           if (!ALLOW_SEED_CATALOG) {
             throw new Error('Menu is empty for this outlet — sync from Petpooja.');
           }
-          return SEED_ITEMS;
+          return demoSeedMenuItems();
         }
 
         return itemsSnap.docs.map((d) => mapProductDoc(d.id, d.data() as Record<string, any>));
       } catch (err: any) {
-        if (ALLOW_SEED_CATALOG) {
-          console.warn('Error loading menu items:', err?.message || err);
-          return SEED_ITEMS;
-        }
+        // A failed read must never swap in the demo catalog (Runbook §8) —
+        // dev and prod alike surface the error and MenuPage show the retry.
         throw err instanceof Error ? err : new Error('Menu failed to load.');
       }
     },
@@ -124,8 +136,9 @@ export function useMenu() {
   });
 
   // Categories derived from the canonical items (first-seen order, counts).
+  // No seed fallback: an empty/erroring catalog derives zero categories —
+  // honest, never invented rails.
   const categories: MenuCategory[] = useMemo(() => {
-    if (products.length === 0) return SEED_CATEGORIES;
     const seen = new Map<string, MenuCategory & { itemCount: number }>();
     for (const item of products) {
       const id = item.categoryId || 'uncategorized';
@@ -145,7 +158,7 @@ export function useMenu() {
     return [...seen.values()] as MenuCategory[];
   }, [products]);
 
-  const items = products.length > 0 ? products : SEED_ITEMS;
+  const items = products;
 
   // Background staleness check (hourly auto-sync)
   useEffect(() => {

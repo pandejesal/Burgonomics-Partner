@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Navigate } from 'react-router-dom';
 import { useBranches, type CreateBranchInput } from '@/hooks/useBranches';
 import { useAuthStore } from '@/stores/authStore';
 import { BranchConfigModal } from '@/features/branches/components/BranchConfigModal';
@@ -27,6 +28,10 @@ import {
 } from 'lucide-react';
 import type { Branch } from '@/types';
 import type { FranchiseLead } from '@/hooks/useFranchiseLeads';
+import { toast } from 'sonner';
+
+const isActiveBranch = (branch: Branch): boolean =>
+  branch.status === 'active' || (branch.active && !branch.status);
 
 export function BranchesPage() {
   const { user } = useAuthStore();
@@ -48,6 +53,14 @@ export function BranchesPage() {
   const [activatingBranch, setActivatingBranch] = useState<Branch | null>(null);
   const [petpoojaInputId, setPetpoojaInputId] = useState('');
 
+  // Defense-in-depth page guard: router-level ProtectedRoute is the primary
+  // gate, but this page must never render branch data for roles outside the
+  // brand-level allowlist (mirrors allowedRoles on the /branches route).
+  const BRANCH_PAGE_ROLES = ['brand_owner', 'developer', 'support', 'regional_manager'] as const;
+  if (!user || !(BRANCH_PAGE_ROLES as readonly string[]).includes(user.role)) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
   const isGlobalRole =
     user?.role === 'brand_owner' || user?.role === 'developer' || user?.role === 'support';
 
@@ -58,7 +71,7 @@ export function BranchesPage() {
   };
 
   const filteredBranches = branches.filter((b) => {
-    if (activeTab === 'active') return b.status === 'active' || (b.active && !b.status);
+    if (activeTab === 'active') return isActiveBranch(b);
     if (activeTab === 'upcoming') return b.status === 'coming_soon';
     return true;
   });
@@ -131,7 +144,7 @@ export function BranchesPage() {
               setBranchInitialData(null);
               setShowAddBranchModal(true);
             }}
-            className="flex items-center gap-2 px-4 py-2.5 bg-[#0E4825] hover:bg-[#155e32] text-white rounded-xl font-bold text-xs transition-colors shadow-md border border-[#4ADE80]/30 cursor-pointer"
+            className="flex items-center justify-center gap-2 min-h-[44px] px-4 py-2.5 bg-[#0E4825] hover:bg-[#155e32] text-white rounded-xl font-bold text-xs transition-colors shadow-md border border-[#4ADE80]/30 cursor-pointer"
           >
             <Plus className="w-4 h-4 text-[#4ADE80]" />
             <span>Add New Branch</span>
@@ -143,7 +156,7 @@ export function BranchesPage() {
       <div className="flex items-center space-x-2 border-b border-[#1E3A24] pb-3 overflow-x-auto">
         <button
           onClick={() => setActiveTab('all')}
-          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+          className={`min-h-[44px] px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
             activeTab === 'all'
               ? 'bg-[#0E4825] text-white shadow-sm border border-[#4ADE80]/30'
               : 'bg-[#112415] text-zinc-400 hover:text-white border border-[#1E3A24]'
@@ -153,17 +166,17 @@ export function BranchesPage() {
         </button>
         <button
           onClick={() => setActiveTab('active')}
-          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+          className={`min-h-[44px] px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
             activeTab === 'active'
               ? 'bg-[#0E4825] text-white shadow-sm border border-[#4ADE80]/30'
               : 'bg-[#112415] text-zinc-400 hover:text-white border border-[#1E3A24]'
           }`}
         >
-          Active Live Outlets ({branches.filter((b) => b.status !== 'coming_soon').length})
+          Active Live Outlets ({branches.filter(isActiveBranch).length})
         </button>
         <button
           onClick={() => setActiveTab('upcoming')}
-          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center space-x-1.5 ${
+          className={`min-h-[44px] px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center space-x-1.5 ${
             activeTab === 'upcoming'
               ? 'bg-[#0E4825] text-white shadow-sm border border-[#4ADE80]/30'
               : 'bg-[#112415] text-zinc-400 hover:text-white border border-[#1E3A24]'
@@ -174,7 +187,7 @@ export function BranchesPage() {
         </button>
         <button
           onClick={() => setActiveTab('franchise_leads')}
-          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center space-x-1.5 ${
+          className={`min-h-[44px] px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center space-x-1.5 ${
             activeTab === 'franchise_leads'
               ? 'bg-[#0E4825] text-white shadow-sm border border-[#4ADE80]/30'
               : 'bg-[#112415] text-zinc-400 hover:text-white border border-[#1E3A24]'
@@ -288,7 +301,9 @@ export function BranchesPage() {
                             <span>Delivery Radius:</span>
                           </div>
                           <div className="font-mono font-bold text-white mt-0.5">
-                            {branch.deliveryRadiusKm || 7} km Geofence
+                            {branch.deliveryRadiusKm
+                              ? `${branch.deliveryRadiusKm} km Geofence`
+                              : 'Not configured'}
                           </div>
                         </div>
 
@@ -298,7 +313,9 @@ export function BranchesPage() {
                             <span>Route Royalty:</span>
                           </div>
                           <div className="font-mono font-bold text-white mt-0.5">
-                            {branch.brandRoyaltyPercent || 5.0}% Escrow Cut
+                            {branch.brandRoyaltyPercent != null
+                              ? `${branch.brandRoyaltyPercent}% Escrow Cut`
+                              : 'Not configured'}
                           </div>
                         </div>
                       </div>
@@ -340,10 +357,20 @@ export function BranchesPage() {
                       {userCanEdit && !isComingSoon && (
                         <button
                           onClick={() =>
-                            toggleBranchStatus.mutate({
-                              branchId: branch.id,
-                              active: !branch.active,
-                            })
+                            toggleBranchStatus.mutate(
+                              {
+                                branchId: branch.id,
+                                active: !branch.active,
+                              },
+                              {
+                                // A rejected write leaves the outlet in its old
+                                // state — say so instead of failing silently.
+                                onError: () =>
+                                  toast.error(
+                                    `Could not update ${branch.name}. The outlet status is unchanged.`
+                                  ),
+                              }
+                            )
                           }
                           className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors flex items-center gap-1.5 cursor-pointer ${
                             branch.active

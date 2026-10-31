@@ -164,7 +164,7 @@ export function CustomerDetailPage() {
               <div className="flex items-center justify-between">
                 <span className="text-neutral-400">Favorite Branch:</span>
                 <span className="font-bold text-white">
-                  {customer.favoriteBranchName || customer.favoriteBranchId || 'Ahmedabad CG Road'}
+                  {customer.favoriteBranchName || customer.favoriteBranchId || 'No favourite branch yet'}
                 </span>
               </div>
             </div>

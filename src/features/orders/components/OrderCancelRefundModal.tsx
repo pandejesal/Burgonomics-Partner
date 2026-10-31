@@ -50,9 +50,17 @@ export function OrderCancelRefundModal({
 
   // RBAC Permission Check — fail CLOSED. The old list named roles that do
   // not exist ('superadmin', 'branch_manager') and granted access when the
-  // role was MISSING entirely.
-  const allowedRoles = ['brand_owner', 'developer', 'branch_owner'];
+  // role was MISSING entirely. branch_staff is allowed to cancel: the server
+  // route enforces same-branch scope, so a staff member can only cancel their
+  // own outlet's orders.
+  const allowedRoles = ['brand_owner', 'developer', 'branch_owner', 'branch_staff'];
   const hasPermission = !!user?.role && allowedRoles.includes(user.role);
+
+  // POST /payments/refund is requireRole(["brand_owner","developer","support"])
+  // server-side — a branch_owner/branch_staff call is rejected 403. Never
+  // offer a button the server will refuse, and never claim money moved when
+  // it did not.
+  const canReleaseRefundDirectly = !!user?.role && ['brand_owner', 'developer', 'support'].includes(user.role);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -102,7 +110,8 @@ export function OrderCancelRefundModal({
             <ShieldAlert className="w-12 h-12 text-rose-500 mx-auto" />
             <h3 className="font-black text-white text-base">Manager Authorization Required</h3>
             <p className="text-xs text-neutral-400">
-              Only Store Managers, Franchise Owners, or Admins can cancel placed orders and trigger financial refunds.
+              Only Store Managers, Franchise Owners, Kitchen Staff, or Admins can cancel placed
+              orders. Financial refunds are released by brand admins only.
             </p>
             <button
               type="button"
@@ -159,12 +168,23 @@ export function OrderCancelRefundModal({
                     className="rounded border-neutral-700 text-rose-500 focus:ring-0"
                   />
                   <span className="font-bold text-white text-xs">
-                    Issue 100% Instant Refund (₹{order.total})
+                    {canReleaseRefundDirectly
+                      ? `Issue 100% Instant Refund (₹${order.total})`
+                      : `Request 100% Refund (₹${order.total})`}
                   </span>
                 </label>
-                <p className="text-[11px] text-neutral-400 pl-5">
-                  Reverses customer transaction via Razorpay API route split back to the original payment source.
-                </p>
+                {canReleaseRefundDirectly ? (
+                  <p className="text-[11px] text-neutral-400 pl-5">
+                    Releases the Razorpay refund server-side (POST /payments/refund) and reverses
+                    the capture back to the original payment source.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-neutral-400 pl-5">
+                    Refunds are issued by brand admins. Checking this records the refund need on
+                    the cancelled order — a brand admin must still release the money; nothing is
+                    refunded by this screen.
+                  </p>
+                )}
               </div>
             )}
 

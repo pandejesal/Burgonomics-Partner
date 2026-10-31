@@ -58,19 +58,6 @@ export interface Branch {
   updatedAt?: Timestamp;
 }
 
-export interface FutureStoreInput {
-  name: string;
-  city: string;
-  address: string;
-  phone: string;
-  expectedLaunchDate: string;
-  bannerImage?: string;
-  petpoojaStoreId?: string;
-  allowComingSoonSubscribers: boolean;
-  lat: number;
-  lng: number;
-}
-
 // Order types
 export type OrderStatus =
   | 'pending'
@@ -93,11 +80,25 @@ export interface OrderItem {
   quantity: number;
   price: number;
   specialInstructions?: string;
+  /**
+   * Kitchen-facing add-ons (extra sauce, cheese burst, bun swaps, …),
+   * already coerced to display strings by `normalizeOrderDoc`. Carried on
+   * the contract so the KDS card and the KOT slip can both render them —
+   * normalizing them away made every customized burger print plain.
+   */
+  modifiers?: string[];
 }
 
 export interface Order {
   id: string;
   customerId: string;
+  /**
+   * Auth UID of the customer (delivery orders) or the creating staff operator
+   * (counter/walk-in orders). firestore.rules orders create accepts
+   * `customerId == auth.uid || userId == auth.uid`; counter orders keep the
+   * `cust_walkin` sentinel customerId, so they MUST stamp this instead.
+   */
+  userId?: string;
   customerName: string;
   customerPhone: string;
   branchId: string;
@@ -110,6 +111,10 @@ export interface Order {
   total: number;
   orderType: OrderType;
   deliveryAddress?: Address;
+  /** Store/branch origin snapshot — Delivery writes nested coords here. */
+  store?: { id?: string; name?: string; address?: string; lat?: number; lng?: number };
+  /** Explicit kitchen coords for route origin (wins over `store`). */
+  branchCoordinates?: { lat: number; lng: number };
   tableNumber?: string;
   status: OrderStatus;
   paymentMethod: 'razorpay' | 'cod' | 'upi';

@@ -8,15 +8,13 @@ import {
   KeyRound,
   History,
   Lock,
-  Power,
   RefreshCcw,
   CheckCircle,
   LogOut,
   User,
 } from "lucide-react";
-import { useAdminAuthStore } from "../store/adminAuthStore";
+import { useAdmin } from "../hooks/useAdmin";
 import { db } from "@/core/config/firebase";
-import { toast } from "sonner";
 import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
 import { PageHeader } from "../components/Headers";
 import { StatCard, AdminCard } from "../components/Cards";
@@ -25,7 +23,8 @@ import { AdminAvatar } from "../components/Utilities";
 import { secureStorage } from "@/core/storage/secureStorage";
 
 export const AdminProfilePage: React.FC = () => {
-  const { admin } = useAdminAuthStore();
+  // Single sign-in: profile identity is the unified partner session.
+  const { admin } = useAdmin();
   const [activeTab, setActiveTab] = useState<"security" | "sessions" | "permissions">("security");
 
   // Password fields
@@ -308,24 +307,14 @@ export const AdminProfilePage: React.FC = () => {
                     </div>
                   </div>
                   {!sess.active && (
-                    <button
-                      // Loop 53/120 honesty: session docs are server-minted
-                      // (rules deny all client writes) — there is no working
-                      // terminate path yet, so this says so instead of
-                      // silently doing nothing. QUEUED: server session-revoke
-                      // endpoint. Meanwhile: signing out everywhere starts
-                      // from the login screen's session controls.
-                      onClick={() =>
-                        toast.error("Session termination is not available yet.", {
-                          description:
-                            "Session records are server-managed. To lock an account out, revoke its role or contact Brand.",
-                        })
-                      }
-                      className="flex h-8 w-8 items-center justify-center rounded-xl text-red-500 bg-red-50 hover:bg-red-100 dark:bg-red-950/15 transition-colors"
-                      title="Terminate Session"
+                    // No session-revoke endpoint exists (session docs are server-minted) —
+                    // show the pointer instead of a dead control.
+                    <span
+                      className="text-[10px] font-black uppercase tracking-wider text-gray-400 dark:text-gray-500"
+                      title="Session records are server-managed. Revoke this device's access by revoking its role — contact Brand."
                     >
-                      <Power size={14} />
-                    </button>
+                      Revoke via Brand
+                    </span>
                   )}
                 </div>
               ))}

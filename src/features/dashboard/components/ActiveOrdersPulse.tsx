@@ -32,9 +32,9 @@ export function ActiveOrdersPulse({
 
         <div className="space-y-0.5">
           <div className="flex items-center gap-2">
-            <h3 className="font-black text-sm text-white">Live Kitchen Orders Stream</h3>
+            <h3 className="font-black text-sm text-white">Kitchen Orders Board</h3>
             <span className="px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-400/40 text-emerald-300 font-bold text-[10px] uppercase">
-              KDS Realtime
+              Auto-refreshes every 30s
             </span>
           </div>
           <p className="text-xs text-emerald-100/80">

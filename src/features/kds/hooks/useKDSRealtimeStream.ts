@@ -14,13 +14,186 @@ import {
   orderDocTimeMs,
 } from '@/utils/orderContract';
 import { FIRESTORE_IN_LIMIT, isGlobalRole, resolveScopedBranchIds } from '@/utils/branchScope';
-import { playKDSChime, syncKDSAlarmState } from '@/utils/kdsAudio';
+import { playKDSChime, stopRepeatingKDSAlarm, syncKDSAlarmState } from '@/utils/kdsAudio';
 import type { Order, OrderStatus } from '@/types';
 
 export interface RecalledOrderHistory {
   order: Order;
   previousStatus: OrderStatus;
   timestamp: number;
+}
+
+/** One queued offline bump. `queuedAt`/`expectedStatus` were added in v2. */
+export interface PendingKdsBump {
+  orderId: string;
+  targetStatus: OrderStatus;
+  /** Epoch ms the operator tapped — replays past the TTL are dropped. */
+  queuedAt?: number;
+  /** Status the KDS card showed when queued — lost-update precondition. */
+  expectedStatus?: OrderStatus;
+}
+
+/**
+ * An offline bump older than this is dropped instead of replayed. A queue
+ * entry from last night must never flip a delivered/cancelled order back to
+ * "preparing" as if it were fresh work.
+ */
+export const KDS_BUMP_TTL_MS = 10 * 60 * 1000;
+
+const PENDING_BUMPS_KEY = 'kds-pending-bumps:v1';
+
+/**
+ * Shape-validates the persisted outbox and drops entries past the TTL.
+ * Entries written by older builds carry no `queuedAt` — those are treated as
+ * expired rather than replayed with unknown age.
+ */
+export function readPendingKdsBumps(
+  raw: string | null,
+  nowMs: number = Date.now()
+): { fresh: PendingKdsBump[]; stale: PendingKdsBump[] } {
+  const fresh: PendingKdsBump[] = [];
+  const stale: PendingKdsBump[] = [];
+  if (!raw) return { fresh, stale };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { fresh, stale };
+  }
+  if (!Array.isArray(parsed)) return { fresh, stale };
+  for (const entry of parsed) {
+    if (
+      !entry ||
+      typeof entry !== 'object' ||
+      typeof (entry as PendingKdsBump).orderId !== 'string' ||
+      typeof (entry as PendingKdsBump).targetStatus !== 'string'
+    ) {
+      continue;
+    }
+    const bump = entry as PendingKdsBump;
+    const queuedAt = typeof bump.queuedAt === 'number' ? bump.queuedAt : null;
+    if (queuedAt === null || nowMs - queuedAt > KDS_BUMP_TTL_MS) {
+      stale.push(bump);
+      continue;
+    }
+    fresh.push(bump);
+  }
+  return { fresh, stale };
+}
+
+export function writePendingKdsBumps(queue: PendingKdsBump[]): void {
+  try {
+    window.localStorage.setItem(PENDING_BUMPS_KEY, JSON.stringify(queue));
+  } catch {
+    /* storage unavailable — ephemeral queue only */
+  }
+}
+
+/**
+ * Why the live onSnapshot listener stopped delivering. A missing composite
+ * index is a deployment gap, not a data failure — but the operator-facing
+ * consequence is identical, so the feed is not live either way.
+ */
+export type KdsStreamFailureKind = 'missing_index' | 'listener_error';
+
+/**
+ * Classify an onSnapshot error callback argument. `failed-precondition` is
+ * Firestore's code for "this query needs an index that isn't deployed"; the
+ * message check catches the same rejection surfaced without the code.
+ */
+export function classifyKdsStreamFailure(err: unknown): KdsStreamFailureKind {
+  const code = (err as { code?: unknown } | null | undefined)?.code;
+  const message = (err as { message?: unknown } | null | undefined)?.message;
+  if (code === 'failed-precondition') return 'missing_index';
+  return /failed[- ]precondition|\bindex\b/i.test(String(message ?? ''))
+    ? 'missing_index'
+    : 'listener_error';
+}
+
+/**
+ * Operator-readable error for the index-gap degradation. A module-level
+ * instance keeps identity stable, so a repeatedly failing listener does not
+ * re-render (or re-announce) the page on every identical rejection.
+ */
+export const KDS_STREAM_INDEX_ERROR: Error = Object.assign(
+  new Error(
+    'Live makeline stream unavailable — the Firestore index for this branch view is not deployed. Last good data stays on screen.'
+  ),
+  { name: 'KdsStreamIndexError' }
+);
+
+/** What the KDS header may honestly claim about the makeline feed. */
+export type KdsStreamStatus = 'connecting' | 'live' | 'live_unavailable';
+
+export interface KdsFeedStateInput {
+  /** The branch-scoped onSnapshot listener has delivered ≥1 snapshot. */
+  streamHydrated: boolean;
+  /** The listener fired its error callback and no snapshot has arrived since. */
+  listenerFailed: boolean;
+  /** The one-shot useOrders query (seed/fallback) is still in flight. */
+  oneShotLoading: boolean;
+  /** The one-shot useOrders query rejected — fallback data is unavailable. */
+  oneShotError: unknown;
+}
+
+/**
+ * Header-badge state for the makeline feed. A failed listener must NEVER
+ * read as live, and "live" is claimed only once some source has actually
+ * delivered data — never from an unverified, silently-stalled stream.
+ */
+export function deriveKdsStreamStatus(input: KdsFeedStateInput): KdsStreamStatus {
+  if (input.listenerFailed) return 'live_unavailable';
+  if (input.streamHydrated) return 'live';
+  if (input.oneShotError) return 'live_unavailable';
+  if (input.oneShotLoading) return 'connecting';
+  return 'connecting';
+}
+
+/**
+ * Whether the data on screen was ever verified by the live stream or by a
+ * successful one-shot read. Without this the columns would present an
+ * unreadable feed as an empty kitchen ("grill is clear").
+ */
+export function kdsDataVerified(input: {
+  streamHydrated: boolean;
+  oneShotLoading: boolean;
+  oneShotError: unknown;
+}): boolean {
+  return input.streamHydrated || (!input.oneShotLoading && !input.oneShotError);
+}
+
+/** Column body state — one source of truth for all three KDS columns. */
+export type KdsColumnState = 'loading' | 'error' | 'empty' | 'orders';
+
+/**
+ * Decide what a makeline column renders. `error` requires that NO verified
+ * data exists (dead listener AND unusable fallback); when the listener died
+ * after data was verified the last good orders keep rendering instead of
+ * being replaced by an error panel.
+ */
+export function deriveKdsColumnState(input: {
+  isLoading: boolean;
+  dataVerified: boolean;
+  itemCount: number;
+}): KdsColumnState {
+  if (input.isLoading) return 'loading';
+  if (!input.dataVerified) return 'error';
+  return input.itemCount === 0 ? 'empty' : 'orders';
+}
+
+/**
+ * Freshness label for the data-age chip. When the live feed is down the age
+ * describes the LAST GOOD read, so a stale makeline can never masquerade as
+ * fresh data.
+ */
+export function formatKdsDataAge(
+  nowMs: number,
+  lastRefreshAtMs: number,
+  streamLive: boolean
+): string {
+  const ageSec = Math.max(0, Math.round((nowMs - lastRefreshAtMs) / 1000));
+  const value = ageSec < 60 ? `${ageSec}s` : `${Math.floor(ageSec / 60)}m`;
+  return streamLive ? `data ${value} old` : `last good data ${value} old`;
 }
 
 export function useKDSRealtimeStream() {
@@ -31,7 +204,6 @@ export function useKDSRealtimeStream() {
     isLoading,
     error: ordersError,
     updateOrderStatus,
-    simulateOrder,
   } = useOrders();
 
   const [isOnline, setIsOnline] = useState<boolean>(
@@ -44,18 +216,40 @@ export function useKDSRealtimeStream() {
   const [liveError, setLiveError] = useState<Error | null>(null);
   const [listenerEpoch, setListenerEpoch] = useState(0);
   const streamHydratedRef = useRef<boolean>(false);
+  // Render-time mirror of streamHydratedRef: the header badge and the
+  // column state must re-render the moment the listener's first snapshot
+  // lands (or its failure proves no snapshot is coming).
+  const [streamHydrated, setStreamHydrated] = useState<boolean>(false);
 
   // Surface the live-stream error when present, else the one-shot query error.
   const streamError = liveError ?? ordersError ?? null;
 
-  // Recall state (active for 60 seconds)
-  const [recallHistory, setRecallHistory] = useState<RecalledOrderHistory | null>(null);
+  // Recall stack (each entry active for 60 seconds, max 5 deep): rapid
+  // successive bumps used to overwrite a single recall slot, stranding the
+  // earlier bump with no undo. Expired entries are pruned on read.
+  const [recallStack, setRecallStack] = useState<RecalledOrderHistory[]>([]);
+
+  const pruneRecallStack = (stack: RecalledOrderHistory[]): RecalledOrderHistory[] => {
+    const now = Date.now();
+    const fresh = stack.filter((e) => now - e.timestamp < 60000);
+    return fresh.slice(-5);
+  };
+
+  const liveRecallStack = pruneRecallStack(recallStack);
+  const recallHistory = liveRecallStack.length > 0 ? liveRecallStack[liveRecallStack.length - 1] : null;
 
   // Audio deduplication: store order IDs that have already chimed
   const seenOrderIdsRef = useRef<Set<string>>(new Set());
   const initialLoadDoneRef = useRef<boolean>(false);
 
-  // Online / offline listeners
+  // Online / offline listeners + outbox drain. Queued bumps replay in
+  // order when connectivity returns; entries that still fail stay queued.
+  // drainingRef makes the drain single-flight: its effect deps include a
+  // react-query mutation OBJECT (a new identity on every render), so the
+  // effect can re-run while a previous drain is still awaiting — without
+  // this guard the same queued bump was replayed concurrently twice.
+  const drainingRef = useRef<boolean>(false);
+
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -69,6 +263,63 @@ export function useKDSRealtimeStream() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!isOnline) return;
+    if (drainingRef.current) return;
+    let raw: string | null = null;
+    try {
+      raw = window.localStorage.getItem(PENDING_BUMPS_KEY);
+    } catch {
+      raw = null;
+    }
+    const { fresh, stale } = readPendingKdsBumps(raw);
+    if (stale.length > 0) {
+      // Fail-loud: a stale replay silently re-bumping a delivered order is
+      // worse than an operator re-tapping. Tell them what was discarded.
+      writePendingKdsBumps(fresh);
+      toast.error(`${stale.length} offline bump(s) expired — discarded`, {
+        description: `Queued bumps older than ${Math.round(KDS_BUMP_TTL_MS / 60000)} minutes are never replayed. Re-bump the order if it still needs to move.`,
+      });
+    }
+    if (fresh.length === 0) return;
+
+    drainingRef.current = true;
+    let cancelled = false;
+    (async () => {
+      const remaining: PendingKdsBump[] = [];
+      for (const item of fresh) {
+        if (cancelled) {
+          remaining.push(item);
+          continue;
+        }
+        try {
+          if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
+            await updateOrderStatus.mutateAsync({
+              orderId: item.orderId,
+              status: item.targetStatus,
+              ...(item.expectedStatus ? { expectedStatus: item.expectedStatus } : {}),
+            });
+          }
+        } catch {
+          remaining.push(item);
+        }
+      }
+      if (!cancelled) {
+        writePendingKdsBumps(remaining);
+        if (remaining.length < fresh.length) {
+          toast.success('Queued bumps applied', {
+            description: `${fresh.length - remaining.length} offline bump(s) synced.`,
+          });
+        }
+      }
+    })().finally(() => {
+      drainingRef.current = false;
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOnline, updateOrderStatus]);
+
   // Seed the makeline from the one-shot query only until the live stream
   // delivers its first snapshot (never clobber the stream afterward).
   useEffect(() => {
@@ -77,9 +328,12 @@ export function useKDSRealtimeStream() {
     }
   }, [orders]);
 
-  // Filter KDS active orders for current branch
+  // Filter KDS active orders for current branch. Fail-closed: an order
+  // without a branchId is unroutable (normalizeOrderDoc already resolves
+  // branchId via the store↔branch registry), so it must not render on
+  // every branch's makeline.
   const activeOrders = liveOrders.filter((o) => {
-    if (selectedBranchId && o.branchId && o.branchId !== selectedBranchId) {
+    if (selectedBranchId && o.branchId !== selectedBranchId) {
       return false;
     }
     const status = o.status as string;
@@ -105,6 +359,17 @@ export function useKDSRealtimeStream() {
 
   // Audio chime alarm triggering on new pending orders
   useEffect(() => {
+    // Arm the dedupe set only once the makeline has actually delivered data.
+    // Priming on the very first render (query still in flight, stream not yet
+    // hydrated) recorded an EMPTY set, so every pre-existing ticket then
+    // counted as "new" and a plain page refresh chime-blasted — and started
+    // the 10s repeating alarm in — a kitchen that had done nothing wrong.
+    // `streamHydratedRef` flips on the first snapshot even when it is empty;
+    // a settled one-shot query covers listener startup failures.
+    if (!user) return;
+    const dataReady = streamHydratedRef.current || !isLoading;
+    if (!dataReady) return;
+
     if (!initialLoadDoneRef.current) {
       // Prime the set of known orders on initial load so page refresh doesn't blast chime
       pendingOrders.forEach((o) => seenOrderIdsRef.current.add(o.id));
@@ -125,54 +390,122 @@ export function useKDSRealtimeStream() {
       playKDSChime();
     }
 
+    // Cap the chime dedupe set: a 12h rush on a busy makeline adds thousands
+    // of ids and never releases them (Set is insertion-ordered, so the
+    // oldest are the no-longer-pending ones). Bounded = no slow leak, and
+    // the current pending set always stays fully covered.
+    if (seenOrderIdsRef.current.size > 500) {
+      const it = seenOrderIdsRef.current.values();
+      for (let i = 0; i < 100; i++) {
+        const next = it.next();
+        if (next.done) break;
+        seenOrderIdsRef.current.delete(next.value);
+      }
+    }
+
     // Sync repeating alarm for unacknowledged orders
     syncKDSAlarmState(pendingOrders.length);
   }, [pendingOrders.length, activeOrders]);
 
-  // Clean up timer on recallHistory expiration (60s)
+  // Leaving /kds must silence the 10s repeating alarm. It is module-level
+  // state, so without this unmount cleanup the loop kept chiming on every
+  // other screen (and in the background) until the pending count hit 0.
+  // pending-count-0 stop still happens inside syncKDSAlarmState above.
   useEffect(() => {
-    if (!recallHistory) return;
+    return () => stopRepeatingKDSAlarm();
+  }, []);
 
+  // Clean up timer on recall-stack expiration (60s) + 1s tick while any
+  // recall is live: canRecall is computed during render, so without a
+  // ticking clock the Recall button stayed visible past expiry until some
+  // unrelated render happened.
+  const [, setRecallTick] = useState(0);
+  useEffect(() => {
+    if (liveRecallStack.length === 0) return;
+
+    const oldestExpiryMs =
+      60000 - (Date.now() - liveRecallStack[0].timestamp);
     const timer = setTimeout(() => {
-      setRecallHistory((curr) => {
-        if (curr && Date.now() - curr.timestamp >= 60000) {
-          return null;
-        }
-        return curr;
-      });
-    }, 60000);
+      setRecallStack((curr) => pruneRecallStack(curr));
+    }, Math.max(0, oldestExpiryMs));
+    const ticker = setInterval(() => setRecallTick((t) => t + 1), 1000);
 
-    return () => clearTimeout(timer);
-  }, [recallHistory]);
+    return () => {
+      clearTimeout(timer);
+      clearInterval(ticker);
+    };
+    // Dep on state identity (stable between sets), NOT the derived pruned
+    // array (new identity every render would churn the timers).
+  }, [recallStack]);
 
   // In-flight bump guard (drives button disabled state on cards).
   const [bumpingIds, setBumpingIds] = useState<Record<string, boolean>>({});
+  // Synchronous ref guard: setState commits async, so two rapid taps before
+  // re-render both passed the bumpingIds check and double-bumped (each bump
+  // now pushes its own recall entry, so both stay undoable).
+  const bumpingRef = useRef<Set<string>>(new Set());
+
+  // Offline bump outbox: a bump that fails for connectivity reasons is
+  // queued in localStorage (shape-validated + TTL-filtered on read by
+  // readPendingKdsBumps above) and replayed when the browser comes back
+  // online — the operator no longer has to remember to re-bump after an
+  // airplane-mode tap.
 
   // Bump Bar Action: recall history is recorded ONLY after the mutation
   // succeeds. The old code set it before awaiting — an offline bump looked
   // accepted (card gone + Recall offered) while Firestore never changed.
   const bumpOrder = useCallback(
     async (orderId: string, targetStatus: OrderStatus) => {
-      if (bumpingIds[orderId]) return;
+      if (bumpingRef.current.has(orderId)) return;
+      bumpingRef.current.add(orderId);
       setBumpingIds((prev) => ({ ...prev, [orderId]: true }));
+      // Precondition: the status THIS card is showing. If another terminal
+      // already moved the order, the server refuses instead of clobbering.
+      const currentStatus = liveOrders.find((o) => o.id === orderId)?.status;
       try {
         if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
-          await updateOrderStatus.mutateAsync({ orderId, status: targetStatus });
+          await updateOrderStatus.mutateAsync({
+            orderId,
+            status: targetStatus,
+            ...(currentStatus ? { expectedStatus: currentStatus } : {}),
+          });
         }
         const targetOrder = liveOrders.find((o) => o.id === orderId);
         if (targetOrder) {
-          setRecallHistory({
+          const entry: RecalledOrderHistory = {
             order: { ...targetOrder },
             previousStatus: targetOrder.status,
             timestamp: Date.now(),
-          });
+          };
+          setRecallStack((curr) => [...pruneRecallStack(curr), entry].slice(-5));
         }
       } catch (err: any) {
-        logger.warn('kds.bump_failed', { orderId, message: err?.message });
-        toast.error('Bump failed — order unchanged', {
-          description: err?.message || 'Check connection and retry.',
-        });
+        const offline =
+          (typeof navigator !== 'undefined' && !navigator.onLine) ||
+          /offline|network|failed to fetch|firestore/i.test(err?.message || '');
+        if (offline) {
+          const { fresh } = readPendingKdsBumps(window.localStorage.getItem(PENDING_BUMPS_KEY));
+          if (!fresh.some((q) => q.orderId === orderId)) {
+            fresh.push({
+              orderId,
+              targetStatus,
+              queuedAt: Date.now(),
+              ...(currentStatus ? { expectedStatus: currentStatus } : {}),
+            });
+            writePendingKdsBumps(fresh);
+          }
+          logger.warn('kds.bump_queued_offline', { orderId });
+          toast.error('Offline — bump queued', {
+            description: 'It will apply automatically when you are back online.',
+          });
+        } else {
+          logger.warn('kds.bump_failed', { orderId, message: err?.message });
+          toast.error('Bump failed — order unchanged', {
+            description: err?.message || 'Check connection and retry.',
+          });
+        }
       } finally {
+        bumpingRef.current.delete(orderId);
         setBumpingIds((prev) => {
           const next = { ...prev };
           delete next[orderId];
@@ -180,25 +513,34 @@ export function useKDSRealtimeStream() {
         });
       }
     },
-    [liveOrders, updateOrderStatus, bumpingIds]
+    [liveOrders, updateOrderStatus]
   );
 
-  // Recall Last Bumped Order within 60s. Guarded: no history, expired
-  // history, or a failed write all return false (never an unhandled throw).
+  // Recall the most recent bump within 60s (stack depth 5 — rapid
+  // successive bumps each stay undoable). Guarded: empty/expired stack or
+  // a failed write returns false (never an unhandled throw). A popped entry
+  // is consumed — a second recall undoes the bump before it.
   const recallLastOrder = useCallback(async () => {
-    if (!recallHistory) return false;
-
-    if (Date.now() - recallHistory.timestamp > 60000) {
-      setRecallHistory(null);
+    const live = pruneRecallStack(recallStack);
+    if (live.length === 0) {
+      setRecallStack([]);
       return false;
     }
+    const head = live[live.length - 1];
 
     try {
-      const { order, previousStatus } = recallHistory;
+      const { order, previousStatus } = head;
+      // Precondition: what the card shows right now (the status this recall
+      // is undoing), not the pre-bump status stored on the stack entry.
+      const currentStatus = liveOrders.find((o) => o.id === order.id)?.status;
       if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
-        await updateOrderStatus.mutateAsync({ orderId: order.id, status: previousStatus });
+        await updateOrderStatus.mutateAsync({
+          orderId: order.id,
+          status: previousStatus,
+          ...(currentStatus ? { expectedStatus: currentStatus } : {}),
+        });
       }
-      setRecallHistory(null);
+      setRecallStack(live.slice(0, -1));
       return true;
     } catch (err: any) {
       logger.warn('kds.recall_failed', { message: err?.message });
@@ -207,15 +549,9 @@ export function useKDSRealtimeStream() {
       });
       return false;
     }
-  }, [recallHistory, updateOrderStatus]);
+  }, [recallStack, updateOrderStatus, liveOrders]);
 
-  const canRecall = !!recallHistory && Date.now() - recallHistory.timestamp < 60000;
-
-  const handleSimulateOrder = useCallback(() => {
-    if (simulateOrder && typeof simulateOrder.mutate === 'function') {
-      simulateOrder.mutate();
-    }
-  }, [simulateOrder]);
+  const canRecall = liveRecallStack.length > 0;
 
   // Realtime, backend-driven makeline. The one-shot read in useOrders cannot
   // keep the KDS current, and 15s getDocs polling left a frozen green "Live"
@@ -245,11 +581,16 @@ export function useKDSRealtimeStream() {
       return;
     }
 
+    // `in` + `orderBy('createdAt')` on different fields is exactly what
+    // forces a composite (compound) index — `FirebaseError: The query
+    // requires an index` whenever it is not deployed, and a dead listener.
+    // Scoped reads therefore pass only the `in` filter; the stream already
+    // sorts client-side at merge time (orderDocTimeMs below). The global
+    // branch-less read keeps the latest-first orderBy (single-field index).
     const constraints: QueryConstraint[] = [
       ...(scopeBranchIds.length
         ? [where('branchId', 'in', scopeBranchIds.slice(0, FIRESTORE_IN_LIMIT))]
-        : []),
-      orderBy('createdAt', 'desc'),
+        : [orderBy('createdAt', 'desc')]),
       limit(100),
     ];
 
@@ -257,7 +598,14 @@ export function useKDSRealtimeStream() {
     const ingest = (rawDocs: Array<{ id: string; data: Record<string, any> }>): void => {
       if (!alive) return;
       streamHydratedRef.current = true;
-      setLiveOrders(rawDocs.map((d) => normalizeOrderDoc(d.id, d.data)));
+      setStreamHydrated(true);
+      // Latest-first is restored here, never in Firestore: ordering the
+      // scoped `in` read server-side would demand a composite index, and
+      // orderDocTimeMs compares Timestamps and ISO-string dates alike.
+      const sorted = [...rawDocs].sort(
+        (a, b) => orderDocTimeMs(b.data) - orderDocTimeMs(a.data)
+      );
+      setLiveOrders(sorted.map((d) => normalizeOrderDoc(d.id, d.data)));
       setLiveError(null);
       setLastRefreshAt(Date.now());
     };
@@ -292,10 +640,33 @@ export function useKDSRealtimeStream() {
           });
       },
       (err) => {
-        logger.warn('kds.stream_error', { message: err?.message });
+        // A failed listener must NEVER render as a live makeline. A missing
+        // composite index (`failed-precondition`) is a deployment gap rather
+        // than a data failure, but the operator-facing consequence is the
+        // same: no new tickets will ever arrive. Both kinds therefore set
+        // liveError, which flips the header badge to "Live Unavailable" and
+        // the columns into the degraded state — last good snapshots and the
+        // one-shot fallback stay on screen (nothing is cleared), and the
+        // page can never claim an empty kitchen on an unreadable feed.
         if (!alive) return;
-        setLiveError(err);
-        setLastRefreshAt(Date.now());
+        const kind = classifyKdsStreamFailure(err);
+        const code = (err as { code?: string } | null)?.code;
+        if (kind === 'missing_index') {
+          logger.warn('kds.stream_index_missing', { message: err?.message, code });
+          setLiveError(KDS_STREAM_INDEX_ERROR);
+          return;
+        }
+        logger.warn('kds.stream_error', { message: err?.message, code });
+        setLiveError(
+          err instanceof Error
+            ? err
+            : new Error(
+                String((err as { message?: unknown } | null)?.message ?? 'Live order stream failed')
+              )
+        );
+        // lastRefreshAt is deliberately NOT touched here: it tracks the last
+        // SUCCESSFUL data delivery, so the age label stays honest about how
+        // stale the on-screen (last good) data is.
       }
     );
 
@@ -307,10 +678,27 @@ export function useKDSRealtimeStream() {
     };
   }, [user, selectedBranchId, listenerEpoch]);
 
+  // Derived feed honesty for the header/columns: what the makeline may
+  // claim about liveness, and whether the data on screen was ever verified
+  // by the stream or by a successful one-shot read.
+  const streamStatus = deriveKdsStreamStatus({
+    streamHydrated,
+    listenerFailed: liveError !== null,
+    oneShotLoading: isLoading,
+    oneShotError: ordersError,
+  });
+  const dataVerified = kdsDataVerified({
+    streamHydrated,
+    oneShotLoading: isLoading,
+    oneShotError: ordersError,
+  });
+
   return {
     isOnline,
     isLoading,
     streamError,
+    streamStatus,
+    dataVerified,
     activeOrders,
     pendingOrders,
     preparingOrders,
@@ -320,7 +708,6 @@ export function useKDSRealtimeStream() {
     recallLastOrder,
     canRecall,
     lastBumpedOrder: recallHistory?.order || null,
-    simulateOrder: handleSimulateOrder,
     refresh,
     lastRefreshAt,
   };

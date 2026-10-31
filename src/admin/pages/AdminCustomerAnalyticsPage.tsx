@@ -27,8 +27,45 @@ import { StatCard, AdminCard } from "../components/Cards";
 import { AdminButton } from "../components/Buttons";
 import { customerStorage, CustomerProfile } from "./customersData";
 
+// M7: this console reads the browser-local customer directory
+// (customerStorage.getCustomers() → localStorage "burg_crm_customers"). It is
+// NOT connected to the live CRM, so neither the copy nor an empty chart may
+// present local/absent data as a real CRM measurement.
+export const ANALYTICS_SOURCE_LABEL =
+  "Local directory analytics — not connected to the live CRM";
+
+export type DirectorySourceState = "local" | "unavailable";
+
+/** Distinguishes an unreadable source from a measured (possibly empty) one. */
+export function resolveDirectorySourceState(canReadLocalDirectory: boolean): DirectorySourceState {
+  return canReadLocalDirectory ? "local" : "unavailable";
+}
+
+export function describeDirectorySourceState(
+  source: DirectorySourceState,
+  customerCount: number,
+): string {
+  if (source === "unavailable") {
+    return "Customer directory unavailable — the browser-local store could not be read. Nothing was measured; the live CRM is not connected.";
+  }
+  if (customerCount === 0) {
+    return "Directory source: browser-local store, currently empty (0 records). This is a local result, not the live CRM.";
+  }
+  return `Directory source: browser-local store (${customerCount} record${customerCount === 1 ? "" : "s"}). Local data — not the live CRM.`;
+}
+
+function readLocalDirectoryState(): DirectorySourceState {
+  if (typeof window === "undefined") return "unavailable";
+  try {
+    return resolveDirectorySourceState(!!window.localStorage);
+  } catch {
+    return "unavailable";
+  }
+}
+
 export const AdminCustomerAnalyticsPage: React.FC = () => {
   const [customers, setCustomers] = useState<CustomerProfile[]>(customerStorage.getCustomers());
+  const [sourceState] = useState<DirectorySourceState>(readLocalDirectoryState);
 
   // Aggregate Metrics (calculated directly from the live database)
   const stats = useMemo(() => {
@@ -148,7 +185,7 @@ export const AdminCustomerAnalyticsPage: React.FC = () => {
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <PageHeader
           title="Customer CRM Analytics Console"
-          description="Charts aggregate real CRM profiles from the customer directory."
+          description={ANALYTICS_SOURCE_LABEL}
           breadcrumbs={[
             { label: "Customer CRM", to: "/admin/customers" },
             { label: "CRM Analytics" },
@@ -165,12 +202,21 @@ export const AdminCustomerAnalyticsPage: React.FC = () => {
         </div>
       </div>
 
+      {/* M7: source + measurement honesty — local directory, never the live CRM */}
+      <div
+        role="status"
+        className="rounded-2xl border border-gray-100 dark:border-gray-800/80 bg-gray-50/60 dark:bg-gray-900/20 px-4 py-3 text-[11px] font-semibold text-gray-500"
+      >
+        {describeDirectorySourceState(sourceState, customers.length)}
+      </div>
+
       {/* Stats KPI Overview */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           title="Consolidated CRM Profiles"
           value={stats.total.toString()}
           icon={Users}
+          subtext="Browser-local directory — not the live CRM"
         />
         <StatCard
           title="Consolidated Customer Value"

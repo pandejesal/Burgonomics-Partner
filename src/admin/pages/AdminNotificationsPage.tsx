@@ -6,24 +6,7 @@ import { StatCard, AdminCard } from "../components/Cards";
 import { AdminButton } from "../components/Buttons";
 import { Timeline, ActivityItem, ConfirmDialog } from "../components/Utilities";
 import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
-
-interface PushLog {
-  id: string;
-  title: string;
-  body: string;
-  target: string;
-  sentAt: string;
-  successCount: number;
-  // Loop 22/120 honesty: nothing on this page has ever been dispatched —
-  // there is no customer broadcast endpoint. Seeds are fixtures, new rows
-  // are local drafts. Never present either as deliveries.
-  // Readiness-9: "sent" rows carry SERVER-MEASURED counts from POST
-  // /notifications/broadcast (targeted/delivered/failed) — the only rows
-  // that may claim a dispatch.
-  status: "fixture" | "draft" | "sent";
-  targeted?: number;
-  failedCount?: number;
-}
+import { marketingStorage, type PushLog } from "./marketingData";
 
 const INITIAL_PUSH_LOGS: PushLog[] = [
   {
@@ -47,7 +30,10 @@ const INITIAL_PUSH_LOGS: PushLog[] = [
 ];
 
 export const AdminNotificationsPage: React.FC = () => {
-  const [logs, setLogs] = useState<PushLog[]>(INITIAL_PUSH_LOGS);
+  const [logs, setLogs] = useState<PushLog[]>([
+    ...INITIAL_PUSH_LOGS,
+    ...marketingStorage.getPushLogs(),
+  ]);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [target, setTarget] = useState("all");
@@ -62,37 +48,32 @@ export const AdminNotificationsPage: React.FC = () => {
   } | null>(null);
   const [confirmBroadcast, setConfirmBroadcast] = useState(false);
 
+  // Honest local save: no request is made. The draft is persisted on this
+  // device (marketingStorage) and clearly labeled as NOT dispatched —
+  // inventing delivery counts would be worse than a local draft.
   const handleDispatchPush = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !body.trim()) return;
 
-    // Loop 22/120 honest fail-closed: there is NO customer broadcast channel
-    // (server dispatch is staff-topics only). Recording a local draft and
-    // saying so loudly beats fabricating 1850 deliveries. QUEUED: customer
-    // broadcast endpoint (token fan-out).
-    setIsSending(true);
-    setSendSuccess(false);
+    const newLog: PushLog = {
+      id: `push_${Date.now()}`,
+      title,
+      body,
+      target: target === "all" ? "All Registered Customers" : "High Frequency Buyers",
+      sentAt: new Date().toISOString().replace("T", " ").substring(0, 16),
+      successCount: 0,
+      status: "draft",
+    };
 
-    setTimeout(() => {
-      const newLog: PushLog = {
-        id: `push_${Date.now()}`,
-        title,
-        body,
-        target: target === "all" ? "All Registered Customers" : "High Frequency Buyers",
-        sentAt: new Date().toISOString().replace("T", " ").substring(0, 16),
-        successCount: 0,
-        status: "draft",
-      };
-
-      setLogs([newLog, ...logs]);
-      setIsSending(false);
-      setSendSuccess(true);
-      setTitle("");
-      setBody("");
-    }, 1500);
+    marketingStorage.addPushLog(newLog);
+    setLogs((prev) => [newLog, ...prev]);
+    setSendSuccess(true);
+    setLastResult(null); // stale-banner guard: this save made no broadcast
+    setTitle("");
+    setBody("");
   };
 
-  // Readiness-9: REAL send through POST /notifications/broadcast. Runs only
+  // Readiness-9: REAL send through the server broadcast route. Runs only
   // after the confirm dialog (a broadcast reaches every registered device).
   // Records the server-measured counts — never estimates — and reports
   // failures loudly with no history row written.
@@ -118,7 +99,8 @@ export const AdminNotificationsPage: React.FC = () => {
         failedCount: res.failureCount,
         status: "sent",
       };
-      setLogs([entry, ...logs]);
+      marketingStorage.addPushLog(entry);
+      setLogs((prev) => [entry, ...prev]);
       setLastResult({
         targeted: res.targeted,
         successCount: res.successCount,
@@ -136,6 +118,16 @@ export const AdminNotificationsPage: React.FC = () => {
     }
   };
 
+  // Stat cards count real state only: drafts exclude fixtures and dispatches,
+  // and the delivery average is computed from server-measured send rows
+  // (targeted/successCount as returned at send time) — never from fixtures.
+  const sentLogs = logs.filter((l) => l.status === "sent" && (l.targeted ?? 0) > 0);
+  const sentTargeted = sentLogs.reduce((s, l) => s + (l.targeted ?? 0), 0);
+  const avgDeliveryPct =
+    sentTargeted > 0
+      ? Math.round((sentLogs.reduce((s, l) => s + l.successCount, 0) / sentTargeted) * 100)
+      : null;
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -151,8 +143,18 @@ export const AdminNotificationsPage: React.FC = () => {
           icon={Users}
           subtext="No live token count wired"
         />
-        <StatCard title="Avg Delivery Rate" value="—" icon={CheckCircle} subtext="No dispatches yet" />
-        <StatCard title="Campaign Drafts" value={logs.length} icon={Megaphone} />
+        <StatCard
+          title="Avg Delivery Rate"
+          value={avgDeliveryPct === null ? "—" : `${avgDeliveryPct}%`}
+          icon={CheckCircle}
+          subtext={avgDeliveryPct === null ? "No dispatches yet" : "From server-measured sends"}
+        />
+        <StatCard
+          title="Local Campaign Drafts"
+          value={logs.filter((l) => l.status === "draft").length}
+          icon={Megaphone}
+          subtext="Saved on this device — never dispatched"
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -171,10 +173,9 @@ export const AdminNotificationsPage: React.FC = () => {
                 onChange={(e) => setTarget(e.target.value)}
                 className="w-full p-3 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] text-sm text-gray-800 dark:text-gray-100 focus:outline-none"
               >
-                {/* Loop 59/120: no device-target counts — the old labels
-                  ("1,850 device targets" / "290 targets") revived the exact
-                  fabricated reach Loop 22 removed from the stats. No live
-                  token count exists (see stat cards above). */}
+                {/* Loop 59/120: no device-target counts — reach figures were
+                  removed as fabricated; no live token count exists (see stat
+                  cards above). */}
                 <option value="all">All Registered Customers (no live count)</option>
                 <option value="high-buyers">High Frequency Buyers (no live count)</option>
               </select>
@@ -223,11 +224,11 @@ export const AdminNotificationsPage: React.FC = () => {
               ) : (
                 <div className="p-3.5 rounded-2xl bg-amber-50 text-amber-800 text-xs font-semibold flex items-center gap-2">
                   <CheckCircle size={15} />
-                  <span>Saved as a local draft — NOT dispatched. Use Broadcast below to send.</span>
+                  <span>Draft saved on this device — not dispatched. Use Broadcast below to send.</span>
                 </div>
               ))}
 
-            <AdminButton type="submit" variant="secondary" isLoading={isSending} className="w-full">
+            <AdminButton type="submit" variant="secondary" className="w-full">
               <Send size={14} />
               <span>Save Campaign Draft</span>
             </AdminButton>
@@ -253,7 +254,7 @@ export const AdminNotificationsPage: React.FC = () => {
               onClose={() => setConfirmBroadcast(false)}
               onConfirm={() => void handleBroadcast()}
               title="Broadcast to all registered devices?"
-              description="This sends the campaign above to EVERY registered device right now via POST /notifications/broadcast. Counts reported afterwards are server-measured."
+              description="This sends the campaign to every registered device immediately. Counts reported afterwards are measured by the server."
               confirmLabel="Send Broadcast"
               isDestructive
             />
@@ -263,7 +264,7 @@ export const AdminNotificationsPage: React.FC = () => {
         {/* Dispatch Logs timeline */}
         <AdminCard
           title="Draft Log"
-          subtitle="Local drafts and fixtures only — nothing here was dispatched"
+          subtitle="Drafts, dispatch records, and fixtures — each row states whether it was actually sent."
         >
           <Timeline>
             {logs.map((log) => (

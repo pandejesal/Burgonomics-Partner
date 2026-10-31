@@ -51,7 +51,11 @@ function normalizeOrderStatus(order: any): string {
   if (typeof order?.status?.code === "string") return order.status.code;
   if (typeof order?.status === "string") return order.status;
   if (typeof order?.orderStatus === "string") return order.orderStatus;
-  return "Completed";
+  // M1: an order carrying no supported status field is NOT evidence of a
+  // completed order. Label it "Unknown" so the breakdown surfaces the count
+  // for review instead of fabricating a "Completed" that never happened.
+  // (Recognised strings are returned unchanged — only absent shapes fall here.)
+  return "Unknown";
 }
 
 /**
@@ -92,7 +96,7 @@ export class DashboardService {
    * ids belonging to the caller's assigned branches otherwise. An empty
    * set means no access — callers filter to nothing, never to everything.
    */
-  protected async scopedOrderIds(): Promise<Set<string> | null> {
+  protected async scopedOrderIds(strict = false): Promise<Set<string> | null> {
     try {
       const user = useAuthStore.getState().user;
       if (isGlobalRole(user?.role)) return null;
@@ -100,6 +104,7 @@ export class DashboardService {
         (b): b is string => typeof b === "string" && !!b
       );
       if (assigned.length === 0) return new Set<string>();
+      if (strict && assigned.length > FIRESTORE_IN_LIMIT) throw new Error("Branch scope exceeds query limit");
       const snap = await getDocs(
         query(
           collection(db, "orders"),
@@ -107,6 +112,7 @@ export class DashboardService {
           limit(1000)
         )
       );
+      if (strict && snap.size >= 1000) throw new Error("Branch order scope is incomplete");
       const ids = new Set<string>();
       snap.forEach((d) => ids.add(d.id));
       return ids;
@@ -114,6 +120,7 @@ export class DashboardService {
       logger.warn("dashboardService.scope_resolve_failed", {
         message: err instanceof Error ? err.message : String(err),
       });
+      if (strict) throw err;
       return new Set<string>();
     }
   }
@@ -337,6 +344,8 @@ export class DashboardService {
     revenue: RevenueSummary;
     topProducts: TopProduct[];
     statusBreakdown: OrderStatusBreakdown[];
+    /** M3: orders with no usable timestamp — reported, never folded into a window. */
+    undatedOrderCount: number;
   }> {
     const fromMillis = toMillis(params.from);
     const toMillisVal = toMillis(params.to) || Date.now();
@@ -347,10 +356,14 @@ export class DashboardService {
       this.fetchRefunds(),
     ]);
 
-    // Filter orders in date range
+    // M3: an invalid/missing timestamp cannot be placed in a bounded window.
+    // It used to return `true` from the filter, so the same order inflated
+    // every unrelated reporting period. Exclude it from time-bound totals and
+    // surface a separate undated count instead.
+    const undatedOrderCount = allOrders.filter((o) => !toMillis(o.placedAt || o.createdAt)).length;
     const ordersInRange = allOrders.filter((o) => {
       const orderMillis = toMillis(o.placedAt || o.createdAt);
-      if (!orderMillis) return true; // Include if timestamp missing to avoid empty cards
+      if (!orderMillis) return false;
       return orderMillis >= fromMillis && orderMillis <= toMillisVal;
     });
 
@@ -372,7 +385,7 @@ export class DashboardService {
               : 0;
 
       const status = normalizeOrderStatus(order);
-      if (status !== "Cancelled" && status !== "Refunded") {
+      if (!["cancelled", "refunded"].includes(status.toLowerCase())) {
         totalRevenuePaise += totalPaise;
       }
 
@@ -439,6 +452,7 @@ export class DashboardService {
       revenue,
       topProducts,
       statusBreakdown,
+      undatedOrderCount,
     };
   }
 
@@ -636,20 +650,47 @@ export class DashboardService {
 
   /**
    * 8. Duplicate Payments Detection
+   *
+   * M2: every discrepancy used to become a "duplicate" with an invented count
+   * of two. A duplicate requires actual evidence — the server's recognised
+   * second-capture reason, an unresolved status, the requested time window,
+   * and at least one recorded payment identity. Amount/currency/order
+   * mismatches and uncaptured checkouts are NOT duplicates, and a count is
+   * never manufactured when the identity evidence is absent.
    */
-  async getDuplicatePayments(_windowMinutes = 60): Promise<DuplicatePayment[]> {
+  async getDuplicatePayments(windowMinutes = 60): Promise<DuplicatePayment[]> {
     try {
       const snap = await getDocs(query(collection(db, "payment_discrepancies"), limit(200)));
       const allowed = await this.scopedOrderIds();
-      const duplicates: DuplicatePayment[] = [];
+      const now = Date.now();
+      const windowMs = windowMinutes > 0 ? windowMinutes * 60 * 1000 : 0;
+      const duplicates = new Map<string, DuplicatePayment>();
       snap.forEach((doc) => {
         const d = doc.data();
-        if (d.orderId) {
-          if (allowed && !allowed.has(d.orderId)) return;
-          duplicates.push({ orderId: d.orderId, count: d.count || 2 });
+        // Recognised duplicate reason only: the payments verifier parks
+        // SECOND_CAPTURE_MISMATCH for a second distinct captured payment.
+        if (d.reason !== "SECOND_CAPTURE_MISMATCH") return;
+        // Resolved rows are no longer an open duplicate alert.
+        if (d.status !== "needs_review") return;
+        if (!d.orderId) return;
+        if (allowed && !allowed.has(d.orderId)) return;
+        // Requested window — an untimed row cannot be placed in it.
+        const createdMillis = toMillis(d.createdAt);
+        if (windowMs > 0 && (!createdMillis || now - createdMillis > windowMs)) return;
+        // Count is derived from actual payment identities (the second capture
+        // plus the recorded first capture). No identity, no count.
+        const identities = new Set(
+          [d.razorpayPaymentId, d.recordedPaymentId].filter(
+            (id): id is string => typeof id === "string" && !!id,
+          ),
+        );
+        if (identities.size === 0) return;
+        const existing = duplicates.get(d.orderId);
+        if (!existing || identities.size > existing.count) {
+          duplicates.set(d.orderId, { orderId: d.orderId, count: identities.size });
         }
       });
-      return duplicates;
+      return Array.from(duplicates.values());
     } catch (_err) {
       return [];
     }
@@ -665,6 +706,7 @@ export class DashboardService {
     count: number;
     totalPaise: number;
     refundedPaise: number;
+    reconciliationStatus: "clear" | "needs_review" | "unavailable";
     discrepancies: Array<{ paymentId: string; reason: string }>;
   }> {
     const [payments, refunds] = await Promise.all([this.fetchPayments(), this.fetchRefunds()]);
@@ -685,11 +727,43 @@ export class DashboardService {
 
     const refundedPaise = refundsInRange.reduce((acc, r) => acc + r.amountPaise, 0);
 
+    const discrepancies: Array<{ paymentId: string; reason: string }> = [];
+    let reconciliationStatus: "clear" | "needs_review" | "unavailable" = "unavailable";
+    try {
+      const [snap, allowed] = await Promise.all([
+        getDocs(query(
+          collection(db, "payment_discrepancies"),
+          where("status", "==", "needs_review"),
+          where("createdAt", ">=", new Date(fromMillis)),
+          where("createdAt", "<=", new Date(toMillisVal)),
+          limit(201),
+        )),
+        this.scopedOrderIds(true),
+      ]);
+      snap.forEach((doc) => {
+        const data = doc.data();
+        const createdMillis = toMillis(data.createdAt);
+        if (data.status !== "needs_review" || !createdMillis || createdMillis < fromMillis || createdMillis > toMillisVal) return;
+        if (allowed && !allowed.has(data.orderId)) return;
+        discrepancies.push({
+          paymentId: typeof data.razorpayPaymentId === "string" ? data.razorpayPaymentId : doc.id,
+          reason: typeof data.reason === "string" ? data.reason : "Failure reason unavailable",
+        });
+      });
+      // A capped read is not proof that the scoped queue is empty.
+      if (snap.size < 201) reconciliationStatus = discrepancies.length ? "needs_review" : "clear";
+    } catch (err) {
+      logger.warn("dashboardService.reconciliation_unavailable", {
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     return {
       count: paymentsInRange.length,
       totalPaise,
       refundedPaise,
-      discrepancies: [],
+      reconciliationStatus,
+      discrepancies,
     };
   }
 

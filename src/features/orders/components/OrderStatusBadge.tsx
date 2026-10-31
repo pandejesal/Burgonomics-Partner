@@ -36,6 +36,16 @@ export function getOrderStatusBadgeMeta(status: OrderStatus | string): {
         label: 'Ready for Pickup',
         className: 'bg-yellow-950/80 text-yellow-400 border-yellow-800/60',
       };
+    case 'ready_to_serve':
+      return {
+        label: 'Ready to Serve',
+        className: 'bg-yellow-950/80 text-yellow-400 border-yellow-800/60',
+      };
+    case 'picked_up':
+      return {
+        label: 'Picked Up',
+        className: 'bg-emerald-950/80 text-emerald-400 border-emerald-800/60',
+      };
     case 'out_for_delivery':
     case 'dispatched':
       return {

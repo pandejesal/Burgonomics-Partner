@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -136,6 +136,13 @@ export function ResponsiveTable<T extends { id: string | number; [key: string]: 
 
   const totalPages = Math.ceil(processedData.length / pageSize) || 1;
 
+  // Keep the current page inside the available range when the data (and
+  // therefore totalPages) shrinks, so rows are never hidden on a page that no
+  // longer exists.
+  useEffect(() => {
+    setCurrentPage((p) => Math.min(p, totalPages));
+  }, [totalPages]);
+
   // Selection actions
   const isAllSelected =
     paginatedData.length > 0 && paginatedData.every((row) => selectedIds.has(row.id));
@@ -227,11 +234,14 @@ export function ResponsiveTable<T extends { id: string | number; [key: string]: 
             value={searchTerm}
             onChange={(e) => handleSearchChange(e.target.value)}
             placeholder={searchPlaceholder}
+            aria-label={searchPlaceholder}
             className="w-full pl-10 pr-10 py-2.5 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] text-sm text-gray-800 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#0E4825]/25 focus:border-primary transition-all"
           />
           {searchTerm && (
             <button
+              type="button"
               onClick={() => handleSearchChange("")}
+              aria-label="Clear search"
               className="absolute inset-y-0 right-0 flex items-center pr-3.5 text-gray-400 hover:text-gray-600"
             >
               <X size={14} />
@@ -324,7 +334,9 @@ export function ResponsiveTable<T extends { id: string | number; [key: string]: 
               </button>
             ))}
             <button
+              type="button"
               onClick={() => setSelectedIds(new Set())}
+              aria-label="Clear selection"
               className="p-2 hover:bg-white/10 rounded-xl text-white/70 hover:text-white"
             >
               <X size={14} />
@@ -345,46 +357,72 @@ export function ResponsiveTable<T extends { id: string | number; [key: string]: 
                       type="checkbox"
                       checked={isAllSelected}
                       onChange={handleSelectAll}
+                      aria-label="Select all rows on this page"
                       className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-[#0E4825]"
                     />
                   </th>
                 )}
 
-                {activeColumns.map((col) => (
-                  <th
-                    key={col.accessorKey}
-                    onClick={() => col.sortable !== false && handleSort(col.accessorKey)}
-                    className={`p-4 text-xs font-bold text-gray-400 uppercase tracking-wider select-none ${
-                      col.sortable !== false
-                        ? "cursor-pointer hover:bg-gray-100/50 dark:hover:bg-gray-900/50"
-                        : ""
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <span>{col.header}</span>
-                      {col.sortable !== false && (
-                        <span className="text-gray-400">
-                          {sortKey === col.accessorKey ? (
-                            sortOrder === "asc" ? (
-                              <ChevronUp size={13} />
+                {activeColumns.map((col) => {
+                  const isSortable = col.sortable !== false;
+                  const isSorted = sortKey === col.accessorKey;
+                  const ariaSort: React.AriaAttributes["aria-sort"] = isSortable
+                    ? isSorted
+                      ? sortOrder === "asc"
+                        ? "ascending"
+                        : "descending"
+                      : "none"
+                    : undefined;
+                  return (
+                    <th
+                      key={col.accessorKey}
+                      aria-sort={ariaSort}
+                      className="p-4 text-xs font-bold text-gray-400 uppercase tracking-wider select-none"
+                    >
+                      {isSortable ? (
+                        <button
+                          type="button"
+                          onClick={() => handleSort(col.accessorKey)}
+                          className="flex items-center gap-1.5 rounded-lg transition-colors hover:text-gray-600 dark:hover:text-gray-200"
+                        >
+                          <span>{col.header}</span>
+                          <span className="text-gray-400" aria-hidden="true">
+                            {isSorted ? (
+                              sortOrder === "asc" ? (
+                                <ChevronUp size={13} />
+                              ) : (
+                                <ChevronDown size={13} />
+                              )
                             ) : (
-                              <ChevronDown size={13} />
-                            )
-                          ) : (
-                            <ChevronDown size={13} className="opacity-20" />
-                          )}
-                        </span>
+                              <ChevronDown size={13} className="opacity-20" />
+                            )}
+                          </span>
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <span>{col.header}</span>
+                        </div>
                       )}
-                    </div>
+                    </th>
+                  );
+                })}
+
+                {onRowClick && (
+                  <th scope="col" className="p-4 w-10">
+                    <span className="sr-only">Actions</span>
                   </th>
-                ))}
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-gray-800/80">
               {paginatedData.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={activeColumns.length + (bulkActions.length > 0 ? 1 : 0)}
+                    colSpan={
+                      activeColumns.length +
+                      (bulkActions.length > 0 ? 1 : 0) +
+                      (onRowClick ? 1 : 0)
+                    }
                     className="p-12 text-center text-xs font-semibold text-gray-400 uppercase tracking-wider"
                   >
                     No matching records found.
@@ -407,6 +445,7 @@ export function ResponsiveTable<T extends { id: string | number; [key: string]: 
                             type="checkbox"
                             checked={isSelected}
                             onChange={(e) => handleSelectRow(row.id, e as any)}
+                            aria-label={`Select record ${row.id}`}
                             className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-[#0E4825]"
                           />
                         </td>
@@ -420,6 +459,22 @@ export function ResponsiveTable<T extends { id: string | number; [key: string]: 
                           {col.cell ? col.cell(row) : getNestedValue(row, col.accessorKey)}
                         </td>
                       ))}
+
+                      {onRowClick && (
+                        <td className="p-4 w-10 text-right">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onRowClick(row);
+                            }}
+                            aria-label={`View details for record ${row.id}`}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-xl text-gray-400 hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+                          >
+                            <Eye size={16} />
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })
@@ -452,8 +507,10 @@ export function ResponsiveTable<T extends { id: string | number; [key: string]: 
 
         <div className="flex items-center gap-1">
           <button
+            type="button"
             onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
             disabled={currentPage === 1}
+            aria-label="Previous page"
             className="flex h-8 w-8 items-center justify-center rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-900 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <ChevronLeft size={16} />
@@ -464,8 +521,10 @@ export function ResponsiveTable<T extends { id: string | number; [key: string]: 
           </span>
 
           <button
+            type="button"
             onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-            disabled={currentPage === totalPages}
+            disabled={currentPage >= totalPages}
+            aria-label="Next page"
             className="flex h-8 w-8 items-center justify-center rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#1A1A1A] text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-900 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <ChevronRight size={16} />

@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.burgonomics.partner",
+      "sha256_cert_fingerprints": [
+        "25:C9:63:BC:E4:6F:15:A4:0B:2D:D6:34:88:6F:83:25:BA:D4:34:32:8F:8C:CC:A7:83:68:73:62:8E:C3:CF:D7"
+      ]
+    }
+  }
+]

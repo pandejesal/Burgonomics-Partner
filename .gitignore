@@ -19,6 +19,9 @@ dist-ssr
 !.env.example
 *.jks
 *.keystore
+*.keystore.*
+key.properties
+android/key.properties
 
 # Native Firebase & signing — India production
 *.p12
@@ -38,3 +41,10 @@ GoogleService-Info.plist
 *.njsproj
 *.sln
 *.sw?
+
+# Local backup and test harness artifacts
+*.pre-phase2
+.harness/
+
+# Playwright / harness run output
+test-results/

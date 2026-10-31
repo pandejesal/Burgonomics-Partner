@@ -11,7 +11,8 @@ import {
 
 export interface StoreAnalyticsChartsProps {
   avgOrderValue: number | string;
-  peakHour: string;
+  /** Absent = never measured (P0-3). Renders an honest dash, never a guess. */
+  peakHour?: string | null;
   weeklyRevenueTrend: number[];
 }
 
@@ -24,6 +25,12 @@ export const StoreAnalyticsCharts: React.FC<StoreAnalyticsChartsProps> = ({
   peakHour,
   weeklyRevenueTrend,
 }) => {
+  // Honest placeholder: an outlet that has taken no orders has no AOV —
+  // print the "not enough orders" pattern, not a fabricated ₹ number.
+  const hasAov =
+    typeof avgOrderValue === "number"
+      ? avgOrderValue > 0
+      : avgOrderValue.trim() !== "" && avgOrderValue.trim() !== "0";
   return (
     <div className="rounded-[20px] border border-gray-100 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-[#1C1C1E]">
       <div className="flex items-center justify-between mb-4">
@@ -37,13 +44,13 @@ export const StoreAnalyticsCharts: React.FC<StoreAnalyticsChartsProps> = ({
         <div className="rounded-xl bg-gray-50 p-3 dark:bg-gray-900/40">
           <span className="block text-gray-400">AOV (Average Basket):</span>
           <span className="font-mono text-sm font-black text-gray-900 dark:text-white">
-            ₹{avgOrderValue}
+            {hasAov ? `₹${avgOrderValue}` : "Not enough orders yet"}
           </span>
         </div>
         <div className="rounded-xl bg-gray-50 p-3 dark:bg-gray-900/40">
           <span className="block text-gray-400">Peak Ordering Hour:</span>
           <span className="font-mono text-sm font-black text-gray-900 dark:text-white truncate">
-            {peakHour}
+            {peakHour || "—"}
           </span>
         </div>
       </div>

@@ -31,13 +31,11 @@ const roleLabels: Record<string, string> = {
 
 export function SettingsPage() {
   const { user, signOut } = useAuthStore();
-  const { branches } = useBranches();
+  const { branches, isLoading: branchesLoading } = useBranches();
   const [showDevDiagnostics, setShowDevDiagnostics] = useState(false);
+  const canViewDiagnostics = user?.role === 'developer' || user?.role === 'brand_owner';
 
-  const myBranch =
-    branches.find((b) => user?.branchIds?.includes(b.id)) ||
-    branches[0] ||
-    null;
+  const myBranch = branches.find((b) => user?.branchIds?.includes(b.id)) ?? null;
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-16 select-none">
@@ -94,7 +92,12 @@ export function SettingsPage() {
           <div className="p-3 rounded-2xl bg-neutral-950 border border-neutral-850 space-y-1">
             <span className="text-neutral-500 font-bold uppercase text-[10px] block">Assigned Outlet</span>
             <p className="font-semibold text-neutral-200 truncate">
-              {myBranch?.name || user?.branchIds?.[0] || 'Surat Adajan'}
+              {myBranch?.name ??
+                (branchesLoading
+                  ? 'Loading outlet…'
+                  : user?.branchIds?.length
+                    ? 'Outlet unavailable'
+                    : 'Not assigned to an outlet')}
             </p>
           </div>
 
@@ -109,23 +112,23 @@ export function SettingsPage() {
       <div className="p-4 rounded-2xl bg-neutral-950 border border-neutral-850 flex items-center justify-between text-xs text-neutral-400">
         <div className="flex items-center gap-2">
           <Smartphone className="w-4 h-4 text-[#FF6600]" />
-          <span>Burgonomics Partner POS • v2.4.0 (Petpooja Bridge Active)</span>
+          <span>Burgonomics Partner POS • v2.4.0</span>
         </div>
 
-        <button
+        {canViewDiagnostics && <button
           type="button"
           onClick={() => setShowDevDiagnostics(true)}
           className="text-neutral-400 hover:text-white font-bold text-[11px] underline cursor-pointer"
         >
           Dev Diagnostics
-        </button>
+        </button>}
       </div>
 
       {/* Dev Diagnostics Modal */}
-      <DevDiagnosticsModal
+      {canViewDiagnostics && <DevDiagnosticsModal
         isOpen={showDevDiagnostics}
         onClose={() => setShowDevDiagnostics(false)}
-      />
+      />}
     </div>
   );
 }

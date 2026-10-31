@@ -17,7 +17,12 @@ export interface RichOrder extends Omit<Order, "status"> {
     | "Out for Delivery"
     | "Completed"
     | "Cancelled"
-    | "Refunded";
+    | "Refunded"
+    // Quarantine bucket for docs whose status the contract could not map
+    // (unknown code / corrupt shape). Non-actionable by design: it never
+    // enters a kitchen column, the status-bump API rejects it, and the
+    // drawer gates every transition button on it.
+    | "Needs Review";
   paymentStatus: "Paid" | "Pending" | "Failed" | "Refunded";
   petpoojaStatus: "Synced" | "Pending" | "Failed" | "Bypassed";
   petpoojaDetails?: {

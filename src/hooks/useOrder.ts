@@ -61,14 +61,20 @@ export function useOrder(orderId: string) {
     mutationFn: async ({
       status,
       cancellationReason,
+      expectedStatus,
     }: {
       status: OrderStatus;
       cancellationReason?: string;
+      /** The status the screen currently shows — lost-update precondition. */
+      expectedStatus?: OrderStatus;
     }) => {
       // Server-side bump (POST /orders/bumpStatus): branch-checked write.
+      // expectedStatus carries what this screen believes the order is in, so
+      // the server can refuse a bump that would clobber a concurrent change.
       await partnerFunctionsApi.bumpOrderStatus({
         orderId,
         status,
+        ...(expectedStatus ? { expectedStatus } : {}),
         ...(cancellationReason ? { cancellationReason } : {}),
       });
     },

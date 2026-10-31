@@ -197,6 +197,40 @@ describe('partnerFunctionsApi gateway (real client, mocked transport)', () => {
     await expect(partnerFunctionsApi.cancelPorterRider('ord_9')).rejects.toThrow(/rejected the cancellation/);
   });
 
+  it('POSTs the KDS 86 toggle to the Petpooja stock route with branch/item/state', async () => {
+    const seen: { url?: string; init?: RequestInit } = {};
+    globalThis.fetch = (async (url: any, init: any) => {
+      seen.url = String(url);
+      seen.init = init;
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as any;
+
+    const res = await partnerFunctionsApi.toggle86Item({
+      branchId: 'branch_surat_01',
+      itemId: 'pp_b1',
+      inStock: false,
+    });
+    expect(seen.url).toBe('https://example.invalid/api/petpooja/pushStock');
+    expect(JSON.parse(String(seen.init?.body))).toEqual({
+      branchId: 'branch_surat_01',
+      itemId: 'pp_b1',
+      inStock: false,
+    });
+    expect(res.success).toBe(true);
+
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: 'Petpooja POS rejected the stock push' }), {
+        status: 502,
+        headers: { 'Content-Type': 'application/json' },
+      })) as any;
+    await expect(
+      partnerFunctionsApi.toggle86Item({ branchId: 'b1', itemId: 'pp_b1', inStock: true })
+    ).rejects.toThrow(/rejected the stock push/);
+  });
+
   it('measures API health instead of fabricating latency', async () => {
     globalThis.fetch = (async (url: any) => {
       expect(String(url)).toMatch(/\/health$/);

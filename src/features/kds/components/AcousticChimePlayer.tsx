@@ -1,12 +1,16 @@
 import React from 'react';
-import { Volume2, VolumeX, BellRing, Sparkles } from 'lucide-react';
-import { playKDSChime } from '@/utils/kdsAudio';
+import { Volume2, VolumeX, BellRing, Sparkles, BellOff } from 'lucide-react';
+import { acknowledgeKDSAlarm, playKDSChime } from '@/utils/kdsAudio';
 
 interface AcousticChimePlayerProps {
   isMuted: boolean;
   audioUnlocked: boolean;
   onToggleMute: () => void;
   onUnlockAudio: () => void;
+  /** Optional: live pending-order count. Shows the Acknowledge button when > 0. */
+  pendingCount?: number;
+  /** Optional: parent callback fired after a staff acknowledge. */
+  onAcknowledge?: () => void;
   className?: string;
 }
 
@@ -15,6 +19,8 @@ export function AcousticChimePlayer({
   audioUnlocked,
   onToggleMute,
   onUnlockAudio,
+  pendingCount = 0,
+  onAcknowledge,
   className = '',
 }: AcousticChimePlayerProps) {
   const handleTestChime = () => {
@@ -22,6 +28,11 @@ export function AcousticChimePlayer({
       onUnlockAudio();
     }
     playKDSChime();
+  };
+
+  const handleAcknowledge = () => {
+    acknowledgeKDSAlarm();
+    onAcknowledge?.();
   };
 
   return (
@@ -37,15 +48,28 @@ export function AcousticChimePlayer({
           <span>Click to Enable Audio Alarm</span>
         </button>
       ) : (
-        <button
-          type="button"
-          onClick={handleTestChime}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-neutral-800/80 hover:bg-neutral-700 border border-neutral-700 text-neutral-300 text-xs font-bold transition-colors cursor-pointer"
-          title="Test KDS Alarm Chime"
-        >
-          <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-          <span>Test Chime</span>
-        </button>
+        <>
+          <button
+            type="button"
+            onClick={handleTestChime}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-neutral-800/80 hover:bg-neutral-700 border border-neutral-700 text-neutral-300 text-xs font-bold transition-colors cursor-pointer"
+            title="Test KDS Alarm Chime"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Test Chime</span>
+          </button>
+          {pendingCount > 0 && (
+            <button
+              type="button"
+              onClick={handleAcknowledge}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 border border-amber-600/50 text-amber-300 text-xs font-bold transition-colors cursor-pointer"
+              title="Acknowledge alarm — silence until new orders arrive"
+            >
+              <BellOff className="w-3.5 h-3.5" />
+              <span>Acknowledge</span>
+            </button>
+          )}
+        </>
       )}
 
       <button

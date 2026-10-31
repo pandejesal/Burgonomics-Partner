@@ -7,11 +7,8 @@ import {
   OrderStatusStepper,
   OrderCancelRefundModal,
   OrderStatusBadge,
+  PetpoojaTestRunnerModal,
 } from '@/features/orders';
-import {
-  getPorterDeliveryQuote,
-  type PorterDeliveryQuote,
-} from '@/services/porterDelivery';
 import {
   ArrowLeft,
   Printer,
@@ -26,19 +23,35 @@ import {
   RefreshCw,
   XCircle,
   Clock,
+  FlaskConical,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { OrderStatus } from '@/types';
 import { ConfirmDialog } from '../admin/components/Utilities';
 import { DeliveryOtpModal } from '@/components/DeliveryOtpModal';
+import { useAuthStore } from '@/stores/authStore';
+import { useQueryClient } from '@tanstack/react-query';
+import { partnerFunctionsApi, dispatchProviderLabel } from '@/services/partnerFunctionsApi';
+import type { DispatchQuoteResult } from '@/services/partnerFunctionsApi';
+
+/**
+ * POST /payments/refund is requireRole(["brand_owner","developer","support"])
+ * server-side — anyone else gets a 403. Mirrored here so branch staff get an
+ * honest message instead of a guaranteed server rejection.
+ */
+const REFUND_ROLES = ['brand_owner', 'developer', 'support'];
 
 export function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuthStore();
+  const queryClient = useQueryClient();
+  const canReleaseRefund = !!user?.role && REFUND_ROLES.includes(user.role);
 
   const {
     order,
     isLoading,
+    error: orderError,
     updateStatus,
     pushToPetpooja,
     autoDispatchPorter,
@@ -47,6 +60,7 @@ export function OrderDetailPage() {
   const [copiedId, setCopiedId] = useState(false);
   const [showKOTModal, setShowKOTModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
+  const [showTestRunner, setShowTestRunner] = useState(false);
   // Loop 12/120: delivery handover requires the customer OTP — the stepper
   // must not flip delivery orders straight to DELIVERED (the OTP proof system
   // with lockout is otherwise bypassable by any staffer).
@@ -54,8 +68,10 @@ export function OrderDetailPage() {
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [isSyncingPetpooja, setIsSyncingPetpooja] = useState(false);
 
-  // Porter quote state
-  const [porterQuote, setPorterQuote] = useState<PorterDeliveryQuote | null>(null);
+  // Server quote state: the authoritative dispatch quote replaces the old
+  // client-side rate card, which fabricated a fare (₹40 base + ₹10/km) and
+  // presented it as a live Porter quote.
+  const [porterQuote, setPorterQuote] = useState<DispatchQuoteResult | null>(null);
   const [loadingQuote, setLoadingQuote] = useState(false);
   const { branches } = useBranches();
   const [isDispatchingPorter, setIsDispatchingPorter] = useState(false);
@@ -76,29 +92,48 @@ export function OrderDetailPage() {
     order?.orderType === 'delivery' || (order as any)?.fulfillment === 'delivery';
 
   useEffect(() => {
-    if (!order || !isDeliveryOrder) return;
+    if (!order || !isDeliveryOrder || !orderIdForQuote) return;
     setLoadingQuote(true);
-    // Pickup from the branch record's real coordinates (fail-closed in the
-    // service when missing — never fabricated defaults).
-    getPorterDeliveryQuote({
-      pickupLat,
-      pickupLng,
-      dropLat,
-      dropLng,
-      customerName: order.customerName,
-      customerPhone: order.customerPhone,
-    })
+    // Server-authoritative quote (multi-provider): pickup from the branch
+    // record's real coordinates, drop from the order — missing pins fail
+    // closed client-side before a request is sent, never a number without
+    // server backing. A failure or serviceable:false renders honestly below;
+    // the fabricated client rate card has been removed.
+    if (![pickupLat, pickupLng, dropLat, dropLng].every((c) => typeof c === 'number' && Number.isFinite(c))) {
+      setPorterQuote(null);
+      setLoadingQuote(false);
+      return;
+    }
+    let stale = false;
+    partnerFunctionsApi
+      .dispatchQuote({
+        pickupLat: pickupLat as number,
+        pickupLng: pickupLng as number,
+        dropLat: dropLat as number,
+        dropLng: dropLng as number,
+        customerName: order.customerName,
+        customerPhone: order.customerPhone,
+        orderId: orderIdForQuote,
+      })
       .then((q) => {
+        if (stale) return;
         setPorterQuote(q);
         setLoadingQuote(false);
       })
       .catch((err) => {
+        if (stale) return;
+        setPorterQuote(null);
         setLoadingQuote(false);
         // Never swallow: a missing quote looks identical to "free delivery".
         toast.error('Delivery quote failed', {
           description: err instanceof Error ? err.message : 'Could not reach the dispatcher.',
         });
       });
+    // Out-of-order guard: a refetch (new drop pin / branch coordinates) must
+    // not let the older request's response overwrite the newer one.
+    return () => {
+      stale = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderIdForQuote, dropLat, dropLng, pickupLat, pickupLng, isDeliveryOrder]);
 
@@ -112,20 +147,47 @@ export function OrderDetailPage() {
   }
 
   if (!order) {
+    // Typed read failures are not "not found": permission-denied means the
+    // order is outside the caller's scope, unavailable/network means the
+    // backend could not answer, and only a doc that genuinely does not exist
+    // (or a refusal with no typed code) claims it is gone. No raw internals
+    // are exposed.
+    const readCode = (orderError as { code?: string } | null)?.code;
+    const retryable = readCode === 'unavailable' || readCode === 'network-request-failed';
+    const denied = readCode === 'permission-denied';
+    const heading = denied
+      ? 'Order Outside Your Branch'
+      : retryable
+      ? 'Order Details Unreachable'
+      : 'Order Not Found';
+    const detail = denied
+      ? 'This order belongs to a branch outside your assigned scope, or its outlet is unlinked.'
+      : retryable
+      ? 'Could not read this order right now. Check the connection and retry.'
+      : 'The requested order ID may have been archived or deleted.';
     return (
       <div className="text-center py-20 bg-neutral-900/60 rounded-3xl border border-neutral-800 max-w-xl mx-auto my-12 p-8">
         <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto mb-3" />
-        <h2 className="text-lg font-black text-white">Order Not Found</h2>
-        <p className="text-xs text-neutral-400 mt-1">
-          The requested order ID may have been archived or deleted.
-        </p>
-        <Link
-          to="/orders"
-          className="mt-5 inline-flex items-center gap-2 px-5 py-2.5 bg-[#0E4825] text-emerald-300 font-bold text-xs rounded-xl shadow-sm"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          <span>Back to Live Orders</span>
-        </Link>
+        <h2 className="text-lg font-black text-white">{heading}</h2>
+        <p className="text-xs text-neutral-400 mt-1">{detail}</p>
+        <div className="mt-5 inline-flex flex-wrap items-center justify-center gap-3">
+          <Link
+            to="/orders"
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#0E4825] text-emerald-300 font-bold text-xs rounded-xl shadow-sm"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Back to Live Orders</span>
+          </Link>
+          {(retryable || denied) && (
+            <button
+              type="button"
+              onClick={() => queryClient.invalidateQueries({ queryKey: ['order', id] })}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-neutral-800 border border-neutral-700 text-white font-bold text-xs rounded-xl"
+            >
+              Retry
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -174,7 +236,12 @@ export function OrderDetailPage() {
     setIsUpdatingStatus(true);
     try {
       if (updateStatus && typeof updateStatus.mutateAsync === 'function') {
-        await updateStatus.mutateAsync({ status: nextStatus });
+        await updateStatus.mutateAsync({
+          status: nextStatus,
+          // Precondition: what this screen is showing — a concurrent bump on
+          // another terminal is refused server-side instead of clobbered.
+          ...(order ? { expectedStatus: order.status } : {}),
+        });
       }
       toast.success(`Order status advanced to ${nextStatus.toUpperCase()}`);
     } catch (err) {
@@ -190,14 +257,66 @@ export function OrderDetailPage() {
         await updateStatus.mutateAsync({
           status: 'cancelled',
           cancellationReason: notes ? `${reason}: ${notes}` : reason,
+          // Precondition: the status this screen is showing.
+          ...(order ? { expectedStatus: order.status } : {}),
         });
       }
-      toast.success(
-        `Order cancelled (${reason}).${shouldRefund ? ' Process the refund from Payments to complete it.' : ''}`
-      );
     } catch (err) {
       toast.error('Failed to cancel order — no changes were made.');
       throw err;
+    }
+
+    // Refund is a SEPARATE server round-trip (POST /payments/refund,
+    // requireRole brand/developer/support) — cancelling never moves money.
+    // Failure here is loud and specific: the order IS cancelled, the refund
+    // is NOT.
+    if (!shouldRefund) {
+      toast.success(`Order cancelled (${reason}).`);
+      return;
+    }
+
+    if (!canReleaseRefund) {
+      // The server would 403 this caller anyway — say so honestly instead of
+      // firing a request we know is refused.
+      toast.info('Order cancelled — refund NOT issued by this screen.', {
+        description: `Refunds of ₹${order.total} are released by brand admins. Ask a brand admin to release it.`,
+      });
+      return;
+    }
+
+    const paymentId =
+      (order as any)?.payment?.razorpayPaymentId ||
+      (order as any)?.razorpayPaymentId ||
+      '';
+    if (!paymentId) {
+      toast.error('Order cancelled, but NO refund was issued.', {
+        description:
+          'No Razorpay payment id is recorded on this order — a brand admin must locate the capture and release the refund manually.',
+      });
+      return;
+    }
+
+    try {
+      const res = await partnerFunctionsApi.releaseRefund({
+        orderId: order.id,
+        razorpayPaymentId: paymentId,
+        amountRupees: order.total,
+        reason: `Cancelled (${reason})`,
+      });
+      toast.success(
+        `Order cancelled and refund released via Razorpay${
+          (res as any)?.reused ? ' (already processed — idempotent replay)' : ''
+        }.`,
+        { description: `Refund ID: ${(res as any)?.id ?? 'confirmed'}` }
+      );
+      queryClient.invalidateQueries({ queryKey: ['order', order.id] });
+    } catch (err) {
+      toast.error('Order cancelled, but the refund FAILED — no money moved.', {
+        description:
+          err instanceof Error
+            ? err.message
+            : 'Retry from Payments, or ask a brand admin to release it.',
+      });
     }
   };
 
@@ -221,14 +340,17 @@ export function OrderDetailPage() {
       toast.error("You're offline — booking not attempted. Reconnect and retry.");
       return;
     }
-    // Paid-booking confirm with the live fare — a Porter dispatch spends
-    // real money and cannot be undone.
-    const fareHint = porterQuote ? ` (~₹${porterQuote.estimatedFare})` : '';
+    // Paid-booking confirm with the SERVER-backed fare and provider only —
+    // a fabricated client number must never be presented as the booking price.
+    const fareHint =
+      porterQuote?.serviceable === true && typeof porterQuote.estimatedFare === 'number'
+        ? `(server quote ~₹${porterQuote.estimatedFare} via ${dispatchProviderLabel(porterQuote.winner)})`
+        : '';
     const confirmed =
       typeof window === 'undefined'
         ? true
         : window.confirm(
-            `Book a PAID Porter rider${fareHint} for this order? This charges the branch and cannot be undone.`
+            `Book a PAID courier rider${fareHint} for this order? This charges the branch and cannot be undone.`
           );
     if (!confirmed) return;
     setIsDispatchingPorter(true);
@@ -250,10 +372,33 @@ export function OrderDetailPage() {
 
   const addressText =
     order.deliveryAddress?.full ||
+    [
+      (order.deliveryAddress as any)?.line1,
+      (order.deliveryAddress as any)?.line2,
+      (order.deliveryAddress as any)?.landmark,
+      (order.deliveryAddress as any)?.city,
+      (order.deliveryAddress as any)?.pincode,
+    ]
+      .filter(Boolean)
+      .join(', ') ||
     (order.deliveryAddress as any)?.street ||
     (order.deliveryAddress as any)?.address ||
     order.deliveryAddress?.label ||
     'Store Pickup';
+
+  // MT-23: explicit route origin — a desktop/POS terminal has no GPS fix, so
+  // `maps/dir/?api=1&destination=…` alone opens with no starting point. When
+  // the order carries branch/store coords we plot the kitchen→customer route.
+  // Absent/malformed coords fall back to Google's own origin prompt.
+  const rawOrder = order as any;
+  const branchLat = rawOrder.branchCoordinates?.lat ?? rawOrder.store?.lat ?? pickupLat;
+  const branchLng = rawOrder.branchCoordinates?.lng ?? rawOrder.store?.lng ?? pickupLng;
+  const hasBranchOrigin =
+    typeof branchLat === 'number' &&
+    typeof branchLng === 'number' &&
+    Number.isFinite(branchLat) &&
+    Number.isFinite(branchLng);
+  const mapsOriginParam = hasBranchOrigin ? `&origin=${branchLat},${branchLng}` : '';
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-16">
@@ -314,6 +459,16 @@ export function OrderDetailPage() {
             <span>{order.petpoojaOrderId ? 'Re-sync POS' : 'Sync Petpooja'}</span>
           </button>
 
+          {/* Petpooja Test Runner */}
+          <button
+            type="button"
+            onClick={() => setShowTestRunner(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-neutral-950 border border-neutral-700 hover:bg-neutral-800 text-neutral-300 hover:text-white font-bold text-xs transition-colors cursor-pointer"
+          >
+            <FlaskConical className="w-3.5 h-3.5" />
+            <span>Petpooja Test Lab</span>
+          </button>
+
           {/* Cancel Order */}
           {order.status !== 'cancelled' && order.status !== 'delivered' && (
             <button
@@ -331,6 +486,7 @@ export function OrderDetailPage() {
       {/* Order Status Stepper */}
       <OrderStatusStepper
         currentStatus={order.status}
+        orderType={order.orderType}
         onUpdateStatus={handleStatusChange}
         isSubmitting={isUpdatingStatus}
       />
@@ -487,9 +643,9 @@ export function OrderDetailPage() {
                   </div>
                 </div>
 
-                {order.deliveryAddress.lat && order.deliveryAddress.lng && (
+                {order.deliveryAddress?.lat && order.deliveryAddress?.lng && (
                   <a
-                    href={`https://www.google.com/maps/dir/?api=1&destination=${order.deliveryAddress.lat},${order.deliveryAddress.lng}`}
+                    href={`https://www.google.com/maps/dir/?api=1${mapsOriginParam}&destination=${order.deliveryAddress.lat},${order.deliveryAddress.lng}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 text-[11px] font-bold text-[#FF6600] hover:underline"
@@ -504,14 +660,28 @@ export function OrderDetailPage() {
             {/* Porter Delivery Dispatch Section */}
             {isDelivery && (
               <div className="pt-3 border-t border-neutral-800 space-y-2">
+                {/* Courier Quote: server-authoritative multi-provider quote.
+                    The client-side Porter rate card (fabricated ₹40 + ₹10/km)
+                    has been removed — anything that is not a server-backed
+                    number renders as unavailable, never "Available". */}
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-neutral-400">Porter Courier:</span>
+                  <span className="font-bold text-neutral-400">Courier Quote:</span>
                   <span className="font-mono text-emerald-400 font-bold">
                     {loadingQuote
                       ? 'Fetching quote...'
-                      : porterQuote
-                      ? `₹${porterQuote.estimatedFare} (${porterQuote.estimatedPickupMinutes}m)`
-                      : 'Available'}
+                      : porterQuote?.serviceable === true &&
+                        typeof porterQuote.estimatedFare === 'number'
+                      ? [
+                          `₹${porterQuote.estimatedFare} via ${dispatchProviderLabel(porterQuote.winner)}`,
+                          typeof porterQuote.estimatedPickupMinutes === 'number'
+                            ? `(${porterQuote.estimatedPickupMinutes}m)`
+                            : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ')
+                      : porterQuote?.serviceable === false
+                      ? porterQuote.message || porterQuote.reason || 'Out of dispatch zone'
+                      : 'Quote unavailable — dispatch from the Delivery Queue'}
                   </span>
                 </div>
 
@@ -532,8 +702,8 @@ export function OrderDetailPage() {
                       setConfirmPorterDispatch(false);
                       void handleDispatchPorterRider();
                     }}
-                    title="Dispatch Porter rider?"
-                    description={`This books a real paid courier${porterQuote ? ` at an estimated fare of ₹${porterQuote.estimatedFare} (ETA ${porterQuote.estimatedPickupMinutes}m)` : ''}. This action spends money.`}
+                    title="Dispatch courier rider?"
+                    description={`This books a real paid courier${porterQuote?.serviceable === true && typeof porterQuote.estimatedFare === 'number' ? ` at an estimated fare of ₹${porterQuote.estimatedFare} via ${dispatchProviderLabel(porterQuote.winner)}${typeof porterQuote.estimatedPickupMinutes === 'number' ? ` (ETA ${porterQuote.estimatedPickupMinutes}m)` : ''}` : ''}. This action spends money.`}
                     confirmLabel="Dispatch Rider"
                   />
                 )}
@@ -557,6 +727,9 @@ export function OrderDetailPage() {
         onClose={() => setShowCancelModal(false)}
         onConfirmCancel={handleCancelAndRefund}
       />
+
+      {/* Petpooja onboarding test runner */}
+      <PetpoojaTestRunnerModal isOpen={showTestRunner} onClose={() => setShowTestRunner(false)} />
 
       {/* Handover OTP — the only path to DELIVERED for delivery orders */}
       {showOtpModal && (

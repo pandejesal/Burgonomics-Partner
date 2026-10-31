@@ -110,3 +110,126 @@ describe('orderContract — Partner ↔ Delivery interop', () => {
     expect(toDeliveryStatusMeta('delivered').terminal).toBe(true);
   });
 });
+
+describe('orderContract — kitchen customizations survive normalization', () => {
+  it('carries modifiers onto the OrderItem so KDS cards and KOT slips can show them', () => {
+    const order = normalizeOrderDoc('ord_mod_1', {
+      branchId: 'branch_surat_01',
+      status: 'preparing',
+      items: [
+        {
+          itemId: 'prd_burger',
+          name: 'Cheese Burst Burger',
+          quantity: 1,
+          price: 249,
+          modifiers: ['Extra Cheese Slice', 'No Onion'],
+          specialInstructions: 'Well done',
+        },
+      ],
+    });
+
+    expect(order.items[0].modifiers).toEqual(['Extra Cheese Slice', 'No Onion']);
+    expect(order.items[0].specialInstructions).toBe('Well done');
+  });
+
+  it('reads add-ons from every key spelling either app writes', () => {
+    const order = normalizeOrderDoc('ord_mod_2', {
+      branchId: 'branch_surat_01',
+      status: 'preparing',
+      items: [
+        { itemId: 'a', name: 'Fries', quantity: 1, price: 99, addons: ['Peri Peri'] },
+        { itemId: 'b', name: 'Shake', quantity: 1, price: 149, customizations: ['Extra Scoop'] },
+        { itemId: 'c', name: 'Momos', quantity: 1, price: 129, selectedModifiers: [{ name: 'Chilli Oil' }] },
+      ],
+    });
+
+    expect(order.items[0].modifiers).toEqual(['Peri Peri']);
+    expect(order.items[1].modifiers).toEqual(['Extra Scoop']);
+    expect(order.items[2].modifiers).toEqual(['Chilli Oil']);
+  });
+
+  it('coerces object-shaped modifiers to labels and drops unlabelled entries', () => {
+    const order = normalizeOrderDoc('ord_mod_3', {
+      branchId: 'branch_surat_01',
+      status: 'preparing',
+      items: [
+        {
+          itemId: 'a',
+          name: 'Burger',
+          quantity: 1,
+          price: 199,
+          customizations: [
+            { name: 'Cheese Burst', price: 30 },
+            { label: 'Extra Sauce' },
+            { price: 10 },
+            'Grilled',
+            '   ',
+            42,
+            null,
+          ],
+        },
+      ],
+    });
+
+    // Every entry must be a renderable string — an object reaching JSX
+    // white-screens the kitchen wall mid-rush.
+    expect(order.items[0].modifiers).toEqual(['Cheese Burst', 'Extra Sauce', 'Grilled']);
+    order.items[0].modifiers!.forEach((m) => expect(typeof m).toBe('string'));
+  });
+
+  it('reads the real customer-app cart shapes (optionName / CartModifier)', () => {
+    const order = normalizeOrderDoc('ord_mod_real', {
+      branchId: 'branch_surat_01',
+      status: 'preparing',
+      items: [
+        {
+          itemId: 'a',
+          name: 'Cheese Burst Burger',
+          quantity: 1,
+          price: 279,
+          modifiers: [
+            {
+              groupId: 'grp_extras',
+              groupName: 'Extras',
+              optionId: 'opt_cheese',
+              name: 'Extra Cheese Slice',
+              priceDelta: 30,
+            },
+          ],
+          customizations: [{ groupName: 'Bun', optionName: 'Brioche Bun', price: 20 }],
+        },
+      ],
+    });
+
+    expect(order.items[0].modifiers).toEqual(['Extra Cheese Slice', 'Brioche Bun']);
+  });
+
+  it('omits the modifiers key entirely when a line has no customizations', () => {
+    const order = normalizeOrderDoc('ord_mod_4', {
+      branchId: 'branch_surat_01',
+      status: 'preparing',
+      items: [{ itemId: 'a', name: 'Fries', quantity: 1, price: 99 }],
+    });
+
+    expect(order.items[0].modifiers).toBeUndefined();
+  });
+
+  it('deduplicates a modifier repeated across keys', () => {
+    const order = normalizeOrderDoc('ord_mod_5', {
+      branchId: 'branch_surat_01',
+      status: 'preparing',
+      items: [
+        {
+          itemId: 'a',
+          name: 'Burger',
+          quantity: 1,
+          price: 199,
+          modifiers: ['Extra Cheese'],
+          addons: ['Extra Cheese'],
+        },
+      ],
+    });
+
+    expect(order.items[0].modifiers).toEqual(['Extra Cheese']);
+  });
+});

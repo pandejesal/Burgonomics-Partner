@@ -3,11 +3,11 @@ import { Settings, ShieldCheck, Cpu, Mail, Zap, Lock, Save, CheckCircle2 } from 
 import { toast } from "sonner";
 
 export const SystemSettingsTab: React.FC = () => {
-  const [smtpHost, setSmtpHost] = useState("smtp.postmarkapp.com");
-  const [smtpPort, setSmtpPort] = useState("587");
-  const [sessionExpiry, setSessionExpiry] = useState("14");
-  const [webhookRetries, setWebhookRetries] = useState("3");
-  const [rateLimitIp, setRateLimitIp] = useState("120");
+  const [smtpHost, setSmtpHost] = useState("");
+  const [smtpPort, setSmtpPort] = useState("");
+  const [sessionExpiry, setSessionExpiry] = useState("");
+  const [webhookRetries, setWebhookRetries] = useState("");
+  const [rateLimitIp, setRateLimitIp] = useState("");
 
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,8 +25,8 @@ export const SystemSettingsTab: React.FC = () => {
             BURGO_SYSTEM CENTRAL SETTINGS
           </h3>
           <p className="text-[10px] text-gray-500 mt-0.5">
-            Configure system limits, SMTP relays, session token boundaries, and API rate throtlling
-            params
+            Reference view of SMTP, session-expiry, webhook-retry, and rate-limit parameters. No
+            settings backend is connected — nothing here is read from a server or written back.
           </p>
         </div>
       </div>
@@ -110,6 +110,7 @@ export const SystemSettingsTab: React.FC = () => {
                   type="text"
                   value={smtpHost}
                   onChange={(e) => setSmtpHost(e.target.value)}
+                  placeholder="Not set (no backend)"
                   className="w-full bg-black border border-gray-900 rounded-lg p-2 text-white font-mono placeholder-gray-800 outline-none focus:border-emerald-700"
                 />
               </div>
@@ -122,6 +123,7 @@ export const SystemSettingsTab: React.FC = () => {
                   type="text"
                   value={smtpPort}
                   onChange={(e) => setSmtpPort(e.target.value)}
+                  placeholder="Not set (no backend)"
                   className="w-full bg-black border border-gray-900 rounded-lg p-2 text-white font-mono placeholder-gray-800 outline-none focus:border-emerald-700"
                 />
               </div>
@@ -147,6 +149,7 @@ export const SystemSettingsTab: React.FC = () => {
                     type="number"
                     value={sessionExpiry}
                     onChange={(e) => setSessionExpiry(e.target.value)}
+                    placeholder="Not set (no backend)"
                     className="w-full bg-black border border-gray-900 rounded-lg p-2 text-white font-mono outline-none focus:border-emerald-700"
                   />
                 </div>
@@ -158,6 +161,7 @@ export const SystemSettingsTab: React.FC = () => {
                     type="number"
                     value={rateLimitIp}
                     onChange={(e) => setRateLimitIp(e.target.value)}
+                    placeholder="Not set (no backend)"
                     className="w-full bg-black border border-gray-900 rounded-lg p-2 text-white font-mono outline-none focus:border-emerald-700"
                   />
                 </div>
@@ -171,6 +175,7 @@ export const SystemSettingsTab: React.FC = () => {
                   type="number"
                   value={webhookRetries}
                   onChange={(e) => setWebhookRetries(e.target.value)}
+                  placeholder="Not set (no backend)"
                   className="w-full bg-black border border-gray-900 rounded-lg p-2 text-white font-mono outline-none focus:border-emerald-700"
                 />
               </div>
@@ -178,11 +183,16 @@ export const SystemSettingsTab: React.FC = () => {
           </div>
         </div>
 
+        <p className="text-[10px] text-gray-500">
+          No backend — this button only confirms the current view; nothing is persisted or
+          broadcast.
+        </p>
+
         <button
           type="submit"
           className="px-6 py-2.5 bg-primary hover:bg-[#156d39] text-white rounded-xl flex items-center justify-center gap-2 text-xs font-black uppercase tracking-wider transition-colors cursor-pointer self-end w-fit ml-auto"
         >
-          <Save size={14} /> Save Configuration Params
+          <Save size={14} /> Save For This View Only
         </button>
       </form>
     </div>

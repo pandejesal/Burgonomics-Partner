@@ -143,6 +143,24 @@ export interface NotificationHistoryItem {
   errorMessage?: string;
 }
 
+export interface PushLog {
+  id: string;
+  title: string;
+  body: string;
+  target: string;
+  sentAt: string;
+  successCount: number;
+  // Loop 22/120 honesty: nothing on this page has ever been dispatched —
+  // there is no customer broadcast endpoint. Seeds are fixtures, new rows
+  // are local drafts. Never present either as deliveries.
+  // Readiness-9: "sent" rows carry SERVER-MEASURED counts from POST
+  // /notifications/broadcast (targeted/delivered/failed) — the only rows
+  // that may claim a dispatch.
+  status: "fixture" | "draft" | "sent";
+  targeted?: number;
+  failedCount?: number;
+}
+
 // Task 1.2: demo marketing seeds removed from the production bundle. The
 // marketing module starts empty and loads only records persisted by admin actions.
 
@@ -156,6 +174,7 @@ class MarketingDataStorage {
   private offers: MarketingOffer[] = [];
   private automations: MarketingAutomation[] = [];
   private history: NotificationHistoryItem[] = [];
+  private pushLogs: PushLog[] = [];
   private listeners: Set<() => void> = new Set();
 
   constructor() {
@@ -165,25 +184,88 @@ class MarketingDataStorage {
   private loadFromStorage() {
     // No seed data ships in the bundle: the marketing module starts empty and
     // loads only records persisted by admin actions (or stays empty in
-    // non-browser envs).
+    // non-browser envs). Corrupt localStorage entries must never throw at
+    // import time — we drop the bad value and continue with an empty array.
     if (typeof window !== "undefined") {
       const storedCampaigns = localStorage.getItem("burg_mkt_campaigns");
       const storedTemplates = localStorage.getItem("burg_mkt_templates");
       const storedOffers = localStorage.getItem("burg_mkt_offers");
       const storedAutomations = localStorage.getItem("burg_mkt_automations");
       const storedHistory = localStorage.getItem("burg_mkt_history");
+      const storedPushLogs = localStorage.getItem("burg_mkt_push_logs");
 
-      this.campaigns = storedCampaigns ? JSON.parse(storedCampaigns) : [];
-      this.templates = storedTemplates ? JSON.parse(storedTemplates) : [];
-      this.offers = storedOffers ? JSON.parse(storedOffers) : [];
-      this.automations = storedAutomations ? JSON.parse(storedAutomations) : [];
-      this.history = storedHistory ? JSON.parse(storedHistory) : [];
+      if (storedCampaigns) {
+        try {
+          this.campaigns = JSON.parse(storedCampaigns);
+        } catch {
+          console.warn('[marketingData] Corrupt localStorage "burg_mkt_campaigns" — discarding');
+          this.campaigns = [];
+        }
+      } else {
+        this.campaigns = [];
+      }
+
+      if (storedTemplates) {
+        try {
+          this.templates = JSON.parse(storedTemplates);
+        } catch {
+          console.warn('[marketingData] Corrupt localStorage "burg_mkt_templates" — discarding');
+          this.templates = [];
+        }
+      } else {
+        this.templates = [];
+      }
+
+      if (storedOffers) {
+        try {
+          this.offers = JSON.parse(storedOffers);
+        } catch {
+          console.warn('[marketingData] Corrupt localStorage "burg_mkt_offers" — discarding');
+          this.offers = [];
+        }
+      } else {
+        this.offers = [];
+      }
+
+      if (storedAutomations) {
+        try {
+          this.automations = JSON.parse(storedAutomations);
+        } catch {
+          console.warn('[marketingData] Corrupt localStorage "burg_mkt_automations" — discarding');
+          this.automations = [];
+        }
+      } else {
+        this.automations = [];
+      }
+
+      if (storedHistory) {
+        try {
+          this.history = JSON.parse(storedHistory);
+        } catch {
+          console.warn('[marketingData] Corrupt localStorage "burg_mkt_history" — discarding');
+          this.history = [];
+        }
+      } else {
+        this.history = [];
+      }
+
+      if (storedPushLogs) {
+        try {
+          this.pushLogs = JSON.parse(storedPushLogs);
+        } catch {
+          console.warn('[marketingData] Corrupt localStorage "burg_mkt_push_logs" — discarding');
+          this.pushLogs = [];
+        }
+      } else {
+        this.pushLogs = [];
+      }
     } else {
       this.campaigns = [];
       this.templates = [];
       this.offers = [];
       this.automations = [];
       this.history = [];
+      this.pushLogs = [];
     }
   }
 
@@ -194,6 +276,7 @@ class MarketingDataStorage {
       localStorage.setItem("burg_mkt_offers", JSON.stringify(this.offers));
       localStorage.setItem("burg_mkt_automations", JSON.stringify(this.automations));
       localStorage.setItem("burg_mkt_history", JSON.stringify(this.history));
+      localStorage.setItem("burg_mkt_push_logs", JSON.stringify(this.pushLogs));
     }
   }
 
@@ -226,6 +309,16 @@ class MarketingDataStorage {
 
   getHistory(): NotificationHistoryItem[] {
     return this.history;
+  }
+
+  getPushLogs(): PushLog[] {
+    return this.pushLogs;
+  }
+
+  addPushLog(entry: PushLog) {
+    this.pushLogs.unshift(entry);
+    if (this.pushLogs.length > 50) this.pushLogs.length = 50;
+    this.notify();
   }
 
   // Campaign Actions
@@ -294,10 +387,14 @@ class MarketingDataStorage {
   createOffer(offer: Omit<MarketingOffer, "id">) {
     const newOffer: MarketingOffer = {
       ...offer,
+      // M6: this only mutates local storage — no coupon/checkout writer runs,
+      // so the row must never claim to be live. Force the non-active label and
+      // say so in the toast; the caller's requested status is not honoured.
+      status: "Inactive",
       id: `OFF-${Date.now().toString().slice(-3)}`,
     };
     this.offers.unshift(newOffer);
-    toast.success(`Promotional Offer "${offer.name}" activated.`);
+    toast.info(`Offer draft "${offer.name}" saved on this device — not active at checkout.`);
     this.notify();
     return newOffer;
   }
@@ -306,7 +403,13 @@ class MarketingDataStorage {
     const offer = this.offers.find((o) => o.id === id);
     if (offer) {
       offer.status = status;
-      toast.success(`Offer state adjusted to ${status}.`);
+      // M6: same local-only truth for later state changes — no checkout writer
+      // exists, so "Active" here means active in this device's list only.
+      toast.info(
+        status === "Active"
+          ? `Offer "${offer.name}" marked active in the local list — not active at checkout.`
+          : `Offer "${offer.name}" marked inactive in the local list.`,
+      );
       this.notify();
       return true;
     }

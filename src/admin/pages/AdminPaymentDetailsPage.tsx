@@ -202,13 +202,16 @@ export const AdminPaymentDetailsPage: React.FC = () => {
           </Link>
           <PageHeader
             title={`Transaction Details: ${txn.id}`}
-            description={`Order reference ${txn.orderId} managed via ${txn.store.name}`}
+            description={`Demo fixture record for order reference ${txn.orderId} — not read from the Firestore payments collection, and not a gateway settlement.`}
             breadcrumbs={[{ label: "Payments Center", to: "/admin/payments" }, { label: txn.id }]}
           />
         </div>
 
         {/* Global Action buttons */}
-        <div className="flex flex-wrap gap-2 self-start md:self-center">
+        <div className="flex flex-wrap items-center gap-2 self-start md:self-center">
+          <span className="inline-flex items-center rounded-md px-2 py-1 text-[9px] font-black uppercase bg-gray-800 text-amber-300 border border-amber-400/40">
+            Demo ledger
+          </span>
           <AdminButton variant="outline" size="sm" onClick={handleDownloadReceipt}>
             <Download size={13} className="mr-1" />
             <span>Receipt Invoice</span>
@@ -230,6 +233,23 @@ export const AdminPaymentDetailsPage: React.FC = () => {
             <History size={13} />
             <span>Process Refund</span>
           </button>
+        </div>
+      </div>
+
+      {/* Honesty banner: this route is fixture-backed, not a gateway record */}
+      <div className="flex gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
+        <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+        <div className="text-xs font-sans leading-relaxed">
+          <span className="font-extrabold block">
+            Demo ledger fixture — this is not the payment you clicked
+          </span>
+          <span className="text-[11px] block mt-0.5">
+            Every field below (signature, webhooks, timeline, refunds, audit log) comes from a
+            bundled demo fixture, not from the Firestore{" "}
+            <span className="font-mono font-bold">payments</span> collection or Razorpay. Treat
+            it as a layout preview: it verifies no signature, settles nothing, and moves no
+            money. Real refunds run server-side via Ticket Resolution (autoRefund).
+          </span>
         </div>
       </div>
 
@@ -257,7 +277,7 @@ export const AdminPaymentDetailsPage: React.FC = () => {
                   <StatusBadge status={statusType} label={txn.status} />
                 </div>
                 <span className="block text-[10px] text-gray-400 font-mono mt-1">
-                  Captured Webhook verified
+                  Demo fixture status — no live webhook
                 </span>
               </div>
               <div className="border-r border-gray-100 dark:border-gray-800/60 sm:px-2">
@@ -278,7 +298,7 @@ export const AdminPaymentDetailsPage: React.FC = () => {
                   )}
                 </div>
                 <span className="block text-[10px] text-gray-400 font-mono mt-1">
-                  Razorpay handshake
+                  Demo fixture — no gateway handshake
                 </span>
               </div>
               <div className="sm:pl-2">
@@ -371,7 +391,7 @@ export const AdminPaymentDetailsPage: React.FC = () => {
                     Order Operations Check:
                   </span>
                   <span className="text-emerald-600 font-bold block mt-0.5">
-                    ✓ Synced to Petpooja POS KDS
+                    ✗ Not verified — fixture row, no Petpooja sync check
                   </span>
                 </div>
               </div>
@@ -438,10 +458,10 @@ export const AdminPaymentDetailsPage: React.FC = () => {
                   ))}
                   <tr>
                     <td className="py-2.5 px-4 text-gray-400 font-mono text-[10px] uppercase font-black">
-                      Escrow Wallet ID
+                      Escrow Wallet ID (demo)
                     </td>
                     <td className="py-2.5 px-4 text-gray-400 font-mono text-[10px]">
-                      esc_razorpay_burgonomics_live_01
+                      esc_razorpay_demo_fixture_01
                     </td>
                   </tr>
                 </tbody>
@@ -480,7 +500,7 @@ export const AdminPaymentDetailsPage: React.FC = () => {
                 {txn.verificationStatus === "VERIFIED" ? (
                   <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-bold">
                     <BadgeCheck size={16} />
-                    <span>Validated Checksum Match</span>
+                    <span>Fixture marks VERIFIED (no live check)</span>
                   </div>
                 ) : (
                   <div className="space-y-3">

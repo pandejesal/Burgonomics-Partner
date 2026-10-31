@@ -17,7 +17,10 @@ describe('Partner 3PL Porter Logistics & Fare Calculation Suite', () => {
     // Base fare of ₹40 applies for <= 2km
     expect(quote.estimatedFare).toBe(40);
     expect(quote.vehicleType).toContain('2-Wheeler');
-    expect(quote.quoteId).toMatch(/^QTE-PRTR-\d{5}$/);
+    // Implementation mints QTE-PRTR- + first 12 hex chars of a UUIDv4,
+    // uppercased (porterDelivery.ts). No consumer parses the old 5-digit
+    // sequence, so this pins the real, collision-resistant format.
+    expect(quote.quoteId).toMatch(/^QTE-PRTR-[0-9A-F]{12}$/);
     expect(quote.validForSeconds).toBe(600);
     expect(quote.expiresAt).toBeGreaterThan(Date.now());
   });
@@ -52,10 +55,36 @@ describe('Partner 3PL Porter Logistics & Fare Calculation Suite', () => {
 
   it('guarantees quote TTL validity lock of 10 minutes (600s)', async () => {
     const beforeTime = Date.now();
-    const quote = await getPorterDeliveryQuote({});
+    // Real pickup + drop coordinates are required (fail-closed GPS guard).
+    const quote = await getPorterDeliveryQuote({
+      pickupLat: 21.1702,
+      pickupLng: 72.8311,
+      dropLat: 21.1800,
+      dropLng: 72.8350,
+    });
     const afterTime = Date.now();
 
+    expect(quote.validForSeconds).toBe(600);
     expect(quote.expiresAt).toBeGreaterThanOrEqual(beforeTime + 599 * 1000);
     expect(quote.expiresAt).toBeLessThanOrEqual(afterTime + 601 * 1000);
+  });
+
+  it('refuses to quote without complete real coordinates (fail-closed, no default estimate)', async () => {
+    await expect(getPorterDeliveryQuote({})).rejects.toThrow(
+      /refusing to estimate from defaults/
+    );
+    // Partial coordinates fail just as loudly — no half-quoted estimate.
+    await expect(
+      getPorterDeliveryQuote({ pickupLat: 21.1702, pickupLng: 72.8311 })
+    ).rejects.toThrow(/refusing to estimate from defaults/);
+    // Non-numeric / non-finite values are not silently coerced either.
+    await expect(
+      getPorterDeliveryQuote({
+        pickupLat: Number.NaN,
+        pickupLng: 72.8311,
+        dropLat: 21.18,
+        dropLng: 72.835,
+      })
+    ).rejects.toThrow(/refusing to estimate from defaults/);
   });
 });

@@ -14,22 +14,38 @@ import {
   Zap,
 } from 'lucide-react';
 import type { Order } from '@/types';
-import type { PorterDeliveryQuote } from '@/services/porterDelivery';
+import {
+  dispatchProviderLabel,
+  type DispatchFareConfirm,
+  type DispatchQuoteResult,
+} from '@/services/partnerFunctionsApi';
 import { isSafeTelNumber, isSafeTrackingUrl } from '@/utils/urlSafety';
 import { playKDSChime } from '@/utils/kdsAudio';
 import { ConfirmDialog } from '../../../admin/components/Utilities';
 
 interface PorterDispatchCardProps {
   order: Order;
-  quote?: PorterDeliveryQuote;
+  /** Cheapest-serviceable-wins multi-provider quote (DR1). */
+  quote?: DispatchQuoteResult;
   loadingQuote?: boolean;
   isDispatching?: boolean;
   isRebooking?: boolean;
+  /** DR7 fare drift the server refused to book without staff sign-off. */
+  fareConfirm?: DispatchFareConfirm | null;
+  /** DR8 Porter manual lane — book in the Porter app, paste details back. */
+  manualLane?: { instructions: string; pasteEndpoint?: string } | null;
+  /** True while POST /dispatch/porter-manual is in flight. */
+  isPasting?: boolean;
   onFetchQuote: (order: Order) => void;
   onDispatchPorter: (order: Order) => void;
   onOpenAssignModal: (order: Order) => void;
   onCancelPorter: (orderId: string) => void;
   onRebookPorter?: (order: Order) => void;
+  /** DR7: book at the NEW fare the staff just confirmed. */
+  onConfirmFare?: (order: Order) => void;
+  onDismissFareConfirm?: (order: Order) => void;
+  /** DR8: persist the Porter-app booking staff pasted in. */
+  onPastePorter?: (order: Order, porterOrderId: string, trackingUrl?: string) => void;
 }
 
 export function getRiderStatusMeta(order: Order): {
@@ -37,12 +53,15 @@ export function getRiderStatusMeta(order: Order): {
   className: string;
   isPorter: boolean;
   isInHouse: boolean;
+  isManualReview: boolean;
 } {
   const deliveryStatus = (order as any).deliveryStatus || (order as any).delivery?.status;
   const status = (order.status || '').toLowerCase();
-  const hasInHouseRider = (order as any).deliveryStatus === 'manually_assigned';
+  const dispatchType = (order as any).dispatchType as string | undefined;
+  const dispatchProvider = (order as any).dispatchProvider as string | undefined;
+  const rebookTrigger = (order as any).rebookTrigger as string | undefined;
 
-  // §4 No-Driver Rebook state: server flags needsRebook when a Porter driver
+  // §4 No-Driver Rebook state: server flags needsRebook when a driver
   // cancelled or no driver was found. Highest-priority pill so the alert card
   // reads urgent even if a stale riderName still lingers on the doc.
   const rebookNeeded =
@@ -56,24 +75,101 @@ export function getRiderStatusMeta(order: Order): {
       className: 'bg-rose-950/80 text-rose-300 border-rose-500/50 animate-pulse',
       isPorter: false,
       isInHouse: false,
+      isManualReview: false,
     };
   }
 
-  if (hasInHouseRider) {
+  // F6 containment (dispatch.webhooks): customer-cancelled / returned parcels
+  // are manual-review outcomes on the needs_review state (needsRebook=false).
+  // They are NOT automatic carrier rebooks and NOT kitchen cooking.
+  const manualReview =
+    deliveryStatus === 'needs_review' ||
+    rebookTrigger === 'customer_cancelled' ||
+    rebookTrigger === 'returned_to_seller';
+
+  if (manualReview) {
+    return {
+      statusText: 'Flagged — Manual Review',
+      className: 'bg-amber-950/80 text-amber-300 border-amber-500/40',
+      isPorter: false,
+      isInHouse: false,
+      isManualReview: true,
+    };
+  }
+
+  // REAL server manual-dispatch shape: POST /orders/manualDispatch writes
+  // dispatchType 'manual_branch_terminal' + deliveryStatus 'dispatched'
+  // (porter.service.ts). The legacy client shape used 'manually_assigned'.
+  // Either way the rider is the restaurant's OWN — never labelled Porter.
+  if (
+    deliveryStatus === 'manually_assigned' ||
+    dispatchType === 'manual_branch_terminal'
+  ) {
     return {
       statusText: 'In-House Staff Assigned',
       className: 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40',
       isPorter: false,
       isInHouse: true,
+      isManualReview: false,
+    };
+  }
+
+  // Terminal states (queue cards never get these from the feed, but the meta
+  // is public — a delivered/cancelled order is not "cooking").
+  if (deliveryStatus === 'delivered' || status === 'delivered') {
+    return {
+      statusText: 'Delivered',
+      className: 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40',
+      isPorter: false,
+      isInHouse: false,
+      isManualReview: false,
+    };
+  }
+  if (status === 'cancelled') {
+    return {
+      statusText: 'Cancelled',
+      className: 'bg-neutral-800 text-neutral-300 border-neutral-700',
+      isPorter: false,
+      isInHouse: false,
+      isManualReview: false,
     };
   }
 
   if (deliveryStatus === 'driver_allocated' || order.riderName) {
+    // Real provider labels: Borzo/Shadowfax bookings carry dispatchProvider;
+    // showing them as Porter fabricated a vendor that never ran this order.
+    if (dispatchProvider && dispatchProvider !== 'porter') {
+      return {
+        statusText: `${dispatchProviderLabel(dispatchProvider)} Courier Allocated`,
+        className: 'bg-blue-950/80 text-blue-300 border-blue-500/40',
+        isPorter: false,
+        isInHouse: false,
+        isManualReview: false,
+      };
+    }
+    // Porter only on EXPLICIT historical Porter evidence: the provider field
+    // itself, a pasted Porter order id, or the driver_allocated status —
+    // which was written solely by Porter-era webhooks. A bare riderName is
+    // NOT Porter evidence.
+    if (
+      dispatchProvider === 'porter' ||
+      (order as any).porterOrderId ||
+      deliveryStatus === 'driver_allocated'
+    ) {
+      return {
+        statusText: 'Porter Rider Allocated',
+        className: 'bg-blue-950/80 text-blue-300 border-blue-500/40',
+        isPorter: true,
+        isInHouse: false,
+        isManualReview: false,
+      };
+    }
     return {
-      statusText: 'Porter Rider Allocated',
+      statusText: 'Courier Rider Allocated',
       className: 'bg-blue-950/80 text-blue-300 border-blue-500/40',
-      isPorter: true,
+      isPorter: false,
       isInHouse: false,
+      isManualReview: false,
     };
   }
 
@@ -81,8 +177,11 @@ export function getRiderStatusMeta(order: Order): {
     return {
       statusText: 'Rider Arrived at Store',
       className: 'bg-indigo-950/80 text-indigo-300 border-indigo-500/40',
+      // Provider-webhook status without a provider field — the historical
+      // Porter gateway wrote it; not a rider-name inference.
       isPorter: true,
       isInHouse: false,
+      isManualReview: false,
     };
   }
 
@@ -90,8 +189,10 @@ export function getRiderStatusMeta(order: Order): {
     return {
       statusText: 'Out for Delivery (In-Transit)',
       className: 'bg-cyan-950/80 text-cyan-300 border-cyan-500/40',
-      isPorter: true,
+      // An order-status value alone is not evidence of WHICH carrier ran it.
+      isPorter: false,
       isInHouse: false,
+      isManualReview: false,
     };
   }
 
@@ -101,6 +202,7 @@ export function getRiderStatusMeta(order: Order): {
       className: 'bg-amber-950/80 text-amber-400 border-amber-500/40 animate-pulse',
       isPorter: false,
       isInHouse: false,
+      isManualReview: false,
     };
   }
 
@@ -109,6 +211,7 @@ export function getRiderStatusMeta(order: Order): {
     className: 'bg-neutral-800 text-neutral-300 border-neutral-700',
     isPorter: false,
     isInHouse: false,
+    isManualReview: false,
   };
 }
 
@@ -118,11 +221,17 @@ export function PorterDispatchCard({
   loadingQuote = false,
   isDispatching = false,
   isRebooking = false,
+  fareConfirm = null,
+  manualLane = null,
+  isPasting = false,
   onFetchQuote,
   onDispatchPorter,
   onOpenAssignModal,
   onCancelPorter,
   onRebookPorter,
+  onConfirmFare,
+  onDismissFareConfirm,
+  onPastePorter,
 }: PorterDispatchCardProps) {
   // Loop 11: dispatch books a real paid courier — require explicit confirm
   // (every other money path already confirms). Fare shown before commit.
@@ -130,7 +239,16 @@ export function PorterDispatchCard({
   // Loop: cancelling kills a live courier booking (rider may be en route) —
   // require explicit confirm, same as dispatch.
   const [confirmCancel, setConfirmCancel] = React.useState(false);
+  // DR8 manual lane inputs (Porter order id pasted from the Porter app).
+  const [pastePorterOrderId, setPastePorterOrderId] = React.useState('');
+  const [pasteTrackingUrl, setPasteTrackingUrl] = React.useState('');
   useEffect(() => {
+    const meta = getRiderStatusMeta(order);
+    const routeStatus = (order.status || '').toLowerCase();
+    // Quotes cost real provider calls: skip them for states that hide all
+    // booking actions anyway (manual review, cancelled-with-rebook, or a
+    // terminal delivered order).
+    if (meta.isManualReview || routeStatus === 'delivered') return;
     onFetchQuote(order);
   }, [order.id]);
 
@@ -152,6 +270,11 @@ export function PorterDispatchCard({
     deliveryStatus === 'rider_cancelled' ||
     deliveryStatus === 'no_riders_available';
 
+  // F6 containment mirrors the pill: customer-cancelled / returned parcels
+  // need a staff decision, not an automatic carrier rebook.
+  const manualReview = riderMeta.isManualReview && !needsRebook;
+  const rebookTriggerSource = (order as any).rebookTrigger as string | undefined;
+
   // §4 urgent audio notification — one-shot chime when the alert card appears,
   // guarded so re-renders of the same order never re-fire it.
   const chimeFiredRef = React.useRef(false);
@@ -164,16 +287,68 @@ export function PorterDispatchCard({
 
   const addressText =
     order.deliveryAddress?.full ||
+    [
+      (order.deliveryAddress as any)?.line1,
+      (order.deliveryAddress as any)?.line2,
+      (order.deliveryAddress as any)?.landmark,
+      (order.deliveryAddress as any)?.city,
+      (order.deliveryAddress as any)?.pincode,
+    ]
+      .filter(Boolean)
+      .join(', ') ||
     (order.deliveryAddress as any)?.street ||
     (order.deliveryAddress as any)?.address ||
     order.deliveryAddress?.label ||
     'Customer Address';
 
+  // MT-23: explicit route origin — desktop/POS riders have no GPS fix, so
+  // the directions URL needs the branch/store kitchen as `origin` to plot
+  // the real pickup→drop route. Absent/malformed coords = no origin param
+  // (Google falls back to asking the rider where they are).
+  const rawOrder = order as any;
+  const branchLat = rawOrder.branchCoordinates?.lat ?? rawOrder.store?.lat;
+  const branchLng = rawOrder.branchCoordinates?.lng ?? rawOrder.store?.lng;
+  const hasBranchOrigin =
+    typeof branchLat === 'number' &&
+    typeof branchLng === 'number' &&
+    Number.isFinite(branchLat) &&
+    Number.isFinite(branchLng);
+  const mapsOriginParam = hasBranchOrigin ? `&origin=${branchLat},${branchLng}` : '';
+
   // No invented fallback fare: without a live quote the card says so and
-  // the booking dialog states the fare is confirmed by Porter at booking.
-  // The old '₹45' default showed a fake fare for a real paid booking.
-  const fareEstimate = quote ? `₹${quote.estimatedFare}` : null;
-  const pickupTime = quote ? `${quote.estimatedPickupMinutes}m pickup` : null;
+  // the booking dialog states the fare is confirmed at booking. The old
+  // '₹45' default showed a fake fare for a real paid booking.
+  // Multi-provider (DR1): the quote's winner is the cheapest serviceable
+  // provider; serviceable:false means the address is outside the 8km zone.
+  const zoneOut = quote ? quote.serviceable === false : false;
+  const winnerLabel = quote?.winner ? dispatchProviderLabel(quote.winner) : null;
+  const fareEstimate =
+    quote && quote.serviceable !== false && typeof quote.estimatedFare === 'number'
+      ? `₹${quote.estimatedFare}`
+      : null;
+  const pickupTime =
+    quote && typeof quote.estimatedPickupMinutes === 'number'
+      ? `${quote.estimatedPickupMinutes}m pickup`
+      : null;
+  // Provider that owns the live booking (for cancel copy). Porter only on
+  // explicit Porter evidence: the provider field, a pasted Porter order id,
+  // or the driver_allocated status (Porter-era webhook only). A bare rider
+  // name is NOT evidence that Porter ran this order.
+  const hasExplicitPorterEvidence =
+    (order as any).dispatchProvider === 'porter' ||
+    !!(order as any).porterOrderId ||
+    deliveryStatus === 'driver_allocated';
+  const activeProviderLabel = (order as any).dispatchProvider
+    ? dispatchProviderLabel((order as any).dispatchProvider)
+    : hasExplicitPorterEvidence
+      ? 'Porter'
+      : 'Courier';
+
+  // An in-house terminal assignment is not a live third-party booking —
+  // there is nothing to cancel and nothing being spent to undo.
+  const isInHouseTerminal =
+    (order as any).dispatchType === 'manual_branch_terminal' ||
+    deliveryStatus === 'manually_assigned';
 
   return (
     <div className="p-5 rounded-3xl bg-[#090909] border border-neutral-800 space-y-4 shadow-lg hover:border-neutral-700 transition-colors">
@@ -192,32 +367,100 @@ export function PorterDispatchCard({
           </div>
           <p className="text-xs text-neutral-400 flex items-center gap-1.5 mt-0.5">
             <Clock className="w-3.5 h-3.5 text-neutral-500" />
-            <span>Ready for dispatch</span>
+            <span>
+              {manualReview
+                ? 'Awaiting staff review'
+                : riderMeta.isInHouse
+                  ? 'In-house delivery — handover via order lifecycle'
+                  : deliveryStatus === 'delivered' || order.status === 'delivered'
+                    ? 'Delivery complete'
+                    : isDispatched
+                      ? 'With assigned courier'
+                      : 'Ready for dispatch'}
+            </span>
             <span>•</span>
             <span className="font-mono font-bold text-white">₹{order.total || order.subtotal}</span>
           </p>
         </div>
 
-        {/* Live Porter Fare Quote Badge */}
+        {/* Live multi-provider quote badge — winner = cheapest serviceable */}
         <div className="text-right">
           <span className="text-[10px] font-bold text-neutral-400 block uppercase">
-            Porter 2-Wheeler Quote
+            {winnerLabel ? `${winnerLabel} Cheapest Quote` : 'Courier Quote'}
           </span>
           <span className="font-mono font-black text-sm text-[#FF6600]">
-            {loadingQuote ? 'Estimating...' : (fareEstimate ?? 'Quote unavailable')}
+            {loadingQuote
+              ? 'Estimating...'
+              : zoneOut
+                ? 'Outside delivery zone'
+                : (fareEstimate ?? 'Quote unavailable')}
           </span>
-          <span className="text-[10px] text-neutral-500 block">{pickupTime ?? '—'}</span>
+          <span className="text-[10px] text-neutral-500 block">
+            {zoneOut ? 'Not serviced' : (pickupTime ?? '—')}
+          </span>
         </div>
       </div>
 
-      {/* §4 No-Driver Alert Card: urgent — Porter rider cancelled or none found */}
+      {/* Per-provider fan-out strip (DR2/DR3) — every quote verdict shown */}
+      {quote && !zoneOut && quote.providers && quote.providers.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 -mt-1">
+          <span className="text-[10px] font-bold text-neutral-500 uppercase mr-0.5">
+            Providers:
+          </span>
+          {quote.providers.map((p) => {
+            const isWinner = p.provider === quote.winner;
+            return (
+              <span
+                key={p.provider}
+                className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold border ${
+                  isWinner
+                    ? 'bg-emerald-950/70 border-emerald-600/60 text-emerald-300'
+                    : 'bg-neutral-900 border-neutral-800 text-neutral-400'
+                }`}
+                title={p.error}
+              >
+                {dispatchProviderLabel(p.provider)}
+                {p.outcome === 'ok' && typeof p.fare === 'number'
+                  ? ` ₹${p.fare}`
+                  : p.outcome === 'not_serviced'
+                    ? ' n/a'
+                    : ' retry'}
+                {isWinner ? ' ✓' : ''}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {/* F6 manual-review containment: customer-cancelled / returned parcels
+          need a STAFF decision — no auto rebook, no refund, no redelivery. */}
+      {manualReview && (
+        <div className="p-4 rounded-2xl bg-amber-950/30 border border-amber-700/60 space-y-3">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-black text-amber-300 uppercase tracking-wide">
+                Flagged for Manual Review
+              </p>
+              <p className="text-xs text-amber-200/80 mt-0.5 leading-relaxed">
+                {rebookTriggerSource === 'returned_to_seller'
+                  ? 'The parcel was returned to the store — review this delivery with staff before taking any action. No automatic rebooking, refund or redelivery is applied.'
+                  : 'The customer cancelled this delivery — review the order with staff before taking any action. No automatic rebooking, refund or redelivery is applied.'}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* §4 No-Driver Alert Card: urgent — the allocated driver cancelled or
+          none was found (any provider). */}
       {needsRebook && (
         <div className="p-4 rounded-2xl bg-rose-950/30 border border-rose-700/60 space-y-3">
           <div className="flex items-start gap-2.5">
             <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 animate-pulse" />
             <div className="min-w-0">
               <p className="text-sm font-black text-rose-300 uppercase tracking-wide">
-                Porter Rider Cancelled
+                Courier Cancelled
               </p>
               <p className="text-xs text-rose-200/80 mt-0.5 leading-relaxed">
                 {order.riderCancellationReason ||
@@ -252,6 +495,66 @@ export function PorterDispatchCard({
         </div>
       )}
 
+      {/* DR8 manual lane — Porter booked in the app, paste the ids back */}
+      {manualLane && !isDispatched && !needsRebook && !manualReview && (
+        <div className="p-4 rounded-2xl bg-amber-950/30 border border-amber-700/60 space-y-2.5">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-black text-amber-300 uppercase tracking-wide">
+                Porter Manual Booking
+              </p>
+              <p className="text-xs text-amber-200/80 mt-0.5 leading-relaxed">
+                {manualLane.instructions}
+              </p>
+            </div>
+          </div>
+          <input
+            type="text"
+            value={pastePorterOrderId}
+            onChange={(e) => setPastePorterOrderId(e.target.value)}
+            placeholder="Porter order id (e.g. POR-123456)"
+            className="w-full px-3 py-2 rounded-xl bg-neutral-950 border border-amber-700/50 text-white placeholder-neutral-500 text-xs font-mono focus:outline-none focus:border-amber-500"
+          />
+          <input
+            type="text"
+            value={pasteTrackingUrl}
+            onChange={(e) => setPasteTrackingUrl(e.target.value)}
+            placeholder="Tracking link (https://porter.in/…, optional)"
+            className="w-full px-3 py-2 rounded-xl bg-neutral-950 border border-amber-700/50 text-white placeholder-neutral-500 text-xs focus:outline-none focus:border-amber-500"
+          />
+          <button
+            type="button"
+            disabled={isPasting || !pastePorterOrderId.trim()}
+            onClick={() => {
+              // savePorterManual rethrows real failures so the paste lane
+              // stays open; keep that rejection from becoming unhandled
+              // noise here — the hook's toast already surfaced it.
+              void Promise.resolve(
+                onPastePorter?.(order, pastePorterOrderId, pasteTrackingUrl)
+              ).catch(() => undefined);
+            }}
+            className="w-full py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50 min-h-[44px]"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            <span>{isPasting ? 'Saving...' : 'Save Porter Booking'}</span>
+          </button>
+        </div>
+      )}
+
+      {/* DR7 fare-change confirm — opens automatically when the server gated
+          the booking; staff must approve the NEW fare before anything books. */}
+      {fareConfirm && !isDispatched && !needsRebook && !manualReview && (
+        <ConfirmDialog
+          isOpen={true}
+          onClose={() => onDismissFareConfirm?.(order)}
+          onConfirm={() => onConfirmFare?.(order)}
+          title="Fare changed — confirm?"
+          description={`${dispatchProviderLabel(fareConfirm.provider)}'s live fare moved from ₹${fareConfirm.quotedFare} to ₹${fareConfirm.newFare} (confirm threshold ₹${fareConfirm.threshold}). Confirm to book at the new fare — this action spends money.`}
+          confirmLabel={`Book at ₹${fareConfirm.newFare}`}
+        />
+      )}
+
       {/* Customer & Address Details */}
       <div className="space-y-2 text-xs">
         <div className="flex items-center justify-between">
@@ -276,7 +579,7 @@ export function PorterDispatchCard({
 
         {order.deliveryAddress?.lat && order.deliveryAddress?.lng && (
           <a
-            href={`https://www.google.com/maps/dir/?api=1&destination=${order.deliveryAddress.lat},${order.deliveryAddress.lng}`}
+            href={`https://www.google.com/maps/dir/?api=1${mapsOriginParam}&destination=${order.deliveryAddress.lat},${order.deliveryAddress.lng}`}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 text-[11px] font-bold text-[#FF6600] hover:underline pt-0.5"
@@ -288,7 +591,7 @@ export function PorterDispatchCard({
       </div>
 
       {/* Assigned Rider Info (if dispatched) */}
-      {!needsRebook && (order.riderName || riderMeta.isInHouse) && (
+      {!needsRebook && !manualReview && (order.riderName || riderMeta.isInHouse) && (
         <div className="p-3 rounded-2xl bg-neutral-950 border border-neutral-800 space-y-1.5 text-xs">
           <div className="flex items-center justify-between">
             <span className="font-bold text-white flex items-center gap-1.5">
@@ -333,20 +636,28 @@ export function PorterDispatchCard({
         </div>
       )}
 
-      {/* Action Triggers (hidden while the §4 rebook alert card is active) */}
-      {!needsRebook && (
+      {/* Action Triggers (hidden while the §4 rebook or manual-review alert
+          card is active) */}
+      {!needsRebook && !manualReview && (
       <div className="flex items-center gap-2 pt-1">
         {!isDispatched ? (
           <>
-            {/* Primary Action: Book Porter Courier (confirmed — real paid booking) */}
+            {/* Primary Action: book the cheapest serviceable provider
+                (confirmed — real paid booking, DR1) */}
             <button
               type="button"
-              disabled={isDispatching}
+              disabled={isDispatching || zoneOut}
               onClick={() => setConfirmDispatch(true)}
               className="flex-1 py-2.5 rounded-xl bg-[#FF6600] hover:bg-[#e05a00] text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50 min-h-[44px]"
             >
               <Zap className="w-3.5 h-3.5 fill-current" />
-              <span>{isDispatching ? 'Booking...' : `Call Porter${fareEstimate ? ` (${fareEstimate})` : ''}`}</span>
+              <span>
+                {isDispatching
+                  ? 'Booking...'
+                  : zoneOut
+                    ? 'Outside Delivery Zone'
+                    : `Call ${winnerLabel ?? 'Courier'}${fareEstimate ? ` (${fareEstimate})` : ''}`}
+              </span>
             </button>
             {confirmDispatch && (
               <ConfirmDialog
@@ -356,10 +667,10 @@ export function PorterDispatchCard({
                   setConfirmDispatch(false);
                   onDispatchPorter(order);
                 }}
-                title="Book Porter courier?"
+                title={`Book ${winnerLabel ?? 'courier'}?`}
                 description={fareEstimate
-                  ? `This books a real paid courier for order ${shortCode} at an estimated fare of ${fareEstimate}. This action spends money.`
-                  : `This books a real paid courier for order ${shortCode}. No local estimate is available — the final fare is confirmed by Porter at booking. This action spends money.`}
+                  ? `This books a real paid courier via ${winnerLabel ?? 'the cheapest provider'} for order ${shortCode} at an estimated fare of ${fareEstimate} (cheapest serviceable provider). This action spends money.`
+                  : `This books a real paid courier for order ${shortCode} via ${winnerLabel ?? 'the cheapest available provider'}. No live estimate is available — the final fare is confirmed at booking. This action spends money.`}
                 confirmLabel="Book Courier"
               />
             )}
@@ -375,6 +686,17 @@ export function PorterDispatchCard({
               <span>In-House</span>
             </button>
           </>
+        ) : isInHouseTerminal ? (
+          // An in-house rider was assigned from this branch terminal — there
+          // is NO live third-party booking here, so there is nothing to
+          // cancel and no money being spent. The order lifecycle (out for
+          // delivery on actual handover) stays server/app-owned; assignment
+          // alone is never claimed as pickup proof.
+          <p className="w-full text-[11px] font-semibold text-neutral-400 leading-relaxed">
+            In-house rider assigned from this terminal. Handover (out for
+            delivery) is recorded through the order lifecycle — nothing was
+            booked with a courier partner for this order.
+          </p>
         ) : (
           <>
           {/* Cancel / Re-dispatch button (confirmed — kills a live booking) */}
@@ -384,7 +706,7 @@ export function PorterDispatchCard({
             className="w-full py-2 rounded-xl bg-rose-950/40 hover:bg-rose-950/80 border border-rose-800/60 text-rose-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer min-h-[44px]"
           >
             <RotateCcw className="w-3.5 h-3.5" />
-            <span>Cancel Porter / Re-assign</span>
+            <span>Cancel {activeProviderLabel} / Re-assign</span>
           </button>
           {confirmCancel && (
             <ConfirmDialog
@@ -394,7 +716,7 @@ export function PorterDispatchCard({
                 setConfirmCancel(false);
                 onCancelPorter(order.id);
               }}
-              title="Cancel Porter booking?"
+              title={`Cancel ${activeProviderLabel} booking?`}
               description={`This cancels the live courier for order ${shortCode} and reverts it to the Ready queue. The rider may already be en route.`}
               confirmLabel="Cancel Booking"
               isDestructive={true}

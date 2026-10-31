@@ -66,7 +66,7 @@ export function RecentOrders({ orders }: RecentOrdersProps) {
                   <div>
                     <p className="font-bold text-white text-xs">{order.customerName || 'Walk-in Customer'}</p>
                     <p className="text-[11px] text-zinc-400 font-mono">
-                      #{String(order.id).slice(-6)} • {order.branchName || 'Surat Adajan'}
+                      #{String(order.id).slice(-6)} • {order.branchName || 'Unassigned outlet'}
                     </p>
                   </div>
                 </div>

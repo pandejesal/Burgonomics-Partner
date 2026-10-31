@@ -3,8 +3,15 @@ import { useOrders } from '@/hooks/useOrders';
 import { useBranches } from '@/hooks/useBranches';
 import { useAppStore } from '@/stores/appStore';
 import { useAuthStore } from '@/stores/authStore';
-import { getPorterDeliveryQuote, manualBranchDispatch, type PorterDeliveryQuote } from '@/services/porterDelivery';
-import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
+import { manualBranchDispatch } from '@/services/porterDelivery';
+import {
+  dispatchProviderLabel as providerLabel,
+  partnerFunctionsApi,
+  type DispatchBookResult,
+  type DispatchFareConfirm,
+  type DispatchManualLane,
+  type DispatchQuoteResult,
+} from '@/services/partnerFunctionsApi';
 import { toast } from 'sonner';
 import { logger } from '@/core/logging/logger';
 import type { Order } from '@/types';
@@ -15,16 +22,56 @@ export interface InHouseRiderInfo {
   vehicleNumber?: string;
 }
 
+/**
+ * What the queue page may claim about the delivery order feed. React Query
+ * keeps `isLoading` true only until the first read settles, so an errored
+ * feed is NOT loading — it is an error, and the page must say so instead of
+ * rendering "No Delivery Orders In Queue" over a feed it never read.
+ */
+export type DeliveryFeedState = 'loading' | 'error' | 'ready';
+
+export function deriveDeliveryFeedState(input: {
+  isLoading: boolean;
+  error: unknown;
+}): DeliveryFeedState {
+  if (input.isLoading) return 'loading';
+  if (input.error) return 'error';
+  return 'ready';
+}
+
 export function usePorterLogistics() {
   const { selectedBranchId } = useAppStore();
-  const { orders = [], isLoading, updateOrderStatus } = useOrders();
+  // error/refetch are propagated verbatim so the queue page can render a
+  // real failure panel with Retry instead of a false empty queue.
+  const {
+    orders = [],
+    isLoading,
+    error: ordersError,
+    refetch: refetchOrders,
+    updateOrderStatus,
+  } = useOrders();
   const { branches = [] } = useBranches();
   const staffName = useAuthStore((s) => s.user?.name || s.user?.email) || 'Branch Staff';
 
-  const [quotes, setQuotes] = useState<Record<string, PorterDeliveryQuote>>({});
+  const [quotes, setQuotes] = useState<Record<string, DispatchQuoteResult>>({});
   const [loadingQuotes, setLoadingQuotes] = useState<Record<string, boolean>>({});
   const [dispatchingOrderIds, setDispatchingOrderIds] = useState<Record<string, boolean>>({});
   const [rebookingOrderIds, setRebookingOrderIds] = useState<Record<string, boolean>>({});
+  // DR7: the server refused to book because the fare drifted past the
+  // threshold — stored here so the card can ask staff to confirm the NEW fare.
+  const [fareConfirms, setFareConfirms] = useState<Record<string, DispatchFareConfirm>>({});
+  // DR8: Porter has no API key — staff books in the Porter app and pastes
+  // the order id back through the manual lane.
+  const [manualLanes, setManualLanes] = useState<Record<string, DispatchManualLane>>({});
+  const [pastingOrderIds, setPastingOrderIds] = useState<Record<string, boolean>>({});
+
+  // Status this screen is currently showing for an order — carried as the
+  // expectedStatus precondition so a concurrent bump elsewhere is refused
+  // server-side instead of silently clobbered.
+  const currentStatusOf = useCallback(
+    (orderId: string) => orders.find((o) => o.id === orderId)?.status,
+    [orders]
+  );
 
   // Filter only active delivery orders for branch. Fail-closed like the
   // KDS makeline: unroutable orders (no branchId) never render anywhere.
@@ -48,26 +95,41 @@ export function usePorterLogistics() {
     });
   }, [orders, selectedBranchId]);
 
-  // Fetch Porter Quote for specific order. Pickup comes from the branch
-  // record's real coordinates (never fabricated defaults); a missing pin on
-  // either end throws inside getPorterDeliveryQuote and lands in the
-  // "quote unavailable" path below.
+  // Multi-provider quote (POST /dispatch/quote): pickup comes from the
+  // branch record's real coordinates (never fabricated defaults); a missing
+  // pin on either end throws client-side and lands in the "quote
+  // unavailable" path below. serviceable:false (out of zone) is a cached
+  // answer for 60s — it has no expiresAt.
   const fetchOrderQuote = useCallback(async (order: Order) => {
     const cached = quotes[order.id];
-    const fresh = cached && cached.expiresAt && cached.expiresAt > Date.now();
+    const now = Date.now();
+    const fresh =
+      cached &&
+      ((cached.serviceable !== false && !!cached.expiresAt && cached.expiresAt > now) ||
+        (cached.serviceable === false && (cached.quotedAt || 0) + 60_000 > now));
     if (fresh || loadingQuotes[order.id]) return;
 
     setLoadingQuotes((prev) => ({ ...prev, [order.id]: true }));
     try {
       const branchId = (order as any).branchId || selectedBranchId;
       const branch = branches.find((b) => b.id === branchId);
-      const q = await getPorterDeliveryQuote({
-        pickupLat: branch?.coordinates?.lat,
-        pickupLng: branch?.coordinates?.lng,
-        dropLat: order.deliveryAddress?.lat,
-        dropLng: order.deliveryAddress?.lng,
+      const coords = [
+        branch?.coordinates?.lat,
+        branch?.coordinates?.lng,
+        order.deliveryAddress?.lat,
+        order.deliveryAddress?.lng,
+      ];
+      if (!coords.every((c) => typeof c === 'number' && Number.isFinite(c))) {
+        throw new Error('Quote needs real pickup and drop coordinates — refusing to estimate from defaults.');
+      }
+      const q = await partnerFunctionsApi.dispatchQuote({
+        pickupLat: coords[0] as number,
+        pickupLng: coords[1] as number,
+        dropLat: coords[2] as number,
+        dropLng: coords[3] as number,
         customerName: order.customerName,
         customerPhone: order.customerPhone,
+        orderId: order.id,
       });
       setQuotes((prev) => ({ ...prev, [order.id]: q }));
     } catch (err: any) {
@@ -80,52 +142,235 @@ export function usePorterLogistics() {
     }
   }, [quotes, loadingQuotes, branches, selectedBranchId]);
 
-  // Dispatch Porter 2-Wheeler
-  // Loop 16/120: book the REAL courier FIRST via POST /porter/book. The old
-  // flow flipped status to out_for_delivery and toasted "dispatched" with a
-  // mere quote fare while booking nothing — a fake fulfillment signal. Status
-  // flips only after the server confirms the booking; failures stay loud
-  // with no status change. (Mock-mode servers return clearly-marked [TEST]
-  // riders, so both modes stay honest.)
-  const dispatchPorter = useCallback(async (order: Order) => {
-    setDispatchingOrderIds((prev) => ({ ...prev, [order.id]: true }));
-    try {
-      const booking = await partnerFunctionsApi.bookPorterRider(order.id, staffName);
+  // Shared /dispatch/book|rebook result routing: exactly one of —
+  // 202 in-progress, fare-confirm gate, manual lane, or a real booking.
+  // Status flips ONLY after the server confirms a booking (Loop 16/120).
+  const applyDispatchResult = useCallback(
+    async (orderId: string, res: DispatchBookResult): Promise<void> => {
+      const shortCode = `#${orderId.slice(-6).toUpperCase()}`;
 
-      if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
-        await updateOrderStatus.mutateAsync({
-          orderId: order.id,
-          status: 'out_for_delivery',
+      // 202 in-flight body — the first tap's claim is still settling.
+      if (res.error && typeof res.retryAfterMs === 'number') {
+        toast.info('Dispatch already in progress — no second rider was booked.', {
+          description: res.error,
         });
+        return;
       }
 
-      toast.success(`Porter courier booked: ${booking.riderName}`, {
-        description: `Order #${order.id.slice(-6).toUpperCase()} · ${booking.porterOrderId}`,
+      if (res.needsFareConfirm && typeof res.newFare === 'number') {
+        setFareConfirms((prev) => ({
+          ...prev,
+          [orderId]: {
+            provider: res.provider || 'porter',
+            quotedFare: res.quotedFare ?? 0,
+            newFare: res.newFare as number,
+            delta: res.delta ?? 0,
+            threshold: res.threshold ?? 0,
+            message: res.message,
+          },
+        }));
+        toast.warning(`Fare changed to ₹${res.newFare} — confirm to book.`, {
+          description: res.message,
+        });
+        return;
+      }
+
+      if (res.manual_action_required) {
+        setManualLanes((prev) => ({
+          ...prev,
+          [orderId]: {
+            instructions:
+              res.instructions ||
+              'Book this order in the Porter app, then paste the Porter order id below.',
+            pasteEndpoint: res.pasteEndpoint,
+          },
+        }));
+        toast.info('Porter booking needed — book in the Porter app, then paste the details.', {
+          description: res.instructions,
+        });
+        return;
+      }
+
+      // Booked (fresh booking or idempotent reuse of the stored summary).
+      // NOTE — no client-side out_for_delivery write here: the server owns
+      // the rider/dispatched fields (deliveryStatus 'dispatched') and a
+      // BOOKING IS NOT PICKUP PROOF. Out for delivery is claimed through the
+      // existing order lifecycle (actual handover), never inferred from a
+      // saved rider name. The card switches to its dispatched UI via
+      // riderName/deliveryStatus, so nothing is lost by not fabricating it.
+      setFareConfirms((prev) => {
+        const next = { ...prev };
+        delete next[orderId];
+        return next;
       });
-    } catch (err) {
-      toast.error('Porter booking failed — no courier dispatched.', {
-        description: err instanceof Error ? err.message : 'Could not reach the dispatcher.',
+      setManualLanes((prev) => {
+        const next = { ...prev };
+        delete next[orderId];
+        return next;
       });
-    } finally {
-      setDispatchingOrderIds((prev) => ({ ...prev, [order.id]: false }));
-    }
-  }, [quotes, updateOrderStatus, staffName]);
+
+      const label = providerLabel(res.provider);
+      const bookedWho = res.riderName ? `${label} courier booked: ${res.riderName}` : `${label} dispatch active`;
+      const failoverNote = res.failover
+        ? ` — failed over from ${providerLabel(res.failover.from)} (cheapest was ${providerLabel(res.failover.cheapestProvider)})`
+        : '';
+      toast.success(bookedWho, {
+        description: `${shortCode} · ${res.providerOrderId || ''}${res.reused ? ' · existing booking reused' : ''}${failoverNote}`,
+      });
+    },
+    [],
+  );
+
+  // Dispatch the cheapest serviceable provider (POST /dispatch/book).
+  // The card's confirm dialog already showed the quoted fare, so it is
+  // passed as quotedFare — the server runs the DR7 delta check against it
+  // and may come back with needsFareConfirm instead of a booking.
+  const dispatchPorter = useCallback(
+    async (order: Order) => {
+      setDispatchingOrderIds((prev) => ({ ...prev, [order.id]: true }));
+      try {
+        const q = quotes[order.id];
+        const quotedFare =
+          q && q.serviceable !== false && typeof q.estimatedFare === 'number'
+            ? q.estimatedFare
+            : undefined;
+        const res = await partnerFunctionsApi.dispatchBook({
+          orderId: order.id,
+          staffName,
+          quotedFare,
+        });
+        await applyDispatchResult(order.id, res);
+      } catch (err) {
+        toast.error('Dispatch failed — no courier booked.', {
+          description: err instanceof Error ? err.message : 'Could not reach the dispatcher.',
+        });
+      } finally {
+        setDispatchingOrderIds((prev) => ({ ...prev, [order.id]: false }));
+      }
+    },
+    [quotes, staffName, applyDispatchResult],
+  );
+
+  // DR7 confirm: re-book at the NEW fare the staff just approved. The
+  // pending gate is cleared first so a second drift can set it again.
+  const confirmFareDispatch = useCallback(
+    async (order: Order) => {
+      const pending = fareConfirms[order.id];
+      setFareConfirms((prev) => {
+        const next = { ...prev };
+        delete next[order.id];
+        return next;
+      });
+      setDispatchingOrderIds((prev) => ({ ...prev, [order.id]: true }));
+      try {
+        const res = await partnerFunctionsApi.dispatchBook({
+          orderId: order.id,
+          staffName,
+          quotedFare: pending?.newFare,
+          confirmFare: true,
+        });
+        await applyDispatchResult(order.id, res);
+      } catch (err) {
+        toast.error('Booking failed at the confirmed fare.', {
+          description: err instanceof Error ? err.message : 'Could not reach the dispatcher.',
+        });
+      } finally {
+        setDispatchingOrderIds((prev) => ({ ...prev, [order.id]: false }));
+      }
+    },
+    [fareConfirms, staffName, applyDispatchResult],
+  );
+
+  // Staff declined the fare change — drop the gate; a fresh dispatch
+  // re-quotes and re-runs the DR7 check from scratch.
+  const dismissFareConfirm = useCallback((orderId: string) => {
+    setFareConfirms((prev) => {
+      const next = { ...prev };
+      delete next[orderId];
+      return next;
+    });
+  }, []);
+
+  // DR8 manual lane: persist the Porter-app booking staff made outside the
+  // API. Server validates the id + tracking URL and binds both order maps.
+  const savePorterManual = useCallback(
+    async (orderId: string, porterOrderId: string, trackingUrl?: string) => {
+      const pid = porterOrderId.trim();
+      if (!pid) {
+        toast.error('Porter order id is required.');
+        return;
+      }
+      setPastingOrderIds((prev) => ({ ...prev, [orderId]: true }));
+      try {
+        const res = await partnerFunctionsApi.savePorterManualBooking({
+          orderId,
+          porterOrderId: pid,
+          trackingUrl: trackingUrl?.trim() || undefined,
+          staffName,
+        });
+        setManualLanes((prev) => {
+          const next = { ...prev };
+          delete next[orderId];
+          return next;
+        });
+        // No client-side out_for_delivery write: the server-pasted booking
+        // binds rider fields itself and is NOT pickup proof. Same rule as
+        // /dispatch/book — handover claims live in the order lifecycle.
+        toast.success(`Porter booking saved: ${res.porterOrderId}`, {
+          description: `Order #${orderId.slice(-6).toUpperCase()} now tracked via Porter${
+            res.reused ? ' · already saved' : ''
+          }`,
+        });
+      } catch (err) {
+        toast.error('Failed to save Porter booking', {
+          description: err instanceof Error ? err.message : 'Could not reach the dispatcher.',
+        });
+        // Rethrow so the paste lane stays open for a retry — the server never
+        // confirmed the booking, so a silent close would read as saved.
+        throw err;
+      } finally {
+        setPastingOrderIds((prev) => {
+          const next = { ...prev };
+          delete next[orderId];
+          return next;
+        });
+      }
+    },
+    [staffName],
+  );
 
   // Assign In-House Rider. Persists rider identity server-side via
-  // POST /orders/manualDispatch (riderName/Phone, dispatched status) instead
-  // of a bare status flip that loses who is carrying the order. Guarded
-  // against double-assignment over a live Porter booking.
+  // POST /orders/manualDispatch (rider/dispatched fields) instead of a bare
+  // status flip that loses who is carrying the order. Guarded against
+  // double-assignment over a live courier booking.
+  //
+  // ASSIGNMENT IS NOT PICKUP PROOF: the server owns the rider/dispatched
+  // fields (deliveryStatus 'dispatched', dispatchType 'manual_branch_terminal');
+  // this hook does NOT write out_for_delivery from a saved rider name. The
+  // in-house rider moves to out-for-delivery only through the existing order
+  // lifecycle (actual handover). NOTE: backend atomic assignment hardening
+  // (a UI check cannot atomically stop a concurrent courier booking) is a
+  // separate Main-owned packet — reported honestly here.
   const assignInHouseRider = useCallback(async (orderId: string, rider: InHouseRiderInfo) => {
     const existing = orders.find((o) => o.id === orderId) as any;
     const deliveryStatus = existing?.deliveryStatus as string | undefined;
+    // A riderName left on the doc by a CANCELLED courier (rider_cancelled /
+    // no_riders_available / needs_review) is a stale name, not a live
+    // assignment — switching to in-house must work there, or the card's own
+    // "Switch to In-House Delivery" fallback can never succeed.
+    const staleRider =
+      existing?.needsRebook === true ||
+      deliveryStatus === 'rider_cancelled' ||
+      deliveryStatus === 'no_riders_available' ||
+      deliveryStatus === 'needs_review';
     if (
-      existing?.riderName ||
+      (existing?.riderName && !staleRider) ||
       deliveryStatus === 'dispatched' ||
       deliveryStatus === 'driver_allocated' ||
       deliveryStatus === 'in_transit'
     ) {
       toast.error('A courier is already assigned — refresh before re-assigning.');
-      return;
+      throw new Error('A courier is already assigned — refresh before re-assigning.');
     }
     try {
       await manualBranchDispatch({
@@ -134,12 +379,6 @@ export function usePorterLogistics() {
         riderPhone: rider.phone,
         staffName,
       });
-      if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
-        await updateOrderStatus.mutateAsync({
-          orderId,
-          status: 'out_for_delivery',
-        });
-      }
       toast.success(`Assigned in-house rider ${rider.name} to order #${orderId.slice(-6).toUpperCase()}`);
     } catch (err) {
       logger.warn('dispatch.inhouse_failed', {
@@ -147,69 +386,92 @@ export function usePorterLogistics() {
         message: err instanceof Error ? err.message : String(err),
       });
       toast.error('Failed to assign in-house rider');
+      // Rethrow so the assignment modal can stay open, retain the typed
+      // rider details and expose the real failure — a false close would read
+      // as a confirmed rider who does not exist on the order.
+      throw err;
     }
-  }, [orders, updateOrderStatus, staffName]);
+  }, [orders, staffName]);
 
-  // Cancel Porter Ride — server POST /porter/cancel releases the order
-  // locally (rider_cancelled + needsRebook for the rebook flow) and asks
-  // staff to confirm in the Porter dashboard (no provider cancel API is
-  // documented). Status flips only after the server confirms.
-  const cancelPorter = useCallback(async (orderId: string) => {
-    try {
-      await partnerFunctionsApi.cancelPorterRider(orderId);
-      if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
-        await updateOrderStatus.mutateAsync({
-          orderId,
-          status: 'ready',
+  // Cancel the active dispatch (POST /dispatch/cancel): Porter bookings go
+  // through the Porter cancel flow, Borzo/Shadowfax release locally with a
+  // dashboard-cancel reminder. Status flips only after the server confirms.
+  const cancelPorter = useCallback(
+    async (orderId: string) => {
+      try {
+        const res = await partnerFunctionsApi.dispatchCancel({ orderId, staffName });
+        if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
+          const expectedStatus = currentStatusOf(orderId);
+          await updateOrderStatus.mutateAsync({
+            orderId,
+            status: 'ready',
+            ...(expectedStatus ? { expectedStatus } : {}),
+          });
+        }
+        setManualLanes((prev) => {
+          const next = { ...prev };
+          delete next[orderId];
+          return next;
+        });
+        toast.success(
+          `${providerLabel(res.provider)} booking cancelled for order #${orderId.slice(-6).toUpperCase()}`,
+          { description: res.message },
+        );
+      } catch (err) {
+        toast.error('Failed to cancel courier booking', {
+          description: err instanceof Error ? err.message : 'Could not reach the dispatcher.',
         });
       }
-      toast.success(`Porter booking cancelled for order #${orderId.slice(-6).toUpperCase()}`);
-    } catch (err) {
-      toast.error('Failed to cancel Porter booking', {
-        description: err instanceof Error ? err.message : 'Could not reach the dispatcher.',
-      });
-    }
-  }, [updateOrderStatus]);
+    },
+    [updateOrderStatus, staffName, currentStatusOf],
+  );
 
-  // Rebook Porter Ride (delivery_porter.md §4) — 1-Click Rebook from the
-  // no-driver alert card. POST /porter/rebook requests a NEW rider for an
-  // order whose previous driver cancelled or was never found. The order must
-  // be in a rebookable server state (needsRebook true / rider_cancelled), so
-  // stale taps surface the server's NOT_REBOOKABLE refusal instead of faking
-  // a booking. Status flips only after the server confirms the new booking.
-  const rebookPorter = useCallback(async (order: Order) => {
-    setRebookingOrderIds((prev) => ({ ...prev, [order.id]: true }));
-    try {
-      const booking = await partnerFunctionsApi.rebookPorterRider(order.id, staffName);
-
-      if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
-        await updateOrderStatus.mutateAsync({
+  // Rebook (delivery_porter.md §4) — POST /dispatch/rebook re-enters the
+  // cheapest-wins walk for an order whose previous driver cancelled or was
+  // never found. Stale taps surface the server's NOT_REBOOKABLE refusal
+  // instead of faking a booking. Same result routing as dispatchPorter
+  // (booking / fare confirm / manual lane).
+  const rebookPorter = useCallback(
+    async (order: Order) => {
+      setRebookingOrderIds((prev) => ({ ...prev, [order.id]: true }));
+      try {
+        const res = await partnerFunctionsApi.dispatchRebook({
           orderId: order.id,
-          status: 'out_for_delivery',
+          staffName,
+        });
+        await applyDispatchResult(order.id, res);
+      } catch (err) {
+        toast.error('Rebook failed — no new courier dispatched.', {
+          description: err instanceof Error ? err.message : 'Could not reach the dispatcher.',
+        });
+      } finally {
+        setRebookingOrderIds((prev) => {
+          const next = { ...prev };
+          delete next[order.id];
+          return next;
         });
       }
-
-      toast.success(`New Porter courier booked: ${booking.riderName}`, {
-        description: `Order #${order.id.slice(-6).toUpperCase()} · ${booking.porterOrderId}`,
-      });
-    } catch (err) {
-      toast.error('Porter rebook failed — no new courier dispatched.', {
-        description: err instanceof Error ? err.message : 'Could not reach the dispatcher.',
-      });
-    } finally {
-      setRebookingOrderIds((prev) => ({ ...prev, [order.id]: false }));
-    }
-  }, [updateOrderStatus, staffName]);
+    },
+    [staffName, applyDispatchResult],
+  );
 
   return {
     deliveryOrders: activeDeliveryOrders,
     isLoading,
+    error: ordersError,
+    refetch: refetchOrders,
     quotes,
     loadingQuotes,
     dispatchingOrderIds,
     rebookingOrderIds,
+    fareConfirms,
+    manualLanes,
+    pastingOrderIds,
     fetchOrderQuote,
     dispatchPorter,
+    confirmFareDispatch,
+    dismissFareConfirm,
+    savePorterManual,
     assignInHouseRider,
     cancelPorter,
     rebookPorter,

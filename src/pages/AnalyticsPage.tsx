@@ -23,12 +23,24 @@ import {
 
 export function AnalyticsPage() {
   const [period, setPeriod] = useState<'week' | 'month' | 'year'>('month');
-  const { data: analytics, isLoading } = useAnalytics(period);
+  const { data: analytics, isLoading, isError, refetch } = useAnalytics(period);
 
-  if (isLoading || !analytics) {
+  if (isLoading) {
     return (
       <div className="flex justify-center py-24">
         <Spinner size="lg" />
+      </div>
+    );
+  }
+
+  if (isError || !analytics) {
+    return (
+      <div role="alert" className="bg-surface border border-border rounded-2xl p-6 space-y-3">
+        <h1 className="font-bold text-text-primary">Analytics unavailable</h1>
+        <p className="text-sm text-text-secondary">We could not load analytics. Please try again.</p>
+        <button type="button" onClick={() => void refetch()} className="min-h-11 px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-xl font-bold text-sm focus-visible:outline-2 focus-visible:outline-accent">
+          Retry
+        </button>
       </div>
     );
   }

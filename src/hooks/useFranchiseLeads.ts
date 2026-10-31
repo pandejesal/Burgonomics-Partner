@@ -144,9 +144,11 @@ export function useFranchiseLeads() {
         await updateDoc(docRef, updatePayload);
       } catch (err) {
         if (import.meta.env.DEV) {
-          console.warn('Updated lead locally / mock fallback:', err);
-          return;
+          console.warn('Lead status write failed (dev):', err);
         }
+        // Never resolve a failed write: the pipeline wires an onError toast
+        // and must be able to surface the rejection. Swallowing it here left
+        // the status select snapping back with no feedback.
         throw err;
       }
     },

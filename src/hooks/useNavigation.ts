@@ -1,5 +1,6 @@
 import { useAuthStore } from '@/stores/authStore';
 import type { UserRole } from '@/types';
+import { rolesForRoute } from '@/core/auth/routePolicy';
 import {
   LayoutDashboard,
   ClipboardList,
@@ -13,6 +14,7 @@ import {
   BarChart3,
   UserCheck,
   Settings,
+  ShieldCheck,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -24,80 +26,93 @@ export interface NavItem {
   roles: UserRole[];
 }
 
-const navItems: NavItem[] = [
+interface NavBaseItem {
+  label: string;
+  icon: LucideIcon;
+  path: string;
+  badge?: string;
+}
+
+// Sidebar order is presentation only. Visibility is NOT listed here — it is
+// derived from the enforced route policy (routePolicy.rolesForRoute), so the
+// sidebar can never offer a route the guard denies.
+const navBaseItems: NavBaseItem[] = [
   {
     label: 'Dashboard',
     icon: LayoutDashboard,
     path: '/dashboard',
-    roles: ['brand_owner', 'developer', 'support', 'regional_manager', 'branch_owner', 'branch_staff'],
   },
   {
     label: 'Live Orders',
     icon: ClipboardList,
     path: '/orders',
-    roles: ['brand_owner', 'developer', 'support', 'regional_manager', 'branch_owner', 'branch_staff'],
   },
   {
     label: 'Kitchen KDS',
     icon: ChefHat,
     path: '/kds',
-    roles: ['brand_owner', 'developer', 'support', 'regional_manager', 'branch_owner', 'branch_staff'],
   },
   {
     label: 'Delivery Queue',
     icon: Bike,
     path: '/delivery-queue',
-    roles: ['brand_owner', 'developer', 'support', 'regional_manager', 'branch_owner', 'branch_staff'],
   },
   {
     label: 'Customer CRM',
     icon: Users,
     path: '/customers',
-    roles: ['brand_owner', 'developer', 'support', 'regional_manager', 'branch_owner'],
   },
   {
     label: 'Chat Hub',
     icon: MessageSquare,
     path: '/chat',
-    roles: ['brand_owner', 'developer', 'support', 'regional_manager', 'branch_owner', 'branch_staff'],
   },
   {
     label: 'Support Tickets',
     icon: Ticket,
     path: '/tickets',
-    roles: ['brand_owner', 'developer', 'support', 'regional_manager', 'branch_owner', 'branch_staff'],
   },
   {
     label: 'Menu Catalog',
     icon: UtensilsCrossed,
     path: '/menu',
-    roles: ['brand_owner', 'developer', 'support', 'regional_manager', 'branch_owner'],
   },
   {
     label: 'Store Network',
     icon: Building2,
     path: '/branches',
-    roles: ['brand_owner', 'developer', 'support', 'regional_manager'],
   },
   {
     label: 'Analytics',
     icon: BarChart3,
     path: '/analytics',
-    roles: ['brand_owner', 'developer', 'support', 'regional_manager', 'branch_owner'],
   },
   {
     label: 'Team & Staff',
     icon: UserCheck,
     path: '/users',
-    roles: ['brand_owner', 'developer', 'support', 'regional_manager'],
+  },
+  {
+    // Migrated Control Room (former standalone admin portal, 44 pages).
+    // Single sign-in — visible only to brand-level roles permitted by
+    // AdminPortalLayout + routePolicy (/admin stays denied for branch/support).
+    label: 'Control Room',
+    icon: ShieldCheck,
+    path: '/admin',
   },
   {
     label: 'Settings',
     icon: Settings,
     path: '/settings',
-    roles: ['brand_owner', 'developer', 'support', 'regional_manager', 'branch_owner'],
   },
 ];
+
+// Single source of truth: each item's roles ARE the policy allowlist for its
+// path. Exported for the nav/policy parity test.
+export const navItems: NavItem[] = navBaseItems.map((item) => ({
+  ...item,
+  roles: rolesForRoute(item.path),
+}));
 
 export function useNavigation() {
   const { user } = useAuthStore();

@@ -1,0 +1,208 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  playKDSChime,
+  syncKDSAlarmState,
+  stopRepeatingKDSAlarm,
+  acknowledgeKDSAlarm,
+  isKDSAlarmRepeating,
+  isKDSAudioMuted,
+  setKDSAudioMuted,
+  KDS_ALARM_REPEAT_MS,
+  __resetKDSAudioStateForTests,
+} from './kdsAudio';
+
+// ---- Web Audio API mocks ----
+interface MockOsc {
+  type: string;
+  frequency: { setValueAtTime: ReturnType<typeof vi.fn> };
+  connect: ReturnType<typeof vi.fn>;
+  start: ReturnType<typeof vi.fn>;
+  stop: ReturnType<typeof vi.fn>;
+}
+
+interface MockGain {
+  gain: {
+    setValueAtTime: ReturnType<typeof vi.fn>;
+    linearRampToValueAtTime: ReturnType<typeof vi.fn>;
+    exponentialRampToValueAtTime: ReturnType<typeof vi.fn>;
+  };
+  connect: ReturnType<typeof vi.fn>;
+}
+
+const createdOscillators: MockOsc[] = [];
+const createdGains: MockGain[] = [];
+
+const mockCtx = {
+  currentTime: 100,
+  state: 'running' as string,
+  destination: {},
+  resume: vi.fn().mockResolvedValue(undefined),
+  createOscillator: vi.fn(() => {
+    const osc: MockOsc = {
+      type: '',
+      frequency: { setValueAtTime: vi.fn() },
+      connect: vi.fn(),
+      start: vi.fn(),
+      stop: vi.fn(),
+    };
+    createdOscillators.push(osc);
+    return osc;
+  }),
+  createGain: vi.fn(() => {
+    const g: MockGain = {
+      gain: {
+        setValueAtTime: vi.fn(),
+        linearRampToValueAtTime: vi.fn(),
+        exponentialRampToValueAtTime: vi.fn(),
+      },
+      connect: vi.fn(),
+    };
+    createdGains.push(g);
+    return g;
+  }),
+};
+
+function installBrowserMocks() {
+  const store = new Map<string, string>();
+  const localStorageMock = {
+    getItem: vi.fn((k: string) => (store.has(k) ? store.get(k)! : null)),
+    setItem: vi.fn((k: string, v: string) => void store.set(k, v)),
+    removeItem: vi.fn((k: string) => void store.delete(k)),
+    clear: vi.fn(() => store.clear()),
+  };
+  (globalThis as unknown as Record<string, unknown>).window = {
+    AudioContext: vi.fn(function (this: unknown) {
+      return mockCtx;
+    }),
+  };
+  (globalThis as unknown as Record<string, unknown>).localStorage = localStorageMock;
+  return { store, localStorageMock };
+}
+
+describe('kdsAudio — two-tone doorbell chime', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    createdOscillators.length = 0;
+    createdGains.length = 0;
+    mockCtx.createOscillator.mockClear();
+    mockCtx.createGain.mockClear();
+    mockCtx.state = 'running';
+    installBrowserMocks();
+    __resetKDSAudioStateForTests();
+  });
+
+  afterEach(() => {
+    __resetKDSAudioStateForTests();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    delete (globalThis as unknown as Record<string, unknown>).window;
+    delete (globalThis as unknown as Record<string, unknown>).localStorage;
+  });
+
+  it('plays a two-tone doorbell: A5 880Hz then D6 1174.66Hz with sine + exponential decay', () => {
+    playKDSChime();
+
+    expect(mockCtx.createOscillator).toHaveBeenCalledTimes(2);
+    expect(mockCtx.createGain).toHaveBeenCalledTimes(2);
+    expect(createdOscillators).toHaveLength(2);
+
+    // Tone 1: 880.00 Hz (A5), ~0.35s, gain 0.30
+    const [osc1, osc2] = createdOscillators;
+    expect(osc1.type).toBe('sine');
+    expect(osc1.frequency.setValueAtTime).toHaveBeenCalledWith(880, 100);
+    expect(osc1.start).toHaveBeenCalledWith(100);
+    expect(osc1.stop).toHaveBeenCalledWith(100 + 0.35);
+
+    // Tone 2: 1174.66 Hz (D6), start +0.18s, ~0.65s, gain 0.35
+    expect(osc2.type).toBe('sine');
+    expect(osc2.frequency.setValueAtTime).toHaveBeenCalledWith(1174.66, 100 + 0.18);
+    expect(osc2.start).toHaveBeenCalledWith(100 + 0.18);
+    expect(osc2.stop).toHaveBeenCalledWith(100 + 0.18 + 0.65);
+
+    // Exponential decay envelope on both tones
+    const [gain1, gain2] = createdGains;
+    expect(gain1.gain.linearRampToValueAtTime).toHaveBeenCalledWith(0.3, 100 + 0.03);
+    expect(gain1.gain.exponentialRampToValueAtTime).toHaveBeenCalledWith(0.0001, 100 + 0.35);
+    expect(gain2.gain.linearRampToValueAtTime).toHaveBeenCalledWith(0.35, 100 + 0.18 + 0.03);
+    expect(gain2.gain.exponentialRampToValueAtTime).toHaveBeenCalledWith(0.0001, 100 + 0.18 + 0.65);
+  });
+
+  it('mute toggle blocks playback and persists state', () => {
+    expect(isKDSAudioMuted()).toBe(false);
+
+    setKDSAudioMuted(true);
+    expect(isKDSAudioMuted()).toBe(true);
+
+    playKDSChime();
+    expect(mockCtx.createOscillator).not.toHaveBeenCalled();
+
+    setKDSAudioMuted(false);
+    expect(isKDSAudioMuted()).toBe(false);
+
+    playKDSChime();
+    expect(mockCtx.createOscillator).toHaveBeenCalledTimes(2);
+  });
+
+  it('repeats the chime every 10 seconds while orders are pending', () => {
+    expect(KDS_ALARM_REPEAT_MS).toBe(10000);
+
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+    syncKDSAlarmState(2);
+
+    // Immediate chime on first sync
+    expect(mockCtx.createOscillator).toHaveBeenCalledTimes(2);
+    expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 10000);
+    expect(isKDSAlarmRepeating()).toBe(true);
+
+    // Advance 10s → second chime
+    mockCtx.createOscillator.mockClear();
+    vi.advanceTimersByTime(10000);
+    expect(mockCtx.createOscillator).toHaveBeenCalledTimes(2);
+
+    // Advance another 10s → third chime
+    mockCtx.createOscillator.mockClear();
+    vi.advanceTimersByTime(10000);
+    expect(mockCtx.createOscillator).toHaveBeenCalledTimes(2);
+
+    // Clearing the makeline stops the loop
+    syncKDSAlarmState(0);
+    expect(isKDSAlarmRepeating()).toBe(false);
+
+    mockCtx.createOscillator.mockClear();
+    vi.advanceTimersByTime(30000);
+    expect(mockCtx.createOscillator).not.toHaveBeenCalled();
+  });
+
+  it('acknowledgeKDSAlarm silences the loop until the pending count increases', () => {
+    syncKDSAlarmState(3);
+    expect(isKDSAlarmRepeating()).toBe(true);
+
+    acknowledgeKDSAlarm();
+    expect(isKDSAlarmRepeating()).toBe(false);
+
+    // Same count re-sync must NOT restart the alarm
+    mockCtx.createOscillator.mockClear();
+    syncKDSAlarmState(3);
+    expect(isKDSAlarmRepeating()).toBe(false);
+    expect(mockCtx.createOscillator).not.toHaveBeenCalled();
+
+    // Timer must stay silent while acknowledged
+    vi.advanceTimersByTime(30000);
+    expect(mockCtx.createOscillator).not.toHaveBeenCalled();
+
+    // A count increase (new orders) resumes alarming
+    syncKDSAlarmState(4);
+    expect(isKDSAlarmRepeating()).toBe(true);
+    expect(mockCtx.createOscillator).toHaveBeenCalledTimes(2);
+  });
+
+  it('muting stops the repeating alarm', () => {
+    syncKDSAlarmState(2);
+    expect(isKDSAlarmRepeating()).toBe(true);
+
+    setKDSAudioMuted(true);
+    expect(isKDSAlarmRepeating()).toBe(false);
+
+    stopRepeatingKDSAlarm();
+  });
+});

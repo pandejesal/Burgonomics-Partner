@@ -1,6 +1,7 @@
 /**
  * Utility for exporting structured data to CSV files with UTF-8 BOM support.
  */
+import { toast } from "sonner";
 
 export interface CsvColumn<T> {
   header: string;
@@ -9,7 +10,7 @@ export interface CsvColumn<T> {
 
 export function exportToCsv<T>(filename: string, data: T[], columns: CsvColumn<T>[]): void {
   if (!data || data.length === 0) {
-    alert('No data available to export.');
+    toast.error('No data available to export.');
     return;
   }
 

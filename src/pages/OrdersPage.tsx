@@ -118,11 +118,12 @@ export function OrdersPage() {
           <h1 className="text-2xl font-bold text-white tracking-wide flex items-center gap-2.5">
             <span>Live Orders & Petpooja Billing</span>
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#0E4825] border border-emerald-500/40 text-emerald-300 font-bold">
-              Realtime Synced
+              Auto-refreshes every 30s
             </span>
           </h1>
           <p className="text-xs text-neutral-400">
-            Real-time customer order stream synchronized with Petpooja POS & Kitchen Makeline
+            Customer order board synchronized with Petpooja POS & Kitchen Makeline — refreshes
+            every 30 seconds (not a live stream)
           </p>
         </div>
 
