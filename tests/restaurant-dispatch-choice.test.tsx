@@ -13,13 +13,12 @@
  * failing assertion traced to a real defect, not to weakened production code.
  *
  * Harness conventions copied from committed suites: node env (vitest.config),
- * jsdom vendored from the sibling workspace for interactive mounts
+ * jsdom as the declared devDependency for interactive mounts
  * (see tests/branches-logs-polish.test.tsx), renderToStaticMarkup for
  * pure-render pins (see tests/partnerops-order-payment-labels.test.tsx).
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
@@ -159,11 +158,9 @@ import {
 } from '@/features/delivery/hooks/usePorterLogistics';
 import { OrderTableList } from '@/features/orders/components/OrderTableList';
 
-// Reuse the workspace's existing DOM install; no new package dependency.
-const require = createRequire(import.meta.url);
-const { JSDOM } = require('../../burgonomics-foundation-core/node_modules/jsdom/lib/api.js') as {
-  JSDOM: new (html: string) => { window: Window & typeof globalThis };
-};
+// TEST-B: resolve jsdom as a package (declared devDependency), never by
+// reaching into a sibling app's node_modules.
+import { JSDOM } from 'jsdom';
 
 const cardSource = readFileSync(
   new URL('../src/features/delivery/components/PorterDispatchCard.tsx', import.meta.url),

@@ -1,6 +1,5 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { createRequire } from 'node:module';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/stores/authStore', () => ({
@@ -27,11 +26,9 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 import { BranchesPage } from '../src/pages/BranchesPage';
 import { SystemLogsTab } from '../src/admin/pages/system/SystemLogsTab';
 
-// Reuse the workspace's existing DOM install; no new package dependency.
-const require = createRequire(import.meta.url);
-const { JSDOM } = require('../../burgonomics-foundation-core/node_modules/jsdom/lib/api.js') as {
-  JSDOM: new (html: string) => { window: Window & typeof globalThis; };
-};
+// TEST-B: resolve jsdom as a package (declared devDependency), never by
+// reaching into a sibling app's node_modules.
+import { JSDOM } from 'jsdom';
 
 describe('branch counts and local log console polish', () => {
   let root: Root;

@@ -250,19 +250,14 @@ type JSDOMCtor = new (html: string, options?: Record<string, unknown>) => {
 
 function resolveJSDOM(): JSDOMCtor | null {
   const requireFromTest = createRequire(import.meta.url);
-  const candidates = [
-    'jsdom', // installed in this package if it ever gains a DOM environment
-    '../../burgonomics-foundation-core/node_modules/jsdom/lib/api.js', // repo sibling install
-  ];
-  for (const candidate of candidates) {
-    try {
-      const mod = requireFromTest(candidate) as { JSDOM?: JSDOMCtor };
-      if (mod?.JSDOM) return mod.JSDOM;
-    } catch {
-      // try next candidate
-    }
+  // TEST-B: package resolution only. The sibling app's node_modules is not
+  // this package's dependency graph and must never be read at test time.
+  try {
+    const mod = requireFromTest('jsdom') as { JSDOM?: JSDOMCtor };
+    return mod?.JSDOM ?? null;
+  } catch {
+    return null;
   }
-  return null;
 }
 
 const JSDOM = resolveJSDOM();
