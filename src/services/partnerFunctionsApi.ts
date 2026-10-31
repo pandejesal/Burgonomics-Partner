@@ -652,6 +652,27 @@ export const partnerFunctionsApi = {
   },
 
   /**
+   * Assigns a staff member's RBAC role + scope server-side
+   * (POST /auth/assignRole, brand-admin asserted). The server sets the
+   * target's Firebase Auth custom claims (role/branchIds/cityIds), revokes
+   * their refresh tokens, and mirrors users/{uid} + admins/{uid}. The old
+   * direct users/{uid} write only changed the profile, so authorization kept
+   * reading stale claims (PAR-02).
+   */
+  async assignUserRole(params: {
+    targetUid: string;
+    role: string;
+    branchIds?: string[];
+    cityIds?: string[];
+  }): Promise<{
+    success: boolean;
+    targetUid: string;
+    role: string;
+  }> {
+    return await apiRequest('/auth/assignRole', params);
+  },
+
+  /**
    * Revokes a staff member's RBAC claims server-side (POST /auth/revokeRole).
    * The server asserts brand-admin, clears role/branchIds/cityIds claims to
    * `customer`, and mirrors the role into users/{uid} — so the old direct

@@ -129,6 +129,73 @@ export interface TeamUser {
   updatedAt?: any;
 }
 
+/** Fields that are enforced from Firebase Auth custom claims, not Firestore. */
+const CLAIM_FIELDS = ['role', 'branchIds', 'cityIds'] as const;
+
+export interface PersistUserUpdateArgs {
+  userId: string;
+  updates: Partial<TeamUser>;
+  /** Current roster row, used to keep claim scope complete on a partial edit. */
+  current?: TeamUser;
+}
+
+/**
+ * Applies a staff edit. Role / branch / city changes are AUTHORIZATION
+ * changes: they go through POST /auth/assignRole, which sets the target's
+ * custom claims, revokes refresh tokens and mirrors users/{uid} + admins/{uid}.
+ * A direct users/{uid} write here would leave the server reading stale claims
+ * while the UI claimed the new role (PAR-02). Non-privileged profile fields
+ * (name, phone, PIN) keep the direct write.
+ *
+ * Failures propagate: a refused claims change must never look saved.
+ */
+export async function persistUserUpdate({
+  userId,
+  updates,
+  current,
+}: PersistUserUpdateArgs): Promise<void> {
+  const changesClaims = CLAIM_FIELDS.some((field) => field in updates);
+  const profileUpdates: Partial<TeamUser> = { ...updates };
+  for (const field of CLAIM_FIELDS) delete profileUpdates[field];
+  if (updates.pin) {
+    profileUpdates.hashedPin = hashPinSimple(updates.pin);
+    profileUpdates.pinSet = true;
+  }
+
+  if (changesClaims) {
+    const role = updates.role ?? current?.role;
+    if (!role) {
+      // Sending a guessed role would silently rewrite someone's access.
+      throw new Error(
+        'Cannot change role or outlet access: the current role is unknown. Reload the team list and retry.'
+      );
+    }
+    // A partial edit must carry the rest of the claim scope, otherwise the
+    // server's empty-array defaults would wipe the target's branch/city grants.
+    const branchIds = updates.branchIds ?? current?.branchIds ?? [];
+    const cityIds = updates.cityIds ?? current?.cityIds ?? [];
+    const { partnerFunctionsApi } = await import(
+      "@/services/partnerFunctionsApi"
+    );
+    await partnerFunctionsApi.assignUserRole({
+      targetUid: userId,
+      role,
+      branchIds,
+      cityIds,
+    });
+  }
+
+  if (Object.keys(profileUpdates).length === 0) return; // nothing but claims
+
+  const userRef = doc(db, 'users', userId);
+  await updateDoc(userRef, {
+    ...profileUpdates,
+    updatedAt: Timestamp.now(),
+  }).catch(async () => {
+    await setDoc(userRef, { ...profileUpdates, updatedAt: Timestamp.now() }, { merge: true });
+  });
+}
+
 export function useUsers() {
   const { user } = useAuthStore();
   const queryClient = useQueryClient();
@@ -217,18 +284,10 @@ export function useUsers() {
       userId: string;
       updates: Partial<TeamUser>;
     }) => {
-      const userRef = doc(db, 'users', userId);
-      const cleanedUpdates = { ...updates };
-      if (updates.pin) {
-        cleanedUpdates.hashedPin = hashPinSimple(updates.pin);
-        cleanedUpdates.pinSet = true;
-      }
-
-      await updateDoc(userRef, {
-        ...cleanedUpdates,
-        updatedAt: Timestamp.now(),
-      }).catch(async () => {
-        await setDoc(userRef, { ...cleanedUpdates, updatedAt: Timestamp.now() }, { merge: true });
+      await persistUserUpdate({
+        userId,
+        updates,
+        current: users.find((member) => member.id === userId),
       });
     },
     onSuccess: () => {

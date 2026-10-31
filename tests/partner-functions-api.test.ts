@@ -275,6 +275,43 @@ describe('partnerFunctionsApi gateway (real client, mocked transport)', () => {
     ).rejects.toThrow(/needs_review/);
   });
 
+  it('POSTs role assignments to the claims-authoritative /auth/assignRole route', async () => {
+    const seen: { url?: string; init?: RequestInit } = {};
+    globalThis.fetch = (async (url: any, init: any) => {
+      seen.url = String(url);
+      seen.init = init;
+      return new Response(JSON.stringify({ success: true, targetUid: 'uid_1', role: 'branch_owner' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as any;
+
+    const res = await partnerFunctionsApi.assignUserRole({
+      targetUid: 'uid_1',
+      role: 'branch_owner',
+      branchIds: ['branch_surat_01'],
+      cityIds: ['Surat'],
+    });
+    expect(seen.url).toBe('https://example.invalid/api/auth/assignRole');
+    expect(seen.init?.method).toBe('POST');
+    expect(JSON.parse(String(seen.init?.body))).toEqual({
+      targetUid: 'uid_1',
+      role: 'branch_owner',
+      branchIds: ['branch_surat_01'],
+      cityIds: ['Surat'],
+    });
+    expect(res.role).toBe('branch_owner');
+
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({ error: 'Permission denied: Only Superadmins / Brand Owners can assign RBAC roles.' }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } }
+      )) as any;
+    await expect(
+      partnerFunctionsApi.assignUserRole({ targetUid: 'uid_1', role: 'developer' })
+    ).rejects.toThrow(/Permission denied/);
+  });
+
   it('detaches device tokens via the unregister endpoint', async () => {
     const seen: { url?: string; init?: RequestInit } = {};
     globalThis.fetch = (async (url: any, init: any) => {
