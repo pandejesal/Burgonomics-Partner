@@ -383,12 +383,12 @@ describe('L1 — branch cards show configured values or say they are unset', () 
     expect(html).toContain('Not configured');
   });
 
-  it('renders the recorded geofence and royalty when they exist', () => {
-    state.branches = [branch({ deliveryRadiusKm: 9.5, brandRoyaltyPercent: 6 })];
+  it('renders the recorded geofence and monthly fee when they exist', () => {
+    state.branches = [branch({ deliveryRadiusKm: 9.5, monthlyFee: 6000 })];
     const html = renderToStaticMarkup(<BranchesPage />);
 
     expect(html).toContain('9.5 km Geofence');
-    expect(html).toContain('6% Escrow Cut');
+    expect(html).toContain('₹6,000 / month');
     expect(html).not.toContain('Not configured');
   });
 });

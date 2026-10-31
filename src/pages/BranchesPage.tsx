@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useBranches, type CreateBranchInput } from '@/hooks/useBranches';
 import { useAuthStore } from '@/stores/authStore';
-import { canReadFranchiseLeads } from '@/core/auth/routePolicy';
+import { canReadFranchiseLeads, isBrandRole } from '@/core/auth/routePolicy';
 import { BranchConfigModal } from '@/features/branches/components/BranchConfigModal';
 import { BranchSettingsModal } from '@/components/stores/BranchSettingsModal';
 import { FranchiseLeadsPipeline } from '@/components/stores/FranchiseLeadsPipeline';
@@ -113,7 +113,7 @@ export function BranchesPage() {
       // operator must paste the real Razorpay linked account; empty stays
       // empty and the Route worker skips the branch with a log.
       razorpayAccountId: '',
-      brandRoyaltyPercent: 5.0,
+      monthlyFee: 2500,
     });
     setShowAddBranchModal(true);
   };
@@ -319,12 +319,12 @@ export function BranchesPage() {
                         <div className="p-2 rounded-xl bg-[#0A0A0A] border border-[#1E3A24]">
                           <div className="text-zinc-400 flex items-center gap-1">
                             <CreditCard className="w-3 h-3 text-[#FF6600]" />
-                            <span>Route Royalty:</span>
+                            <span>Monthly Fee:</span>
                           </div>
                           <div className="font-mono font-bold text-white mt-0.5">
-                            {branch.brandRoyaltyPercent != null
-                              ? `${branch.brandRoyaltyPercent}% Escrow Cut`
-                              : 'Not configured'}
+                            {branch.monthlyFee != null
+                              ? `₹${branch.monthlyFee.toLocaleString()} / month`
+                              : '₹2,500 / month (default)'}
                           </div>
                         </div>
                       </div>
@@ -407,6 +407,7 @@ export function BranchesPage() {
         onSubmit={handleCreateBranch}
         initialData={branchInitialData}
         isSuperAdmin={isGlobalRole}
+        canEditMonthlyFee={isBrandRole(user?.role)}
         loading={createBranch.isPending}
       />
 

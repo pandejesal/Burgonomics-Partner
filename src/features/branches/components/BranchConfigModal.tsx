@@ -19,6 +19,8 @@ interface BranchConfigModalProps {
   onSubmit: (branchData: CreateBranchInput) => Promise<void>;
   initialData?: Partial<CreateBranchInput> | null;
   isSuperAdmin?: boolean;
+  /** Monthly fee is brand-level; branch roles see it read-only. */
+  canEditMonthlyFee?: boolean;
   loading?: boolean;
 }
 
@@ -28,6 +30,7 @@ export function BranchConfigModal({
   onSubmit,
   initialData,
   isSuperAdmin = true,
+  canEditMonthlyFee,
   loading = false,
 }: BranchConfigModalProps) {
   const [formData, setFormData] = useState<CreateBranchInput>({
@@ -41,7 +44,7 @@ export function BranchConfigModal({
       'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=800&auto=format&fit=crop&q=80',
     petpoojaStoreId: '',
     razorpayAccountId: '',
-    brandRoyaltyPercent: 5.0,
+    monthlyFee: 2500,
     deliveryRadiusKm: 7,
     prepTimeMinutes: 20,
     operatingHours: { open: '11:00 AM', close: '11:30 PM' },
@@ -64,6 +67,7 @@ export function BranchConfigModal({
         deliveryRadiusKm: initialData.deliveryRadiusKm ?? prev.deliveryRadiusKm,
         petpoojaStoreId: initialData.petpoojaStoreId || prev.petpoojaStoreId,
         razorpayAccountId: initialData.razorpayAccountId || prev.razorpayAccountId,
+        monthlyFee: initialData.monthlyFee ?? prev.monthlyFee,
         operatingHours: initialData.operatingHours || prev.operatingHours,
       }));
     }
@@ -93,6 +97,14 @@ export function BranchConfigModal({
       !/^acc_[a-zA-Z0-9_]+$/.test(formData.razorpayAccountId)
     ) {
       setValidationError('Razorpay linked account ID must follow the standard format: acc_xxxx.');
+      return;
+    }
+
+    if (
+      formData.monthlyFee !== undefined &&
+      (!Number.isFinite(formData.monthlyFee) || formData.monthlyFee < 0)
+    ) {
+      setValidationError('Monthly fee must be a non-negative amount in rupees (0 means no fee).');
       return;
     }
 
@@ -270,11 +282,13 @@ export function BranchConfigModal({
             coordinates={formData.coordinates}
           />
 
-          {/* Razorpay Route Split Card */}
+          {/* Razorpay Route settlement card */}
           <RazorpayRouteAccountCard
             accountId={formData.razorpayAccountId || ''}
             onChange={(accountId) => setFormData({ ...formData, razorpayAccountId: accountId })}
-            brandRoyaltyPercent={formData.brandRoyaltyPercent || 5.0}
+            monthlyFee={formData.monthlyFee ?? 2500}
+            onMonthlyFeeChange={(monthlyFee) => setFormData({ ...formData, monthlyFee })}
+            canEditMonthlyFee={canEditMonthlyFee ?? isSuperAdmin}
             isSuperAdmin={isSuperAdmin}
           />
 

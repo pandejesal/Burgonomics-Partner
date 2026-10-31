@@ -10,6 +10,17 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import type { Branch } from '@/types';
+import { useAuthStore } from '@/stores/authStore';
+import { isBrandRole } from '@/core/auth/routePolicy';
+
+/** Rules deny branch roles any write to these fields (see firestore.rules). */
+const BRANCH_DENIED_UPDATE_KEYS = [
+  'monthlyFee',
+  'packaging',
+  'packagingFee',
+  'royaltyPercentage',
+  'brandRoyaltyPercent',
+] as const;
 
 export interface CreateBranchInput {
   name: string;
@@ -21,7 +32,8 @@ export interface CreateBranchInput {
   bannerImage?: string;
   petpoojaStoreId?: string;
   razorpayAccountId?: string;
-  brandRoyaltyPercent?: number;
+  /** Fixed monthly branch fee in rupees; absent means ₹2,500, 0 means none. */
+  monthlyFee?: number;
   deliveryRadiusKm?: number;
   prepTimeMinutes?: number;
   operatingHours?: { open: string; close: string };
@@ -31,6 +43,7 @@ export interface CreateBranchInput {
 
 export function useBranches() {
   const queryClient = useQueryClient();
+  const { user } = useAuthStore();
 
   const { data: branches = [], isLoading } = useQuery<Branch[]>({
     queryKey: ['branches'],
@@ -66,7 +79,7 @@ export function useBranches() {
           prepTimeMinutes: 20,
           deliveryRadiusKm: 7,
           razorpayAccountId: 'acc_Rzp_Surat_01',
-          brandRoyaltyPercent: 5.0,
+          monthlyFee: 2500,
           announcementBanner: '🔥 Weekend Special: Flat 20% off Gourmet Burgers!',
           petpoojaStoreId: 'PP_SURAT_01',
           coordinates: { lat: 21.1959, lng: 72.7933 },
@@ -85,7 +98,7 @@ export function useBranches() {
           prepTimeMinutes: 25,
           deliveryRadiusKm: 8,
           razorpayAccountId: 'acc_Rzp_Ahmd_01',
-          brandRoyaltyPercent: 5.0,
+          monthlyFee: 2500,
           petpoojaStoreId: 'PP_AMD_01',
           coordinates: { lat: 23.0525, lng: 72.512 },
           operatingHours: { open: '11:00 AM', close: '11:30 PM' },
@@ -105,7 +118,7 @@ export function useBranches() {
           allowComingSoonSubscribers: true,
           subscribersCount: 142,
           razorpayAccountId: 'acc_Rzp_Vdr_01',
-          brandRoyaltyPercent: 5.0,
+          monthlyFee: 2500,
           coordinates: { lat: 22.3106, lng: 73.1695 },
           createdAt: Timestamp.now(),
         },
@@ -134,10 +147,12 @@ export function useBranches() {
         bannerImage: branchInput.bannerImage || null,
         petpoojaStoreId: branchInput.petpoojaStoreId || null,
         // Loop: never fabricate a linked account id (the old default minted
-        // acc_Rzp_<timestamp>, routing real royalty splits at a nonexistent
+        // acc_Rzp_<timestamp>, routing real transfers at a nonexistent
         // account). Absent → null; the Route worker skips with a log.
         razorpayAccountId: branchInput.razorpayAccountId || null,
-        brandRoyaltyPercent: branchInput.brandRoyaltyPercent || 5.0,
+        // Fixed monthly fee (0 is valid and means no fee). Never write the
+        // retired per-order royalty percentage on new branches.
+        monthlyFee: branchInput.monthlyFee ?? 2500,
         deliveryRadiusKm: branchInput.deliveryRadiusKm || 7,
         prepTimeMinutes: branchInput.prepTimeMinutes || 20,
         operatingHours: branchInput.operatingHours || { open: '11:00 AM', close: '11:30 PM' },
@@ -227,11 +242,20 @@ export function useBranches() {
       settings: Partial<Branch>;
     }) => {
       const branchRef = doc(db, 'branches', branchId);
+      const writable: Record<string, any> = { ...settings };
+      if (!isBrandRole(user?.role)) {
+        // Rules reject ANY present value for these keys — even one identical
+        // to the stored value. A default-filled form field therefore has to be
+        // OMITTED, not sent, or an unrelated save fails.
+        for (const key of BRANCH_DENIED_UPDATE_KEYS) {
+          delete writable[key];
+        }
+      }
       await updateDoc(branchRef, {
-        ...settings,
+        ...writable,
         updatedAt: Timestamp.now(),
       }).catch(async () => {
-        await setDoc(branchRef, { ...settings, updatedAt: Timestamp.now() }, { merge: true });
+        await setDoc(branchRef, { ...writable, updatedAt: Timestamp.now() }, { merge: true });
       });
     },
     onSuccess: () => {

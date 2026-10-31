@@ -43,7 +43,11 @@ export interface Branch {
   bannerImage?: string;
   petpoojaStoreId?: string;
   razorpayAccountId?: string;
-  brandRoyaltyPercent?: number;
+  /**
+   * Fixed monthly branch fee in rupees (owner decision 1 Nov 2026). Absent
+   * means the ₹2,500 default; 0 means no fee. Replaces brandRoyaltyPercent.
+   */
+  monthlyFee?: number;
   allowComingSoonSubscribers?: boolean;
   subscribersCount?: number;
   coordinates: {

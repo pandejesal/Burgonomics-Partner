@@ -57,8 +57,13 @@ export function canAccessRoute(role: UserRole | undefined, pathname: string): bo
  */
 export const FRANCHISE_LEAD_READ_ROLES: UserRole[] = ['brand_owner', 'developer'];
 
-export function canReadFranchiseLeads(role: UserRole | undefined): boolean {
+/** Brand-level roles (brand_owner / developer). Branch roles never are. */
+export function isBrandRole(role: UserRole | undefined): boolean {
   return !!role && FRANCHISE_LEAD_READ_ROLES.includes(role);
+}
+
+export function canReadFranchiseLeads(role: UserRole | undefined): boolean {
+  return isBrandRole(role);
 }
 
 /**

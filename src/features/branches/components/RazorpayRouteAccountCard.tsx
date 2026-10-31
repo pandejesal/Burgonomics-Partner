@@ -4,7 +4,11 @@ import { CreditCard, Lock, CheckCircle2, AlertCircle } from 'lucide-react';
 interface RazorpayRouteAccountCardProps {
   accountId: string;
   onChange: (accountId: string) => void;
-  brandRoyaltyPercent?: number;
+  /** Fixed monthly branch fee in rupees (0 = no fee). */
+  monthlyFee?: number;
+  onMonthlyFeeChange?: (monthlyFee: number) => void;
+  /** Brand roles only; branch roles see the fee read-only. */
+  canEditMonthlyFee?: boolean;
   isSuperAdmin?: boolean;
   disabled?: boolean;
 }
@@ -32,14 +36,16 @@ export function isValidRouteAccountId(raw: string): boolean {
 export function RazorpayRouteAccountCard({
   accountId,
   onChange,
-  brandRoyaltyPercent = 5.0,
+  monthlyFee = 2500,
+  onMonthlyFeeChange,
+  canEditMonthlyFee = true,
   isSuperAdmin = true,
   disabled = false,
 }: RazorpayRouteAccountCardProps) {
   const normalizedAccountId = normalizeRouteAccountId(accountId);
   const isLinked = isValidRouteAccountId(normalizedAccountId);
   const showFormatError = normalizedAccountId.length > 0 && !isLinked;
-  const franchiseSharePercent = (100 - brandRoyaltyPercent).toFixed(1);
+  const fee = Number.isFinite(monthlyFee) && monthlyFee >= 0 ? monthlyFee : 2500;
 
   return (
     <div className="p-4 bg-[#0A0A0A] border border-[#1E3A24] rounded-2xl space-y-3">
@@ -49,9 +55,9 @@ export function RazorpayRouteAccountCard({
             <CreditCard className="w-4 h-4" />
           </div>
           <div>
-            <h4 className="text-xs font-bold text-white">Razorpay Route Franchise Split</h4>
+            <h4 className="text-xs font-bold text-white">Razorpay Route Settlement</h4>
             <p className="text-[10px] text-zinc-400">
-              Automated escrow settlement and franchise royalty deductions
+              Linked account and the fixed monthly branch fee — no per-order split
             </p>
           </div>
         </div>
@@ -105,21 +111,39 @@ export function RazorpayRouteAccountCard({
         )}
       </div>
 
-      {/* Royalty Split Breakdown */}
-      <div className="grid grid-cols-2 gap-2 p-2.5 bg-[#112415] rounded-xl border border-[#1E3A24] text-[10px]">
-        <div>
-          <div className="text-zinc-400">Brand Royalty Cut:</div>
-          <div className="font-bold font-mono text-[#FF6600] mt-0.5">
-            {brandRoyaltyPercent.toFixed(1)}% (Auto Deducted)
-          </div>
+      {/* Fixed monthly fee */}
+      <div className="space-y-1">
+        <label
+          htmlFor="monthly-branch-fee"
+          className="block text-[11px] font-semibold text-zinc-300"
+        >
+          Monthly Branch Fee (₹)
+        </label>
+        <div className="relative">
+          <input
+            id="monthly-branch-fee"
+            type="number"
+            min={0}
+            step={50}
+            value={fee}
+            disabled={!canEditMonthlyFee || disabled}
+            onChange={(e) => {
+              const next = Number(e.target.value);
+              onMonthlyFeeChange?.(Number.isFinite(next) && next >= 0 ? next : 0);
+            }}
+            className="w-full px-3 py-2 text-xs bg-[#112415] border border-[#1E3A24] rounded-xl text-white font-mono focus:outline-none focus:border-[#4ADE80] disabled:opacity-60 disabled:cursor-not-allowed"
+          />
+          {!canEditMonthlyFee && (
+            <div className="absolute right-3 top-2.5 flex items-center gap-1 text-[10px] text-zinc-500">
+              <Lock className="w-3 h-3" />
+              <span>Brand-only field</span>
+            </div>
+          )}
         </div>
-
-        <div>
-          <div className="text-zinc-400">Franchise Net Payout:</div>
-          <div className="font-bold font-mono text-[#4ADE80] mt-0.5">
-            {franchiseSharePercent}% (Direct Bank Transfer)
-          </div>
-        </div>
+        <p className="text-[10px] text-zinc-400 leading-relaxed">
+          The first ₹{fee.toLocaleString()} of Razorpay money each month stays with the brand.
+          After that, each order goes to the branch in full.
+        </p>
       </div>
     </div>
   );
