@@ -25,9 +25,11 @@ describe('Partner RBAC & Operator Authorization Suite (real policy)', () => {
     expect(canAccessRoute('branch_owner', '/admin/x')).toBe(false);
   });
 
-  it('support keeps tickets + CRM but loses admin and app settings', () => {
+  it('support keeps tickets but loses customer PII, admin and app settings', () => {
     expect(canAccessRoute('support', '/tickets')).toBe(true);
-    expect(canAccessRoute('support', '/customers')).toBe(true);
+    // firestore.rules: customers read is isUser(customerId) || isAdmin()
+    // (brand_owner/developer), so support must not reach /customers.
+    expect(canAccessRoute('support', '/customers')).toBe(false);
     expect(canAccessRoute('support', '/admin')).toBe(false);
     expect(canAccessRoute('support', '/settings')).toBe(false);
   });

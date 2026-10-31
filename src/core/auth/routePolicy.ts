@@ -22,19 +22,30 @@ export function canAccessRoute(role: UserRole | undefined, pathname: string): bo
     return allowed.some((prefix) => path.startsWith(prefix));
   }
 
-  // Branch owners: everything except brand-level management and admin portal
+  // Branch owners: everything except brand-level management, the admin portal
+  // and customer PII. firestore.rules gates the customers collection on
+  // `isUser(customerId) || isAdmin()` (brand_owner/developer only), so a
+  // branch owner reaching /customers only ever got a permission-denied page.
   if (role === 'branch_owner') {
-    const restricted = ['/branches', '/users', '/admin'];
+    const restricted = ['/branches', '/users', '/admin', '/customers'];
     return !restricted.some((prefix) => path.startsWith(prefix));
   }
 
-  // Support: tickets + customer 360, no admin portal or app settings
+  // Support: tickets, no admin portal, no app settings and no customer PII
+  // (the same brand-admin-only rules gate as branch owners).
   if (role === 'support') {
-    const restricted = ['/admin', '/settings'];
+    const restricted = ['/admin', '/settings', '/customers'];
     return !restricted.some((prefix) => path.startsWith(prefix));
   }
 
-  // brand_owner, developer, regional_manager: full partner-console access
+  // Regional managers: console-wide reporting, but customer PII stays behind
+  // the brand-admin rules gate — the UI must not offer /customers here.
+  if (role === 'regional_manager') {
+    const restricted = ['/customers'];
+    return !restricted.some((prefix) => path.startsWith(prefix));
+  }
+
+  // brand_owner, developer: full partner-console access
   return true;
 }
 

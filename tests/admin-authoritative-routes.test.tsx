@@ -139,11 +139,16 @@ describe('Role boundaries unchanged — no RBAC widening (R22)', () => {
   it('all three admin-portal roles already had console access to the navigation targets', () => {
     // The redirects reuse existing console reachability under the single
     // source of truth (routePolicy) — no new grant is introduced here.
+    // /customers is excluded for regional_manager: firestore.rules gates the
+    // customers collection on isAdmin() (brand_owner/developer only).
     for (const role of ['brand_owner', 'developer', 'regional_manager'] as const) {
       expect(canAccessRoute(role, '/menu')).toBe(true);
+    }
+    for (const role of ['brand_owner', 'developer'] as const) {
       expect(canAccessRoute(role, '/customers')).toBe(true);
       expect(canAccessRoute(role, '/customers/any_doc_id')).toBe(true);
     }
+    expect(canAccessRoute('regional_manager', '/customers')).toBe(false);
   });
 
   it('non-admin roles remain denied the admin portal (fail-closed, unchanged)', () => {
