@@ -5,7 +5,7 @@ import { RevenueChart } from '@/components/analytics/RevenueChart';
 import { HourlyRushHeatmap } from '@/components/analytics/HourlyRushHeatmap';
 import { FulfillmentDonut } from '@/components/analytics/FulfillmentDonut';
 import { TopItems } from '@/components/analytics/TopItems';
-import { RoyaltyLedger } from '@/components/analytics/RoyaltyLedger';
+import { MonthlyBranchStatement } from '@/components/analytics/MonthlyBranchStatement';
 import { BranchComparison } from '@/components/analytics/BranchComparison';
 import { StatsCard } from '@/components/dashboard/StatsCard';
 import { Spinner } from '@/components/ui/Spinner';
@@ -200,12 +200,10 @@ export function AnalyticsPage() {
         <TopItems items={analytics.topItems} />
       </div>
 
-      {/* Row 3: per-branch earnings by payment stream */}
-      <RoyaltyLedger
-        branches={analytics.branchStats}
-        totalRevenue={analytics.totalRevenue}
-        razorpayRevenue={analytics.razorpayRevenue}
-        cashRevenue={analytics.cashRevenue}
+      {/* Row 3: monthly branch statement (fixed fee) */}
+      <MonthlyBranchStatement
+        current={analytics.monthlyStatements.current}
+        previous={analytics.monthlyStatements.previous}
       />
 
       {/* Row 4: Multi-Branch Performance Benchmarking */}

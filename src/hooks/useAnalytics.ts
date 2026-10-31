@@ -4,6 +4,8 @@ import { useAppStore } from '@/stores/appStore';
 import { db } from '@/config/firebase';
 import {
   collection,
+  doc,
+  getDoc,
   query,
   where,
   limit,
@@ -18,10 +20,14 @@ import {
   isCompletedOrder,
   istDayKey,
   istDayRange,
+  istMonthKey,
+  istMonthLabel,
   orderNetEarnings,
   orderPaymentChannel,
+  previousIstMonthKey,
   startOfIstDay,
   startOfIstMonth,
+  startOfIstMonthKey,
   startOfIstWeek,
   summarizeOrderRevenue,
 } from '@/utils/analyticsMath';
@@ -91,6 +97,31 @@ export interface LogisticsSummary {
   avgDeliveryDistanceKm: number;
 }
 
+export interface MonthlyStatementRow {
+  branchId: string;
+  branchName: string;
+  city: string;
+  linkedAccountId: string;
+  linkedStatus: 'active' | 'pending' | 'verified';
+  razorpayEarnings: number;
+  cashEarnings: number;
+  /** Delivery fees the brand paid on completed cash orders (owed by branch). */
+  courierOnCash: number;
+  /** Null when the ledger read was denied: never a false 0. */
+  fee: number | null;
+  collected: number | null;
+  due: number | null;
+}
+
+export interface MonthlyStatementMonth {
+  monthKey: string;
+  label: string;
+  rows: MonthlyStatementRow[];
+  /** False when `branch_monthly_fees` could not be read for this role. */
+  available: boolean;
+  unavailableReason?: 'not_available_for_role' | 'read_failed';
+}
+
 export interface AnalyticsResult {
   period: 'week' | 'month' | 'year';
   totalRevenue: number;
@@ -102,6 +133,10 @@ export interface AnalyticsResult {
   cashOrders: number;
   cashPendingOrders: number;
   unpaidOrders: number;
+  monthlyStatements: {
+    current: MonthlyStatementMonth;
+    previous: MonthlyStatementMonth;
+  };
   dailyRevenue: DailyRevenue[];
   topItems: TopItem[];
   branchStats: BranchStats[];
@@ -123,7 +158,10 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
 
       const warnings: string[] = [];
       let branchIds: string[] = [];
-      const branchMeta: Record<string, { name: string; city: string; accountId: string }> = {
+      const branchMeta: Record<
+        string,
+        { name: string; city: string; accountId: string; monthlyFee?: number }
+      > = {
         branch_surat_01: {
           name: 'Surat Adajan Outlet',
           city: 'Surat',
@@ -138,31 +176,39 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
 
       // Empty, honest result for fail-closed scopes (assigned branches
       // missing) — never unfiltered brand-wide numbers for a scoped role.
-      const emptyResult = (warning: string): AnalyticsResult => ({
-        period,
-        totalRevenue: 0,
-        totalOrders: 0,
-        averageOrderValue: 0,
-        razorpayRevenue: 0,
-        razorpayOrders: 0,
-        cashRevenue: 0,
-        cashOrders: 0,
-        cashPendingOrders: 0,
-        unpaidOrders: 0,
-        dailyRevenue: [],
-        topItems: [],
-        branchStats: [],
-        hourlyRush: [],
-        fulfillmentBreakdown: [],
-        logistics: {
-          deliveryFeesCollected: 0,
-          porterIncurredCost: 0,
-          netMargin: 0,
-          totalDeliveryTrips: 0,
-          avgDeliveryDistanceKm: 0,
-        },
-        warnings: [warning],
-      });
+      const emptyResult = (warning: string): AnalyticsResult => {
+        const mk = istMonthKey(new Date());
+        const pk = previousIstMonthKey(mk);
+        return {
+          period,
+          totalRevenue: 0,
+          totalOrders: 0,
+          averageOrderValue: 0,
+          razorpayRevenue: 0,
+          razorpayOrders: 0,
+          cashRevenue: 0,
+          cashOrders: 0,
+          cashPendingOrders: 0,
+          unpaidOrders: 0,
+          monthlyStatements: {
+            current: { monthKey: mk, label: istMonthLabel(mk), rows: [], available: true },
+            previous: { monthKey: pk, label: istMonthLabel(pk), rows: [], available: true },
+          },
+          dailyRevenue: [],
+          topItems: [],
+          branchStats: [],
+          hourlyRush: [],
+          fulfillmentBreakdown: [],
+          logistics: {
+            deliveryFeesCollected: 0,
+            porterIncurredCost: 0,
+            netMargin: 0,
+            totalDeliveryTrips: 0,
+            avgDeliveryDistanceKm: 0,
+          },
+          warnings: [warning],
+        };
+      };
 
       // Scope resolution — branch_owner/branch_staff are CLAMPED to their
       // assigned branches. The old code read selectedBranchId straight from
@@ -203,6 +249,9 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
               name: data.name || d.id,
               city: data.city || 'Gujarat',
               accountId: data.razorpayAccountId || `acc_Rzp_${d.id}`,
+              monthlyFee: Number.isFinite(Number(data.monthlyFee))
+                ? Number(data.monthlyFee)
+                : undefined,
             };
           });
           if (
@@ -239,6 +288,9 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
                 name: data.name || d.id,
                 city: data.city || 'Gujarat',
                 accountId: data.razorpayAccountId || `acc_Rzp_${d.id}`,
+                monthlyFee: Number.isFinite(Number(data.monthlyFee))
+                  ? Number(data.monthlyFee)
+                  : undefined,
               };
             });
           }
@@ -253,6 +305,30 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
           return emptyResult('Could not resolve your outlet scope - analytics are not shown.');
         }
         warnings.push('Branch list failed to load — figures cover all outlets.');
+      }
+
+      // Scoped roles (branch_owner/staff) did not read branch docs above; their
+      // fee config + names are needed for the monthly statement. Rules allow a
+      // member to read their own branch.
+      try {
+        const missing = branchIds.filter((id) => !branchMeta[id]).slice(0, 100);
+        if (missing.length > 0) {
+          const snaps = await Promise.all(missing.map((id) => getDoc(doc(db, 'branches', id))));
+          snaps.forEach((snap, idx) => {
+            if (!snap.exists()) return;
+            const data = snap.data();
+            branchMeta[missing[idx]] = {
+              name: data.name || missing[idx],
+              city: data.city || '',
+              accountId: data.razorpayAccountId || `acc_Rzp_${missing[idx]}`,
+              monthlyFee: Number.isFinite(Number(data.monthlyFee))
+                ? Number(data.monthlyFee)
+                : undefined,
+            };
+          });
+        }
+      } catch {
+        warnings.push('Branch fee settings could not be loaded.');
       }
 
       // Loop 51/120: no hardcoded fallback outlets — empty scope means
@@ -444,6 +520,157 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
       // PAR-01: cancelled / fully refunded orders are excluded from every
       // aggregation below (revenue, order volume, daily chart, top items,
       // branch ledger, hourly rush, channel split, delivery fees).
+      // Monthly statement (fixed branch fee) — current + previous IST month.
+      // Razorpay/cash earnings come from the orders; fee/collected come from
+      // the server-written `branch_monthly_fees` ledger. A denied ledger read
+      // marks the month unavailable so the UI never shows a false 0.
+      const currentMonthKey = istMonthKey(now);
+      const previousMonthKey = previousIstMonthKey(currentMonthKey);
+
+      let statementOrders: NormOrder[] = [];
+      const statementStart = startOfIstMonthKey(previousMonthKey);
+      if (statementStart) {
+        try {
+          const statementQuery =
+            branchIds.length > 0
+              ? query(
+                  collection(db, 'orders'),
+                  where('branchId', 'in', branchIds.slice(0, FIRESTORE_IN_LIMIT)),
+                  where('createdAt', '>=', Timestamp.fromDate(statementStart)),
+                  orderBy('createdAt', 'asc'),
+                  limit(2000)
+                )
+              : query(
+                  collection(db, 'orders'),
+                  where('createdAt', '>=', Timestamp.fromDate(statementStart)),
+                  orderBy('createdAt', 'asc'),
+                  limit(2000)
+                );
+          const snap = await getDocs(statementQuery);
+          statementOrders = snap.docs
+            .map((d) => normalizeOrderDoc(d.id, d.data() as Record<string, any>))
+            .filter((o: any) => !branchIds.length || branchIds.includes(o.branchId)) as unknown as NormOrder[];
+        } catch {
+          warnings.push('Monthly statement orders could not be loaded.');
+        }
+      }
+
+      type LedgerRow = {
+        branchId: string;
+        monthKey: string;
+        feePaise: number;
+        feeCollectedPaise: number;
+      };
+      const ledgerRows = new Map<string, LedgerRow>();
+      let ledgerAvailable = true;
+      let ledgerUnavailableReason: MonthlyStatementMonth['unavailableReason'];
+      try {
+        const snap = await getDocs(
+          query(
+            collection(db, 'branch_monthly_fees'),
+            where('monthKey', 'in', [currentMonthKey, previousMonthKey]),
+            limit(500)
+          )
+        );
+        snap.docs.forEach((d) => {
+          const data = d.data() as Record<string, any>;
+          const branchId = String(data.branchId ?? '');
+          const monthKey = String(data.monthKey ?? '');
+          if (!branchId || !monthKey) return;
+          ledgerRows.set(`${monthKey}|${branchId}`, {
+            branchId,
+            monthKey,
+            feePaise: Number(data.feePaise) || 0,
+            feeCollectedPaise: Number(data.feeCollectedPaise) || 0,
+          });
+        });
+      } catch (err: any) {
+        ledgerAvailable = false;
+        ledgerUnavailableReason =
+          String(err?.code ?? '') === 'permission-denied' ||
+          /permission|insufficient/i.test(String(err?.message ?? ''))
+            ? 'not_available_for_role'
+            : 'read_failed';
+      }
+
+      const buildMonthlyStatement = (monthKey: string): MonthlyStatementMonth => {
+        const monthOrders = statementOrders.filter((o) => istMonthKey(o.createdAt) === monthKey);
+        const ids = new Set<string>();
+        branchIds.forEach((id) => ids.add(id));
+        monthOrders.forEach((o) => {
+          if (o.branchId) ids.add(String(o.branchId));
+        });
+        if (ledgerAvailable) {
+          for (const key of ledgerRows.keys()) {
+            if (key.startsWith(`${monthKey}|`)) ids.add(key.slice(monthKey.length + 1));
+          }
+        }
+
+        const rows: MonthlyStatementRow[] = [...ids]
+          .map((bid) => {
+            const branchOrders = monthOrders.filter((o) => String(o.branchId ?? '') === bid);
+            let razorpayEarnings = 0;
+            let cashEarnings = 0;
+            let courierOnCash = 0;
+            for (const o of branchOrders) {
+              const stream = orderPaymentChannel(o);
+              if (stream === 'razorpay') {
+                razorpayEarnings += orderNetEarnings(o);
+              } else if (stream === 'cash' && isCompletedOrder(o)) {
+                cashEarnings += orderNetEarnings(o);
+                courierOnCash += Number(o.deliveryFee) || 0;
+              }
+            }
+
+            const ledger = ledgerRows.get(`${monthKey}|${bid}`);
+            let fee: number | null;
+            let collected: number | null;
+            let due: number | null;
+            if (!ledgerAvailable) {
+              fee = null;
+              collected = null;
+              due = null;
+            } else {
+              fee = ledger ? ledger.feePaise / 100 : (branchMeta[bid]?.monthlyFee ?? 2500);
+              collected = ledger ? ledger.feeCollectedPaise / 100 : 0;
+              due = Math.max(0, fee - collected);
+            }
+
+            const firstOrder = branchOrders[0];
+            const accountId = branchMeta[bid]?.accountId;
+            const hasRealAccount = !!accountId && !accountId.startsWith('acc_Rzp_');
+            return {
+              branchId: bid,
+              branchName: branchMeta[bid]?.name || firstOrder?.branchName || bid,
+              city: branchMeta[bid]?.city || firstOrder?.city || '',
+              linkedAccountId: hasRealAccount ? accountId : 'unlinked',
+              linkedStatus: (hasRealAccount ? 'verified' : 'pending') as MonthlyStatementRow['linkedStatus'],
+              razorpayEarnings: Math.round(razorpayEarnings),
+              cashEarnings: Math.round(cashEarnings),
+              courierOnCash: Math.round(courierOnCash),
+              fee,
+              collected,
+              due,
+            };
+          })
+          .sort((a, b) => a.branchName.localeCompare(b.branchName));
+
+        return {
+          monthKey,
+          label: istMonthLabel(monthKey),
+          rows,
+          available: ledgerAvailable,
+          ...(ledgerUnavailableReason && !ledgerAvailable
+            ? { unavailableReason: ledgerUnavailableReason }
+            : {}),
+        };
+      };
+
+      const monthlyStatements = {
+        current: buildMonthlyStatement(currentMonthKey),
+        previous: buildMonthlyStatement(previousMonthKey),
+      };
+
       const liveOrders = billableOrders(orders) as unknown as NormOrder[];
       // Money aggregations use earnings (net of refunds and the courier fee).
       // Unpaid online orders are not sales: they stay out of item mix/delivery
@@ -683,6 +910,7 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         cashOrders,
         cashPendingOrders,
         unpaidOrders,
+        monthlyStatements,
         // Loop 51/120: real daily buckets; DEV-empty keeps the seeded demo
         // series (prod-empty is honest zeros).
         dailyRevenue: orders.length > 0 ? realDailyRevenue : seedDailyRevenue,

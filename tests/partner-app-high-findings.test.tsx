@@ -38,7 +38,7 @@ vi.mock('@/hooks/useAnalytics', () => ({
   useAnalytics: () => ({ data: undefined, isLoading: state.loading, isError: state.error, refetch: state.refetch }),
 }));
 
-import { RoyaltyLedger } from '@/components/analytics/RoyaltyLedger';
+import { MonthlyBranchStatement } from '@/components/analytics/MonthlyBranchStatement';
 import { DevDiagnosticsModal } from '@/components/admin/DevDiagnosticsModal';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { AnalyticsPage } from '@/pages/AnalyticsPage';
@@ -70,18 +70,27 @@ describe('H1: account linkage never proves KYC or settlement', () => {
     ['acc_real', 'pending'],
     ['acc_real', 'verified'],
   ] as const)('renders honest badges for %s / %s', (linkedAccountId, linkedStatus) => {
-    const branch: BranchStats = {
-      branchId: 'b1', branchName: 'Outlet', city: 'City', orders: 0, revenue: 0,
-      razorpayRevenue: 0, razorpayOrders: 0, cashRevenue: 0, cashOrders: 0,
-      cashPendingOrders: 0, unpaidOrders: 0, averageOrderValue: 0,
-      deliveryOrders: 0, takeawayOrders: 0, dineinOrders: 0, linkedAccountId, linkedStatus,
+    const row = {
+      branchId: 'b1',
+      branchName: 'Outlet',
+      city: 'City',
+      linkedAccountId,
+      linkedStatus,
+      razorpayEarnings: 0,
+      cashEarnings: 0,
+      courierOnCash: 0,
+      fee: 2500,
+      collected: 0,
+      due: 2500,
     };
-    const html = renderToStaticMarkup(<RoyaltyLedger branches={[branch]} totalRevenue={0} razorpayRevenue={0} cashRevenue={0} />);
+    const statement = { monthKey: '2026-11', label: 'November 2026', rows: [row], available: true };
+    const html = renderToStaticMarkup(
+      <MonthlyBranchStatement current={statement} previous={statement} />
+    );
     expect(html).not.toContain('KYC Verified');
     expect(html).not.toContain('Route Settled');
     expect(html).not.toContain('100% Reconciled');
     expect(html).toContain(linkedAccountId === 'unlinked' ? 'Unlinked — no Route split' : linkedStatus === 'pending' ? 'Link pending' : 'Settlement not measured');
-    if (linkedAccountId === 'unlinked') expect(html).toContain('0 Outlets Linked');
   });
 });
 

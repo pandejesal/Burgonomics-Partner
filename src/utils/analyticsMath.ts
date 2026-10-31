@@ -169,6 +169,50 @@ export function startOfIstMonth(value: Date): Date {
   return new Date(Date.UTC(parts.year, parts.month - 1, 1) - IST_OFFSET_MS);
 }
 
+/**
+ * `yyyy-MM` for the Asia/Kolkata calendar month containing `value` (F2).
+ * IST has no DST; the month flips at 18:30Z on the last day.
+ */
+const IST_MONTH_FORMAT = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Kolkata',
+  year: 'numeric',
+  month: '2-digit',
+});
+
+export function istMonthKey(value: unknown): string {
+  const ms = toMillis(value);
+  if (!Number.isFinite(ms)) return '';
+  const parts = IST_MONTH_FORMAT.formatToParts(new Date(ms));
+  const year = parts.find((p) => p.type === 'year')?.value;
+  const month = parts.find((p) => p.type === 'month')?.value;
+  return year && month ? `${year}-${month}` : '';
+}
+
+/** The IST calendar month immediately before `monthKey` (`YYYY-MM`). */
+export function previousIstMonthKey(monthKey: string): string {
+  const [year, month] = String(monthKey).split('-').map(Number);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return '';
+  return month === 1 ? `${year - 1}-12` : `${year}-${String(month - 1).padStart(2, '0')}`;
+}
+
+/** Human label for a `YYYY-MM` key, e.g. "November 2026". */
+export function istMonthLabel(monthKey: string): string {
+  const [year, month] = String(monthKey).split('-').map(Number);
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return monthKey;
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'UTC',
+    month: 'long',
+    year: 'numeric',
+  }).format(new Date(Date.UTC(year, month - 1, 1)));
+}
+
+/** 00:00 IST on the first day of a `YYYY-MM` month. */
+export function startOfIstMonthKey(monthKey: string): Date | null {
+  const [year, month] = String(monthKey).split('-').map(Number);
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return null;
+  return new Date(Date.UTC(year, month - 1, 1) - IST_OFFSET_MS);
+}
+
 function refundStatusOf(order: OrderRevenueShape): string {
   return String(order?.refundStatus ?? '').trim().toLowerCase();
 }
