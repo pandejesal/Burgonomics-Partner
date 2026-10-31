@@ -50,8 +50,11 @@ export function AnalyticsPage() {
       branchName: b.branchName,
       city: b.city,
       grossRevenue: b.revenue,
-      brandRoyalty5Percent: b.brandRoyalty,
-      netBranchPayout95Percent: b.netBranchPayout,
+      razorpayRevenue: b.razorpayRevenue,
+      razorpayOrders: b.razorpayOrders,
+      cashCounterRevenue: b.cashRevenue,
+      cashCounterOrders: b.cashOrders,
+      unpaidOrders: b.unpaidOrders,
       totalOrders: b.orders,
       averageOrderValue: b.averageOrderValue,
       deliveryOrders: b.deliveryOrders,
@@ -67,9 +70,12 @@ export function AnalyticsPage() {
       [
         { header: 'Branch Name', accessor: (r: any) => r.branchName },
         { header: 'City', accessor: (r: any) => r.city },
-        { header: 'Gross Revenue (INR)', accessor: (r: any) => r.grossRevenue },
-        { header: 'Brand Royalty Retained (5% INR)', accessor: (r: any) => r.brandRoyalty5Percent },
-        { header: 'Net Branch Payout (95% INR)', accessor: (r: any) => r.netBranchPayout95Percent },
+        { header: 'Total Earnings (INR)', accessor: (r: any) => r.grossRevenue },
+        { header: 'Razorpay Earnings (INR)', accessor: (r: any) => r.razorpayRevenue },
+        { header: 'Razorpay Orders', accessor: (r: any) => r.razorpayOrders },
+        { header: 'Cash & Counter (INR)', accessor: (r: any) => r.cashCounterRevenue },
+        { header: 'Cash & Counter Orders', accessor: (r: any) => r.cashCounterOrders },
+        { header: 'Unpaid Online Orders', accessor: (r: any) => r.unpaidOrders },
         { header: 'Total Orders', accessor: (r: any) => r.totalOrders },
         { header: 'AOV (INR)', accessor: (r: any) => r.averageOrderValue },
         { header: 'Delivery Orders', accessor: (r: any) => r.deliveryOrders },
@@ -96,7 +102,7 @@ export function AnalyticsPage() {
             </span>
           </div>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Gross sales velocity, Razorpay Route 5% royalty ledger, peak rush heatmaps, and Porter logistics audit
+            Gross sales velocity, separate Razorpay and Cash & counter earnings, peak rush heatmaps, and courier logistics audit
           </p>
         </div>
 
@@ -151,23 +157,31 @@ export function AnalyticsPage() {
         />
         <div className="bg-surface p-5 rounded-2xl border border-border flex flex-col justify-between shadow-xl">
           <div className="flex items-center justify-between text-zinc-400 text-xs font-bold">
-            <span>Brand Royalty (5%)</span>
+            <span>Razorpay Earnings</span>
             <Building className="w-4 h-4 text-purple-400" />
           </div>
           <div className="font-mono font-black text-xl text-purple-400 mt-2">
-            ₹{analytics.brandRoyaltyEarned.toLocaleString()}
+            ₹{analytics.razorpayRevenue.toLocaleString()}
           </div>
-          <div className="text-[10px] text-zinc-400 mt-1">Headquarters Licensing Fee</div>
+          <div className="text-[10px] text-zinc-400 mt-1">
+            {analytics.razorpayOrders} gateway-paid order{analytics.razorpayOrders === 1 ? '' : 's'}
+          </div>
         </div>
         <div className="bg-surface p-5 rounded-2xl border border-border flex flex-col justify-between shadow-xl">
           <div className="flex items-center justify-between text-zinc-400 text-xs font-bold">
-            <span>Net Branch Payout (95%)</span>
+            <span>Cash &amp; Counter</span>
             <Store className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="font-mono font-black text-xl text-emerald-400 mt-2">
-            ₹{analytics.netBranchPayoutTotal.toLocaleString()}
+            ₹{analytics.cashRevenue.toLocaleString()}
           </div>
-          <div className="text-[10px] text-zinc-400 mt-1">Direct to Linked Accounts</div>
+          <div className="text-[10px] text-zinc-400 mt-1">
+            {analytics.cashOrders} completed order{analytics.cashOrders === 1 ? '' : 's'}
+            {analytics.cashPendingOrders > 0
+              ? ` · ${analytics.cashPendingOrders} in progress (not earned)`
+              : ''}
+            {analytics.unpaidOrders > 0 ? ` · ${analytics.unpaidOrders} unpaid (₹0)` : ''}
+          </div>
         </div>
       </div>
 
@@ -186,12 +200,12 @@ export function AnalyticsPage() {
         <TopItems items={analytics.topItems} />
       </div>
 
-      {/* Row 3: Razorpay Route Royalty Ledger */}
+      {/* Row 3: per-branch earnings by payment stream */}
       <RoyaltyLedger
         branches={analytics.branchStats}
         totalRevenue={analytics.totalRevenue}
-        brandRoyalty={analytics.brandRoyaltyEarned}
-        netBranchPayout={analytics.netBranchPayoutTotal}
+        razorpayRevenue={analytics.razorpayRevenue}
+        cashRevenue={analytics.cashRevenue}
       />
 
       {/* Row 4: Multi-Branch Performance Benchmarking */}

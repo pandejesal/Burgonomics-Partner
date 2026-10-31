@@ -28,6 +28,7 @@ import {
 const completed = normalizeOrderDoc('ord_completed', {
   branchId: 'branch_surat_01',
   status: 'delivered',
+  paymentChannel: 'razorpay',
   items: [{ name: 'Burger', quantity: 1, price: 500 }],
   total: 500,
   createdAt: '2026-10-30T10:00:00Z',
@@ -52,27 +53,29 @@ const fullyRefunded = normalizeOrderDoc('ord_refunded', {
   createdAt: '2026-10-30T12:00:00Z',
 });
 
-describe('PAR-01 — revenue and royalty exclude void orders', () => {
+describe('PAR-01 — revenue and payment streams exclude void orders', () => {
   it('a cancelled order adds 0 revenue and is not counted as a billable order', () => {
     const summary = summarizeOrderRevenue([completed, cancelled]);
     expect(summary.totalRevenue).toBe(500);
     expect(summary.totalOrders).toBe(1);
-    expect(summary.brandRoyaltyEarned).toBe(25);
+    expect(summary.razorpayRevenue).toBe(500);
+    expect(summary.cashRevenue).toBe(0);
   });
 
   it('a fully refunded order adds 0 revenue', () => {
     const summary = summarizeOrderRevenue([completed, fullyRefunded]);
     expect(summary.totalRevenue).toBe(500);
     expect(summary.totalOrders).toBe(1);
-    expect(summary.brandRoyaltyEarned).toBe(25);
+    expect(summary.razorpayRevenue).toBe(500);
   });
 
-  it('net revenue, order count and royalty across a mixed period', () => {
+  it('net revenue and streams across a mixed period', () => {
     const summary = summarizeOrderRevenue([completed, cancelled, fullyRefunded]);
     expect(summary.totalRevenue).toBe(500);
     expect(summary.totalOrders).toBe(1);
-    expect(summary.brandRoyaltyEarned).toBe(25);
-    expect(summary.netBranchPayoutTotal).toBe(475);
+    expect(summary.razorpayRevenue).toBe(500);
+    expect(summary.razorpayOrders).toBe(1);
+    expect('brandRoyaltyEarned' in summary).toBe(false);
     expect(billableOrders([completed, cancelled, fullyRefunded])).toHaveLength(1);
   });
 
@@ -80,6 +83,7 @@ describe('PAR-01 — revenue and royalty exclude void orders', () => {
     const partiallyRefunded = normalizeOrderDoc('ord_partial', {
       branchId: 'branch_surat_01',
       status: 'delivered',
+      paymentChannel: 'razorpay',
       items: [{ name: 'Burger', quantity: 1, price: 500 }],
       total: 500,
       refundStatus: 'partially_refunded',
@@ -91,7 +95,13 @@ describe('PAR-01 — revenue and royalty exclude void orders', () => {
     // Amount-only fallback (no cumulative paise recorded).
     expect(
       summarizeOrderRevenue([
-        { status: 'delivered', total: 500, refundStatus: 'partially_refunded', refundAmount: 125 },
+        {
+          status: 'delivered',
+          total: 500,
+          paymentChannel: 'razorpay',
+          refundStatus: 'partially_refunded',
+          refundAmount: 125,
+        },
       ]).totalRevenue
     ).toBe(375);
   });

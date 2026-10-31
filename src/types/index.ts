@@ -113,6 +113,12 @@ export interface Order {
    * verified. Display-only: staff must confirm the fee before collecting cash.
    */
   deliveryFeeUnverified?: boolean;
+  /**
+   * Server-stamped top-level stream marker (F8): `"razorpay"` for a captured
+   * gateway payment. Client-written `paymentMethod`/`paymentStatus` prove
+   * nothing, so analytics and badges treat any other value as unpaid/cash.
+   */
+  paymentChannel?: string;
   total: number;
   orderType: OrderType;
   deliveryAddress?: Address;

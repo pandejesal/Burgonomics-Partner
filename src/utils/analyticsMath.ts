@@ -36,10 +36,27 @@ const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 export interface OrderRevenueShape {
   status?: string | null;
   total?: number | null;
+  deliveryFee?: number | null;
+  /** Server-stamped top-level marker; the only proof of a gateway capture. */
+  paymentChannel?: string | null;
+  /** Walk-in sentinel customer id (staff-created counter order). */
+  customerId?: string | null;
+  /** Client/staff-written tender; never proof of a gateway receipt. */
+  paymentMethod?: string | null;
   refundStatus?: string | null;
   refundAmount?: number | null;
   refundedTotalPaise?: number | null;
 }
+
+/** The two real earnings streams, plus orders that earned nothing. */
+export type PaymentStream = 'razorpay' | 'cash' | 'unpaid';
+
+/**
+ * Staff-created counter orders keep the `cust_walkin` sentinel customerId
+ * (see features/orders/utils/walkInOrder). Duplicated as a constant because
+ * this module must stay pure (no Firestore import chain).
+ */
+const WALK_IN_CUSTOMER_ID = 'cust_walkin';
 
 /** Terminal refund states: the order is fully refunded and earns nothing. */
 const FULL_REFUND_STATUSES = new Set([
@@ -47,6 +64,17 @@ const FULL_REFUND_STATUSES = new Set([
   'full_refund',
   'fully_refunded',
   'refund_completed',
+]);
+
+/** Statuses where the cash is actually in the branch's hands. */
+const COMPLETED_STATUSES = new Set([
+  'delivered',
+  'completed',
+  'complete',
+  'picked_up',
+  'pickedup',
+  'handed_over',
+  'closed',
 ]);
 
 function toMillis(value: unknown): number {
@@ -195,31 +223,111 @@ export function billableOrders<T extends OrderRevenueShape>(orders: readonly T[]
   return orders.filter((order) => !isVoidOrder(order));
 }
 
-export interface OrderRevenueSummary {
-  totalRevenue: number;
-  totalOrders: number;
-  brandRoyaltyEarned: number;
-  netBranchPayoutTotal: number;
+/**
+ * Owner decision 1 Nov 2026. Only the server-stamped top-level
+ * `paymentChannel === "razorpay"` proves a gateway capture. `paymentMethod`,
+ * `paymentStatus` and `payment.*` are client/staff-written and prove nothing:
+ * a walk-in (even with a "razorpay"/UPI tender picked by staff) and a COD order
+ * are cash & counter. Any other order without the marker is unpaid and earns
+ * nothing.
+ */
+export function orderPaymentChannel(order: OrderRevenueShape): PaymentStream {
+  if (order?.paymentChannel === 'razorpay') return 'razorpay';
+  if (order?.customerId === WALK_IN_CUSTOMER_ID) return 'cash';
+  if (order?.paymentMethod === 'cod') return 'cash';
+  return 'unpaid';
+}
+
+function deliveryFeeRupeesOf(order: OrderRevenueShape): number {
+  const fee = Number(order?.deliveryFee);
+  return Number.isFinite(fee) && fee > 0 ? fee : 0;
+}
+
+/** Cumulative refunded rupees (paise field first, then the amount fallback). */
+function refundedRupeesOf(order: OrderRevenueShape): number {
+  const paise = Number(order?.refundedTotalPaise);
+  if (Number.isFinite(paise) && paise > 0) return paise / 100;
+  const amount = Number(order?.refundAmount);
+  return Number.isFinite(amount) && amount > 0 ? amount : 0;
+}
+
+/** Cash counts as earnings only once the order is completed. */
+export function isCompletedOrder(order: OrderRevenueShape): boolean {
+  return COMPLETED_STATUSES.has(String(order?.status ?? '').trim().toLowerCase());
 }
 
 /**
- * Revenue, billable order count and the 5% brand royalty for a set of orders.
- * Cancelled and fully refunded orders contribute nothing; partially refunded
- * orders contribute their net amount.
+ * What the branch actually earns on the order (D6/D7): net revenue minus the
+ * courier fee the brand paid. A refund comes out of the courier fee first, so
+ * subtracting the fee from an already-refunded total would count it twice:
+ *   max(0, total - courierFee) - max(0, refunded - courierFee), floored at 0.
+ * Unpaid orders earn nothing.
+ */
+export function orderNetEarnings(order: OrderRevenueShape): number {
+  const stream = orderPaymentChannel(order);
+  if (stream === 'unpaid') return 0;
+  // Cash is earnings only once the customer has taken the order; otherwise it
+  // is a receivable and must never be shown as earned.
+  if (stream === 'cash' && !isCompletedOrder(order)) return 0;
+  if (isVoidOrder(order)) return 0;
+  const total = totalRupeesOf(order);
+  const courierFee = deliveryFeeRupeesOf(order);
+  const refunded = refundedRupeesOf(order);
+  const earningsBeforeRefund = Math.max(0, total - courierFee);
+  const refundBeyondCourier = Math.max(0, refunded - courierFee);
+  return Math.max(0, earningsBeforeRefund - refundBeyondCourier);
+}
+
+export interface OrderRevenueSummary {
+  totalRevenue: number;
+  totalOrders: number;
+  razorpayRevenue: number;
+  razorpayOrders: number;
+  cashRevenue: number;
+  cashOrders: number;
+  /** Non-completed counter/cash orders — a receivable, never earnings. */
+  cashPendingOrders: number;
+}
+
+/**
+ * Revenue split into the two real streams for a set of orders. Cancelled and
+ * fully refunded orders contribute nothing; partially refunded orders
+ * contribute their net amount; unpaid orders count as order volume but earn 0.
+ * Cash counts only once the order is completed — in-progress counter money is
+ * a receivable. No per-order royalty exists any more (fixed monthly fee).
  */
 export function summarizeOrderRevenue(
   orders: readonly OrderRevenueShape[]
 ): OrderRevenueSummary {
   const billable = billableOrders(orders);
-  const totalRevenue = Math.round(
-    billable.reduce((sum, order) => sum + orderNetRevenue(order), 0)
-  );
-  const totalOrders = billable.length;
-  const brandRoyaltyEarned = Math.round(totalRevenue * 0.05);
+  let razorpayRevenue = 0;
+  let razorpayOrders = 0;
+  let cashRevenue = 0;
+  let cashOrders = 0;
+  let cashPendingOrders = 0;
+
+  for (const order of billable) {
+    const stream = orderPaymentChannel(order);
+    if (stream === 'razorpay') {
+      razorpayRevenue += orderNetEarnings(order);
+      razorpayOrders += 1;
+    } else if (stream === 'cash') {
+      if (isCompletedOrder(order)) {
+        cashRevenue += orderNetEarnings(order);
+        cashOrders += 1;
+      } else {
+        cashPendingOrders += 1;
+      }
+    }
+  }
+
   return {
-    totalRevenue,
-    totalOrders,
-    brandRoyaltyEarned,
-    netBranchPayoutTotal: totalRevenue - brandRoyaltyEarned,
+    totalRevenue: Math.round(razorpayRevenue + cashRevenue),
+    totalOrders: billable.length,
+    razorpayRevenue: Math.round(razorpayRevenue),
+    razorpayOrders,
+    cashRevenue: Math.round(cashRevenue),
+    cashOrders,
+    cashPendingOrders,
   };
 }

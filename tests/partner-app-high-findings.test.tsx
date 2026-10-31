@@ -72,10 +72,11 @@ describe('H1: account linkage never proves KYC or settlement', () => {
   ] as const)('renders honest badges for %s / %s', (linkedAccountId, linkedStatus) => {
     const branch: BranchStats = {
       branchId: 'b1', branchName: 'Outlet', city: 'City', orders: 0, revenue: 0,
-      brandRoyalty: 0, netBranchPayout: 0, averageOrderValue: 0,
+      razorpayRevenue: 0, razorpayOrders: 0, cashRevenue: 0, cashOrders: 0,
+      cashPendingOrders: 0, unpaidOrders: 0, averageOrderValue: 0,
       deliveryOrders: 0, takeawayOrders: 0, dineinOrders: 0, linkedAccountId, linkedStatus,
     };
-    const html = renderToStaticMarkup(<RoyaltyLedger branches={[branch]} totalRevenue={0} brandRoyalty={0} netBranchPayout={0} />);
+    const html = renderToStaticMarkup(<RoyaltyLedger branches={[branch]} totalRevenue={0} razorpayRevenue={0} cashRevenue={0} />);
     expect(html).not.toContain('KYC Verified');
     expect(html).not.toContain('Route Settled');
     expect(html).not.toContain('100% Reconciled');

@@ -15,9 +15,11 @@ import { subDays, format } from 'date-fns';
 import { fetchAliasedStoreOrders, normalizeOrderDoc } from '@/utils/orderContract';
 import {
   billableOrders,
+  isCompletedOrder,
   istDayKey,
   istDayRange,
-  orderNetRevenue,
+  orderNetEarnings,
+  orderPaymentChannel,
   startOfIstDay,
   startOfIstMonth,
   startOfIstWeek,
@@ -46,8 +48,15 @@ export interface BranchStats {
   city: string;
   orders: number;
   revenue: number;
-  brandRoyalty: number; // 5%
-  netBranchPayout: number; // 95%
+  /** Branch earnings from gateway-paid orders (net of courier fee). */
+  razorpayRevenue: number;
+  razorpayOrders: number;
+  /** Counter/cash earnings collected at the outlet (completed orders only). */
+  cashRevenue: number;
+  cashOrders: number;
+  /** In-progress counter orders: a receivable, never earned yet. */
+  cashPendingOrders: number;
+  unpaidOrders: number;
   averageOrderValue: number;
   linkedAccountId: string;
   linkedStatus: 'active' | 'pending' | 'verified';
@@ -87,8 +96,12 @@ export interface AnalyticsResult {
   totalRevenue: number;
   totalOrders: number;
   averageOrderValue: number;
-  brandRoyaltyEarned: number; // 5%
-  netBranchPayoutTotal: number; // 95%
+  razorpayRevenue: number;
+  razorpayOrders: number;
+  cashRevenue: number;
+  cashOrders: number;
+  cashPendingOrders: number;
+  unpaidOrders: number;
   dailyRevenue: DailyRevenue[];
   topItems: TopItem[];
   branchStats: BranchStats[];
@@ -130,8 +143,12 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         totalRevenue: 0,
         totalOrders: 0,
         averageOrderValue: 0,
-        brandRoyaltyEarned: 0,
-        netBranchPayoutTotal: 0,
+        razorpayRevenue: 0,
+        razorpayOrders: 0,
+        cashRevenue: 0,
+        cashOrders: 0,
+        cashPendingOrders: 0,
+        unpaidOrders: 0,
         dailyRevenue: [],
         topItems: [],
         branchStats: [],
@@ -375,28 +392,34 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         }
       }
 
-      const totalRevenue =
-        orders.length > 0
-          ? summarizeOrderRevenue(orders).totalRevenue
-          : demo
-            ? seedDailyRevenue.reduce((s, d) => s + d.revenue, 0)
-            : 0;
+      const summary = orders.length > 0 ? summarizeOrderRevenue(orders) : null;
+      const totalRevenue = summary
+        ? summary.totalRevenue
+        : demo
+          ? seedDailyRevenue.reduce((s, d) => s + d.revenue, 0)
+          : 0;
 
       // Cancelled and fully refunded orders are not billable: they never count
-      // toward order volume (and, above, never toward revenue/royalty). A
-      // partially refunded order still counts once — its net revenue does too.
-      const totalOrders =
-        orders.length > 0
-          ? summarizeOrderRevenue(orders).totalOrders
-          : demo
-            ? seedDailyRevenue.reduce((s, d) => s + d.orders, 0)
-            : 0;
+      // toward order volume. A partially refunded order still counts once.
+      const totalOrders = summary
+        ? summary.totalOrders
+        : demo
+          ? seedDailyRevenue.reduce((s, d) => s + d.orders, 0)
+          : 0;
 
       const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 
-      // 5% Brand Royalty vs 95% Net Branch Payout
-      const brandRoyaltyEarned = Math.round(totalRevenue * 0.05);
-      const netBranchPayoutTotal = totalRevenue - brandRoyaltyEarned;
+      // Owner decision 1 Nov 2026: two real earnings streams, no per-order
+      // royalty (fixed monthly branch fee instead). Unpaid online orders earn
+      // nothing — only the server `paymentChannel === "razorpay"` marker proves
+      // a gateway capture.
+      const razorpayRevenue = summary?.razorpayRevenue ?? 0;
+      const razorpayOrders = summary?.razorpayOrders ?? 0;
+      const cashRevenue = summary?.cashRevenue ?? 0;
+      const cashOrders = summary?.cashOrders ?? 0;
+      const cashPendingOrders = summary?.cashPendingOrders ?? 0;
+      const unpaidOrders =
+        (summary?.totalOrders ?? 0) - (summary?.razorpayOrders ?? 0) - (summary?.cashOrders ?? 0) - cashPendingOrders;
 
       // Loop 51/120: everything below aggregates the REAL fetched orders.
       // The old code scaled fixed percentages (58/56 splits, 60/25/15
@@ -409,6 +432,9 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         orderType?: string;
         total?: number;
         deliveryFee?: number;
+        paymentChannel?: string;
+        customerId?: string;
+        paymentMethod?: string;
         refundStatus?: string;
         refundAmount?: number | null;
         refundedTotalPaise?: number;
@@ -419,6 +445,10 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
       // aggregation below (revenue, order volume, daily chart, top items,
       // branch ledger, hourly rush, channel split, delivery fees).
       const liveOrders = billableOrders(orders) as unknown as NormOrder[];
+      // Money aggregations use earnings (net of refunds and the courier fee).
+      // Unpaid online orders are not sales: they stay out of item mix/delivery
+      // fees and contribute 0 to every money total.
+      const earningOrders = liveOrders.filter((o) => orderPaymentChannel(o) !== 'unpaid');
       // PAR-01: IST day buckets — `toISOString()` is UTC and split the Indian
       // business day at 05:30, so early-morning orders fell on the prior day.
       const orderDay = (o: NormOrder): string => istDayKey(o.createdAt);
@@ -430,12 +460,12 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         const dayOrders = liveOrders.filter((o) => orderDay(o) === date);
         return {
           date,
-          revenue: Math.round(dayOrders.reduce((s, o) => s + orderNetRevenue(o), 0)),
+          revenue: Math.round(dayOrders.reduce((s, o) => s + orderNetEarnings(o), 0)),
           orders: dayOrders.length,
         };
       });
       const itemAgg = new Map<string, { name: string; quantity: number; revenue: number }>();
-      for (const o of liveOrders) {
+      for (const o of earningOrders) {
         for (const it of o.items || []) {
           const name = String(it?.name || "Item");
           const q = Number(it?.quantity) || 0;
@@ -459,7 +489,21 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         }));
       const branchAgg = new Map<
         string,
-        { name: string; city: string; orders: number; revenue: number; delivery: number; takeaway: number; dinein: number }
+        {
+          name: string;
+          city: string;
+          orders: number;
+          revenue: number;
+          razorpayRevenue: number;
+          razorpayOrders: number;
+          cashRevenue: number;
+          cashOrders: number;
+          cashPendingOrders: number;
+          unpaidOrders: number;
+          delivery: number;
+          takeaway: number;
+          dinein: number;
+        }
       >();
       for (const o of liveOrders) {
         const bid = String(o.branchId || "unassigned");
@@ -468,12 +512,33 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
           city: String(o.city || branchMeta[bid]?.city || ""),
           orders: 0,
           revenue: 0,
+          razorpayRevenue: 0,
+          razorpayOrders: 0,
+          cashRevenue: 0,
+          cashOrders: 0,
+          cashPendingOrders: 0,
+          unpaidOrders: 0,
           delivery: 0,
           takeaway: 0,
           dinein: 0,
         };
         cur.orders += 1;
-        cur.revenue += orderNetRevenue(o);
+        const earnings = orderNetEarnings(o);
+        cur.revenue += earnings;
+        const stream = orderPaymentChannel(o);
+        if (stream === "razorpay") {
+          cur.razorpayRevenue += earnings;
+          cur.razorpayOrders += 1;
+        } else if (stream === "cash") {
+          if (isCompletedOrder(o)) {
+            cur.cashRevenue += earnings;
+            cur.cashOrders += 1;
+          } else {
+            cur.cashPendingOrders += 1;
+          }
+        } else {
+          cur.unpaidOrders += 1;
+        }
         const ch = String(o.orderType || "delivery");
         if (ch === "takeaway") cur.takeaway += 1;
         else if (ch === "dinein") cur.dinein += 1;
@@ -486,10 +551,9 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
       // food photos for items never ordered.
       const topItems: TopItem[] = realTopItems;
 
-      // Multi-Branch Stats & Royalty Ledger — real per-branch grouping. The
-      // old code split totals 58/56 with fabricated account IDs + "verified"
-      // statuses + fixed channel shares. Royalty stays a computed 5% policy
-      // rate; linked accounts show the real Razorpay id or 'unlinked'.
+      // Multi-Branch Stats — real per-branch grouping, split into the two
+      // earnings streams. No per-order royalty: the owner replaced it with a
+      // fixed monthly branch fee (see the monthly statement).
       const branchStats: BranchStats[] = [...branchAgg.entries()].map(([bid, b]) => {
         const realAccount = branchMeta[bid]?.accountId;
         const hasRealAccount = !!realAccount && !realAccount.startsWith('acc_Rzp_');
@@ -499,8 +563,12 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
           city: b.city,
           orders: b.orders,
           revenue: Math.round(b.revenue),
-          brandRoyalty: Math.round(b.revenue * 0.05),
-          netBranchPayout: Math.round(b.revenue * 0.95),
+          razorpayRevenue: Math.round(b.razorpayRevenue),
+          razorpayOrders: b.razorpayOrders,
+          cashRevenue: Math.round(b.cashRevenue),
+          cashOrders: b.cashOrders,
+          cashPendingOrders: b.cashPendingOrders,
+          unpaidOrders: b.unpaidOrders,
           averageOrderValue: b.orders > 0 ? Math.round(b.revenue / b.orders) : 0,
           linkedAccountId: hasRealAccount ? realAccount : 'unlinked',
           linkedStatus: hasRealAccount ? 'verified' : 'pending',
@@ -527,7 +595,7 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         const h = d.getHours();
         const cur = hourAgg.get(h) || { orders: 0, revenue: 0 };
         cur.orders += 1;
-        cur.revenue += orderNetRevenue(o as any);
+        cur.revenue += orderNetEarnings(o as any);
         hourAgg.set(h, cur);
       }
       const hourlyRush: HourlyRushData[] = Array.from({ length: 24 }, (_, hour) => {
@@ -551,7 +619,7 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         const ch = String((o as any).orderType || "delivery");
         const slot = ch === "takeaway" ? chanAgg.takeaway : ch === "dinein" ? chanAgg.dinein : chanAgg.delivery;
         slot.orders += 1;
-        slot.revenue += orderNetRevenue(o as any);
+        slot.revenue += orderNetEarnings(o as any);
       }
       const pct = (n: number) => (totalOrders > 0 ? Math.round((n / totalOrders) * 100) : 0);
       const ticket = (rev: number, n: number) => (n > 0 ? Math.round(rev / n) : 0);
@@ -585,7 +653,7 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
       // Logistics Margin Summary — delivery fees really collected; Porter
       // invoice costs are UNKNOWN (no porter billing source): 0 with margin
       // equal to collected, never a fabricated ₹31/trip cost.
-      const deliveryFeesCollected = liveOrders
+      const deliveryFeesCollected = earningOrders
         .filter((o) => String((o as any).orderType || "delivery") === "delivery")
         .reduce((s, o) => s + (Number((o as any).deliveryFee) || 0), 0);
       const deliveryOrders = chanAgg.delivery.orders;
@@ -609,8 +677,12 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         totalOrders,
         warnings,
         averageOrderValue: Math.round(averageOrderValue),
-        brandRoyaltyEarned,
-        netBranchPayoutTotal,
+        razorpayRevenue,
+        razorpayOrders,
+        cashRevenue,
+        cashOrders,
+        cashPendingOrders,
+        unpaidOrders,
         // Loop 51/120: real daily buckets; DEV-empty keeps the seeded demo
         // series (prod-empty is honest zeros).
         dailyRevenue: orders.length > 0 ? realDailyRevenue : seedDailyRevenue,

@@ -316,6 +316,9 @@ export function normalizeOrderDoc(id: string, data: Record<string, any>): Order 
     // be verified; the KDS card and order detail must warn staff before they
     // collect cash. Passed through verbatim, never inferred.
     ...(data.deliveryFeeUnverified === true ? { deliveryFeeUnverified: true } : {}),
+    // Server-stamped payment stream marker. Only "razorpay" proves a gateway
+    // capture; every other value (or absence) is handled by analyticsMath.
+    ...(typeof data.paymentChannel === 'string' ? { paymentChannel: data.paymentChannel } : {}),
     total: num(data.total ?? totals.grandTotal),
     orderType: (data.orderType ?? data.fulfillment ?? 'delivery') as Order['orderType'],
     // Delivery (customer app) saves the address at `data.address`, never at
