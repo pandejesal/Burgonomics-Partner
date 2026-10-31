@@ -11,9 +11,13 @@ import {
 } from 'lucide-react';
 import type { OrderStatus, OrderType } from '@/types';
 
+export type PaymentFilter = 'all' | 'razorpay' | 'cash' | 'unpaid';
+
 interface OrderFiltersBarProps {
   channelFilter: OrderType | 'all';
   onChannelChange: (channel: OrderType | 'all') => void;
+  paymentFilter: PaymentFilter;
+  onPaymentChange: (payment: PaymentFilter) => void;
   statusFilter: OrderStatus | 'all';
   onStatusChange: (status: OrderStatus | 'all') => void;
   dateRange: 'today' | 'week' | 'month' | 'all';
@@ -39,6 +43,8 @@ const STATUS_CHIPS: Array<{ key: OrderStatus | 'all'; label: string }> = [
 export function OrderFiltersBar({
   channelFilter,
   onChannelChange,
+  paymentFilter,
+  onPaymentChange,
   statusFilter,
   onStatusChange,
   dateRange,
@@ -157,6 +163,39 @@ export function OrderFiltersBar({
             <UtensilsCrossed className="w-3.5 h-3.5" />
             <span>Dine-In</span>
           </button>
+        </div>
+
+        {/* Payment stream chips: Razorpay / Cash & counter / Unpaid */}
+        <div
+          className="flex items-center gap-1.5 overflow-x-auto max-w-full pb-1 lg:pb-0"
+          role="group"
+          aria-label="Filter by payment stream"
+        >
+          {(
+            [
+              { key: 'all', label: 'All Payments' },
+              { key: 'razorpay', label: 'Razorpay' },
+              { key: 'cash', label: 'Cash & counter' },
+              { key: 'unpaid', label: 'Unpaid' },
+            ] as const
+          ).map((chip) => {
+            const isActive = paymentFilter === chip.key;
+            return (
+              <button
+                key={chip.key}
+                type="button"
+                onClick={() => onPaymentChange(chip.key)}
+                aria-pressed={isActive}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer shrink-0 ${
+                  isActive
+                    ? 'bg-purple-900/60 text-purple-200 border-purple-500/60'
+                    : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white hover:border-neutral-700'
+                }`}
+              >
+                {chip.label}
+              </button>
+            );
+          })}
         </div>
 
         {/* Status Chips */}

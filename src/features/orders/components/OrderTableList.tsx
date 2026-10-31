@@ -11,6 +11,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { OrderStatusBadge } from './OrderStatusBadge';
+import { orderPaymentChannel } from '@/utils/analyticsMath';
 import type { Order, OrderStatus } from '@/types';
 
 interface OrderTableListProps {
@@ -161,7 +162,31 @@ export function OrderTableList({
 
                 {/* Payment Mode */}
                 <td className="py-3 px-4">
-                  <span className="capitalize font-bold text-[11px] text-neutral-300 block">
+                  {(() => {
+                    const stream = orderPaymentChannel(order);
+                    const meta =
+                      stream === 'razorpay'
+                        ? { label: 'Razorpay', cls: 'bg-purple-500/20 text-purple-300 border-purple-500/40' }
+                        : stream === 'cash'
+                          ? { label: 'Cash', cls: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' }
+                          : { label: 'Unpaid', cls: 'bg-amber-500/20 text-amber-300 border-amber-500/40' };
+                    return (
+                      <span
+                        data-payment-stream={stream}
+                        title={
+                          stream === 'razorpay'
+                            ? 'Gateway payment confirmed by the server'
+                            : stream === 'cash'
+                              ? 'Collected at the counter / cash on delivery'
+                              : 'No server gateway marker — earns nothing'
+                        }
+                        className={`inline-flex items-center px-2 py-0.5 rounded border text-[10px] font-black uppercase tracking-wider ${meta.cls}`}
+                      >
+                        {meta.label}
+                      </span>
+                    );
+                  })()}
+                  <span className="capitalize font-bold text-[11px] text-neutral-300 block mt-1">
                     {order.paymentMethod === 'cod'
                       ? 'Cash'
                       : order.paymentMethod === 'upi'

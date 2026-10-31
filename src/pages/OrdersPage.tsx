@@ -11,6 +11,8 @@ import {
 } from '@/features/orders';
 import { useQueryClient } from '@tanstack/react-query';
 import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
+import { orderPaymentChannel } from '@/utils/analyticsMath';
+import type { PaymentFilter } from '@/features/orders/components/OrderFiltersBar';
 import {
   ChefHat,
   Download,
@@ -24,6 +26,7 @@ export function OrdersPage() {
   const { user } = useAuthStore();
 
   const [channelFilter, setChannelFilter] = useState<OrderType | 'all'>('all');
+  const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('all');
   const [statusFilter, setStatusFilter] = useState<OrderStatus | 'all'>('all');
   const [dateRange, setDateRange] = useState<'today' | 'week' | 'month' | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -42,6 +45,11 @@ export function OrdersPage() {
     return orders.filter((o) => {
       // 1. Channel Filter
       if (channelFilter !== 'all' && o.orderType !== channelFilter) {
+        return false;
+      }
+
+      // 1b. Payment stream (only the server marker proves Razorpay)
+      if (paymentFilter !== 'all' && orderPaymentChannel(o) !== paymentFilter) {
         return false;
       }
 
@@ -66,7 +74,7 @@ export function OrdersPage() {
 
       return true;
     });
-  }, [orders, channelFilter, statusFilter, searchQuery]);
+  }, [orders, channelFilter, paymentFilter, statusFilter, searchQuery]);
 
   const handleExportCsv = () => {
     exportToCsv('Burgonomics_Live_Orders_Report', filteredOrders, [
@@ -78,6 +86,7 @@ export function OrdersPage() {
       { header: 'Order Type', accessor: (o) => o.orderType },
       { header: 'Status', accessor: (o) => o.status },
       { header: 'Payment Method', accessor: (o) => o.paymentMethod },
+      { header: 'Payment Stream', accessor: (o) => orderPaymentChannel(o) },
       { header: 'Payment Status', accessor: (o) => o.paymentStatus },
       { header: 'Subtotal (INR)', accessor: (o) => o.subtotal },
       { header: 'Tax (INR)', accessor: (o) => o.tax },
@@ -151,6 +160,8 @@ export function OrdersPage() {
       <OrderFiltersBar
         channelFilter={channelFilter}
         onChannelChange={setChannelFilter}
+        paymentFilter={paymentFilter}
+        onPaymentChange={setPaymentFilter}
         statusFilter={statusFilter}
         onStatusChange={setStatusFilter}
         dateRange={dateRange}
@@ -184,6 +195,7 @@ export function OrdersPage() {
         onDispatchPorter={handleDispatchPorter}
         onClearFilters={() => {
           setChannelFilter('all');
+          setPaymentFilter('all');
           setStatusFilter('all');
           setSearchQuery('');
         }}
