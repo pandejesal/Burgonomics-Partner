@@ -6,7 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 const state = vi.hoisted(() => ({ role: undefined as string | undefined, rows: [] as Record<string, unknown>[], hook: 0, resolve: vi.fn(async () => ({ id: 'dis1' })), reconciliation: { reconciliationStatus: 'unavailable', discrepancies: [] as { paymentId: string; reason: string }[] } }));
 vi.mock('react', async (original) => {
   const actual = await original<typeof React>();
-  return { ...actual, useState: (initial: unknown) => [state.hook++ === 0 ? state.rows : typeof initial === 'function' ? initial() : initial, vi.fn()], useEffect: vi.fn(), useMemo: (fn: () => unknown) => fn() };
+  return { ...actual, useState: (initial: unknown) => [state.hook++ === 0 ? state.rows : typeof initial === 'function' ? initial() : initial, vi.fn()], useEffect: vi.fn(), useMemo: (fn: () => unknown) => fn(), useRef: (initial: unknown) => ({ current: initial }) };
 });
 vi.mock('@/admin/hooks/useAdmin', () => ({ useAdmin: () => ({ role: state.role }) }));
 vi.mock('@/admin/pages/paymentsData', () => ({ paymentStorage: { getDuplicates: () => [] } }));
