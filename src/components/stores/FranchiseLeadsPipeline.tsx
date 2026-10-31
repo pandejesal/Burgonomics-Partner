@@ -16,6 +16,7 @@ import {
   Search,
   ExternalLink,
   Store,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface FranchiseLeadsPipelineProps {
@@ -23,7 +24,7 @@ interface FranchiseLeadsPipelineProps {
 }
 
 export function FranchiseLeadsPipeline({ onConvertToBranch }: FranchiseLeadsPipelineProps) {
-  const { leads, isLoading, updateLeadStatus } = useFranchiseLeads();
+  const { leads, isLoading, error, updateLeadStatus } = useFranchiseLeads();
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -186,6 +187,23 @@ export function FranchiseLeadsPipeline({ onConvertToBranch }: FranchiseLeadsPipe
       {/* Leads List */}
       {isLoading ? (
         <div className="p-16 text-center text-zinc-400 text-xs">Loading franchise inquiries...</div>
+      ) : error ? (
+        // A read failure is not an empty pipeline. An allowed role
+        // (brand_owner/developer) must see why the list is missing.
+        <div
+          role="alert"
+          className="text-center py-16 bg-surface rounded-2xl border border-rose-800/70 p-8 space-y-3"
+        >
+          <AlertTriangle className="w-12 h-12 mx-auto text-rose-400" aria-hidden="true" />
+          <h3 className="font-bold text-white text-sm">Could not load franchise inquiries</h3>
+          <p className="text-xs text-zinc-400 max-w-md mx-auto">
+            This is a read failure, not an empty pipeline. Retry after checking the connection —
+            if it persists, the account may be missing franchise-lead read access.
+          </p>
+          <p className="text-[10px] font-mono text-rose-300 break-words">
+            {error instanceof Error ? error.message : String(error)}
+          </p>
+        </div>
       ) : filteredLeads.length === 0 ? (
         <div className="text-center py-16 bg-surface rounded-2xl border border-border p-8 space-y-3">
           <Users className="w-12 h-12 mx-auto text-zinc-600" />

@@ -50,6 +50,18 @@ export function canAccessRoute(role: UserRole | undefined, pathname: string): bo
 }
 
 /**
+ * Roles the canonical firestore.rules allow to read franchise lead PII:
+ * `isBrandOwner()` is brand_owner + developer ONLY. branch_owner, branch_staff,
+ * support and regional_manager are denied, so franchise UI must not be offered
+ * to them (a denied read otherwise looks like an empty pipeline).
+ */
+export const FRANCHISE_LEAD_READ_ROLES: UserRole[] = ['brand_owner', 'developer'];
+
+export function canReadFranchiseLeads(role: UserRole | undefined): boolean {
+  return !!role && FRANCHISE_LEAD_READ_ROLES.includes(role);
+}
+
+/**
  * Console roles that may hold a partner session. 'customer' is excluded by
  * design (denied above) — it never appears in sidebar/header navigation.
  */

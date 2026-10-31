@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useBranches, type CreateBranchInput } from '@/hooks/useBranches';
 import { useAuthStore } from '@/stores/authStore';
+import { canReadFranchiseLeads } from '@/core/auth/routePolicy';
 import { BranchConfigModal } from '@/features/branches/components/BranchConfigModal';
 import { BranchSettingsModal } from '@/components/stores/BranchSettingsModal';
 import { FranchiseLeadsPipeline } from '@/components/stores/FranchiseLeadsPipeline';
@@ -63,6 +64,12 @@ export function BranchesPage() {
 
   const isGlobalRole =
     user?.role === 'brand_owner' || user?.role === 'developer' || user?.role === 'support';
+
+  // Franchise lead PII is readable by brand roles only (canonical rules:
+  // isBrandOwner() = brand_owner + developer). support/regional_manager reach
+  // /branches but must not be offered a tab that can only fail or show empty.
+  const canSeeFranchiseLeads = canReadFranchiseLeads(user?.role);
+  const showFranchiseTab = canSeeFranchiseLeads && activeTab === 'franchise_leads';
 
   const canEditBranch = (branchId: string) => {
     if (isGlobalRole) return true;
@@ -185,21 +192,23 @@ export function BranchesPage() {
           <Sparkles className="w-3.5 h-3.5 text-amber-400" />
           <span>Coming Soon ({branches.filter((b) => b.status === 'coming_soon').length})</span>
         </button>
-        <button
-          onClick={() => setActiveTab('franchise_leads')}
-          className={`min-h-[44px] px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center space-x-1.5 ${
-            activeTab === 'franchise_leads'
-              ? 'bg-[#0E4825] text-white shadow-sm border border-[#4ADE80]/30'
-              : 'bg-[#112415] text-zinc-400 hover:text-white border border-[#1E3A24]'
-          }`}
-        >
-          <Users className="w-3.5 h-3.5 text-cyan-400" />
-          <span>Franchise Leads (CRM)</span>
-        </button>
+        {canSeeFranchiseLeads && (
+          <button
+            onClick={() => setActiveTab('franchise_leads')}
+            className={`min-h-[44px] px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer flex items-center space-x-1.5 ${
+              activeTab === 'franchise_leads'
+                ? 'bg-[#0E4825] text-white shadow-sm border border-[#4ADE80]/30'
+                : 'bg-[#112415] text-zinc-400 hover:text-white border border-[#1E3A24]'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Franchise Leads (CRM)</span>
+          </button>
+        )}
       </div>
 
-      {/* Render Tab 4: Franchise Leads CRM */}
-      {activeTab === 'franchise_leads' ? (
+      {/* Render Tab 4: Franchise Leads CRM (brand roles only) */}
+      {showFranchiseTab ? (
         <FranchiseLeadsPipeline onConvertToBranch={handleConvertToBranch} />
       ) : (
         /* Render Tabs 1, 2, 3: Branches Grid */

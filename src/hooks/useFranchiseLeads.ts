@@ -46,7 +46,11 @@ export function useFranchiseLeads() {
           })) as FranchiseLead[];
         }
       } catch (err) {
-        console.warn('Fallback to seed franchise leads:', err);
+        // A denied or failed read must never masquerade as "no leads". The
+        // pipeline renders an honest error for the allowed roles
+        // (brand_owner/developer); DEV seed data below is only for a
+        // genuinely empty collection, never for a rejection.
+        throw err;
       }
 
       // Rich seed franchise applications — DEV-ONLY. These carry
