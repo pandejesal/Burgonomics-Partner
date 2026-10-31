@@ -11,11 +11,17 @@
  * `refundStatus`, `refundAmount` (rupees) and `refundedTotalPaise`.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { normalizeOrderDoc } from '../src/utils/orderContract';
 import {
   billableOrders,
   istDayKey,
   istDayRange,
+  orderNetRevenue,
+  startOfIstDay,
+  startOfIstMonth,
+  startOfIstWeek,
   summarizeOrderRevenue,
 } from '../src/utils/analyticsMath';
 
@@ -115,5 +121,61 @@ describe('PAR-01 — daily buckets follow Asia/Kolkata, not the device timezone'
       '2026-10-31',
       '2026-11-01',
     ]);
+  });
+});
+
+/**
+ * PAR-01b — the FETCH WINDOW must be anchored to IST too. startOfWeek /
+ * startOfMonth use the device timezone, so on a non-IST device the window edge
+ * (and the `createdAt >= startTimestamp` query) disagreed with the IST buckets.
+ */
+describe('PAR-01b — query window anchored to Asia/Kolkata', () => {
+  it('starts the month on the IST first, not the device first', () => {
+    // 2026-10-31T19:00Z is 2026-11-01 00:30 IST → November start = 18:30Z.
+    expect(startOfIstMonth(new Date('2026-10-31T19:00:00Z')).toISOString()).toBe(
+      '2026-10-31T18:30:00.000Z'
+    );
+    // One second earlier it is still 23:59:59 IST on 31 Oct → October start.
+    expect(startOfIstMonth(new Date('2026-10-31T18:29:59Z')).toISOString()).toBe(
+      '2026-09-30T18:30:00.000Z'
+    );
+  });
+
+  it('starts the week on Monday 00:00 IST across the boundary', () => {
+    // 2026-11-01T20:00Z is Mon 2026-11-02 01:30 IST → Monday 2 Nov 00:00 IST.
+    expect(startOfIstWeek(new Date('2026-11-01T20:00:00Z')).toISOString()).toBe(
+      '2026-11-01T18:30:00.000Z'
+    );
+    // One second earlier it is Sun 1 Nov 23:59:59 IST → Monday 26 Oct IST.
+    expect(startOfIstWeek(new Date('2026-11-01T18:29:59Z')).toISOString()).toBe(
+      '2026-10-25T18:30:00.000Z'
+    );
+  });
+
+  it('flips the IST day exactly at 18:30Z', () => {
+    expect(startOfIstDay(new Date('2026-10-30T18:29:59Z')).toISOString()).toBe(
+      '2026-10-29T18:30:00.000Z'
+    );
+    expect(startOfIstDay(new Date('2026-10-30T18:30:00Z')).toISOString()).toBe(
+      '2026-10-30T18:30:00.000Z'
+    );
+  });
+
+  it('useAnalytics uses the IST anchors for its fetch window', () => {
+    const source = readFileSync(
+      fileURLToPath(new URL('../src/hooks/useAnalytics.ts', import.meta.url)),
+      'utf8'
+    );
+    expect(source).toContain('startOfIstWeek(now)');
+    expect(source).toContain('startOfIstMonth(now)');
+    // The device-timezone anchors are gone from the window calculation.
+    expect(source).not.toContain('startOfWeek(now');
+    expect(source).not.toContain('startOfMonth(now');
+  });
+
+  it('net revenue helper still nets a partial refund', () => {
+    expect(orderNetRevenue({ status: 'delivered', total: 500, refundedTotalPaise: 12500 })).toBe(
+      375
+    );
   });
 });

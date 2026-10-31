@@ -29,6 +29,9 @@ const IST_DAY_FORMAT = new Intl.DateTimeFormat('en-CA', {
 
 const MS_PER_DAY = 86_400_000;
 
+/** India has no DST: Asia/Kolkata is a fixed UTC+05:30. */
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
 /** Minimal order shape the money helpers need (raw or normalized). */
 export interface OrderRevenueShape {
   status?: string | null;
@@ -96,6 +99,46 @@ export function istDayRange(now: Date, days: number): string[] {
     range.push(new Date(anchor - i * MS_PER_DAY).toISOString().slice(0, 10));
   }
   return range;
+}
+
+/** IST calendar parts of an instant (null when the value is not a timestamp). */
+function istDayParts(value: unknown): { year: number; month: number; day: number } | null {
+  const key = istDayKey(value);
+  if (!key) return null;
+  const [year, month, day] = key.split('-').map(Number);
+  if (![year, month, day].every((part) => Number.isFinite(part))) return null;
+  return { year, month, day };
+}
+
+/**
+ * PAR-01b: fetch-window anchors. The bucket keys above are IST days, so the
+ * window edge must be an IST midnight too — otherwise a non-IST device asks
+ * Firestore for a window that starts on a different day than the buckets show.
+ * `startOfWeek`/`startOfMonth` from date-fns use the device timezone.
+ */
+export function startOfIstDay(value: Date): Date {
+  const parts = istDayParts(value);
+  if (!parts) return value;
+  return new Date(
+    Date.UTC(parts.year, parts.month - 1, parts.day) - IST_OFFSET_MS
+  );
+}
+
+/** Monday 00:00 IST of the week containing `value`. */
+export function startOfIstWeek(value: Date): Date {
+  const parts = istDayParts(value);
+  if (!parts) return value;
+  const dayAnchor = Date.UTC(parts.year, parts.month - 1, parts.day);
+  const weekday = new Date(dayAnchor).getUTCDay(); // 0=Sun … 6=Sat
+  const daysSinceMonday = (weekday + 6) % 7;
+  return new Date(dayAnchor - daysSinceMonday * MS_PER_DAY - IST_OFFSET_MS);
+}
+
+/** 00:00 IST on the first day of the month containing `value`. */
+export function startOfIstMonth(value: Date): Date {
+  const parts = istDayParts(value);
+  if (!parts) return value;
+  return new Date(Date.UTC(parts.year, parts.month - 1, 1) - IST_OFFSET_MS);
 }
 
 function refundStatusOf(order: OrderRevenueShape): string {

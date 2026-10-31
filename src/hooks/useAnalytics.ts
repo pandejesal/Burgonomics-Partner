@@ -11,13 +11,16 @@ import {
   orderBy,
   Timestamp,
 } from 'firebase/firestore';
-import { startOfWeek, startOfMonth, subDays, format } from 'date-fns';
+import { subDays, format } from 'date-fns';
 import { fetchAliasedStoreOrders, normalizeOrderDoc } from '@/utils/orderContract';
 import {
   billableOrders,
   istDayKey,
   istDayRange,
   orderNetRevenue,
+  startOfIstDay,
+  startOfIstMonth,
+  startOfIstWeek,
   summarizeOrderRevenue,
 } from '@/utils/analyticsMath';
 import { FIRESTORE_IN_LIMIT, isGlobalRole, resolveScopedBranchIds } from '@/utils/branchScope';
@@ -241,16 +244,22 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         warnings.push('No branch scope resolved — figures cover all outlets.');
       }
 
-      // Date range calculation
+      // Date range calculation. PAR-01b: the fetch window is anchored to
+      // Asia/Kolkata, exactly like the day buckets below — date-fns
+      // startOfWeek/startOfMonth use the DEVICE timezone, so a non-IST device
+      // asked Firestore for a window that started on a different IST day than
+      // the chart bucketed into.
       const now = new Date();
       let startDate: Date;
 
       if (period === 'week') {
-        startDate = startOfWeek(now, { weekStartsOn: 1 });
+        startDate = startOfIstWeek(now);
       } else if (period === 'month') {
-        startDate = startOfMonth(now);
+        startDate = startOfIstMonth(now);
       } else {
-        startDate = subDays(now, 365);
+        // 365 IST buckets end today, so the first bucket starts 364 IST days
+        // before today; anchor there instead of an arbitrary instant.
+        startDate = startOfIstDay(subDays(now, 364));
       }
 
       const startTimestamp = Timestamp.fromDate(startDate);
