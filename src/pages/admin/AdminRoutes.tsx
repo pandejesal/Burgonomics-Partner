@@ -1,6 +1,8 @@
 import React, { Suspense, lazy } from "react";
 import { Routes, Route, Outlet, Navigate, Link } from "react-router-dom";
 import { useAuthStore } from "@/stores/authStore";
+import { canAccessRoute } from "@/core/auth/routePolicy";
+import type { UserRole } from "@/types";
 import { AdminLayout } from "@/admin/layouts/AdminLayout";
 import { PetpoojaOperationsLayout } from "@/admin/layouts/PetpoojaOperationsLayout";
 import { SystemOperationsLayout } from "@/admin/layouts/SystemOperationsLayout";
@@ -232,8 +234,14 @@ export function AdminPortalLayout() {
  * to the console /customers/:id profile (that would presume a backend record
  * exists for a local-only reference) and renders no customer data at all —
  * it states the limitation and points at the authoritative CRM list.
+ *
+ * PAR-03b: the CRM link is role-aware. Firestore only admits brand admins to
+ * `customers`, so a regional_manager gets the orders board instead of a
+ * /customers → /dashboard bounce.
  */
 export function AdminCustomerRecordUnavailable() {
+  const { user } = useAuthStore();
+  const canOpenCrm = canAccessRoute(user?.role, "/customers");
   return (
     <div className="mx-auto max-w-xl space-y-4 py-16 text-center font-sans">
       <h1 className="text-lg font-black text-gray-900 dark:text-white">
@@ -245,17 +253,63 @@ export function AdminCustomerRecordUnavailable() {
         opened as a customer profile, and no backend record is assumed for it.
       </p>
       <p className="text-xs text-gray-500 dark:text-gray-400">
-        Open the authoritative customer CRM to find and view real customer
-        records:
+        {canOpenCrm
+          ? "Open the authoritative customer CRM to find and view real customer records:"
+          : "The customer directory is readable only by brand owners and developers. Review the order record instead:"}
       </p>
       <Link
-        to="/customers"
+        to={canOpenCrm ? "/customers" : "/admin/orders"}
         className="inline-block rounded-xl bg-[#0E4825] px-4 py-2 text-xs font-bold text-white"
       >
-        Open Customer CRM (/customers)
+        {canOpenCrm ? "Open Customer CRM (/customers)" : "Open orders (/admin/orders)"}
       </Link>
     </div>
   );
+}
+
+/**
+ * PAR-03b: where the /admin/customers entry can land for a Control Room role.
+ * Kept as a pure function so the gate is pinned by tests.
+ */
+export function customerCrmEntryTarget(
+  role: UserRole | undefined
+): "crm" | "unavailable" {
+  return canAccessRoute(role, "/customers") ? "crm" : "unavailable";
+}
+
+/**
+ * Honest fallback for portal roles the customer directory is not readable for
+ * (regional_manager). Sending them to /customers would only bounce off the
+ * route guard to /dashboard — a silent dead end.
+ */
+export function AdminCustomerDirectoryUnavailable() {
+  return (
+    <div className="mx-auto max-w-xl space-y-4 py-16 text-center font-sans">
+      <h1 className="text-lg font-black text-gray-900 dark:text-white">
+        Customer directory unavailable for this role
+      </h1>
+      <p className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+        Customer records are readable only by brand owners and developers
+        (Firestore rules gate the customers collection on brand-admin access).
+        This role keeps the order records, including each order&apos;s customer
+        details.
+      </p>
+      <Link
+        to="/admin/orders"
+        className="inline-block rounded-xl bg-[#0E4825] px-4 py-2 text-xs font-bold text-white"
+      >
+        Open orders (/admin/orders)
+      </Link>
+    </div>
+  );
+}
+
+function CustomerCrmEntry() {
+  const { user } = useAuthStore();
+  if (customerCrmEntryTarget(user?.role) === "crm") {
+    return <Navigate to="/customers" replace />;
+  }
+  return <AdminCustomerDirectoryUnavailable />;
 }
 
 export function AdminRoutes() {
@@ -306,7 +360,7 @@ export function AdminRoutes() {
             doc ids, so forwarding them would presume a backend record.
             analytics/segments/loyalty sub-routes below are preserved
             unchanged (static paths rank above the :id fallback). */}
-        <Route path="customers" element={<Navigate to="/customers" replace />} />
+        <Route path="customers" element={<CustomerCrmEntry />} />
         <Route path="customers/:id" element={<AdminCustomerRecordUnavailable />} />
         <Route
           path="customers/analytics"

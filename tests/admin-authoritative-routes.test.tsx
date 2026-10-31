@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import type { ReactNode } from 'react';
@@ -21,8 +22,13 @@ import type { ReactNode } from 'react';
  * verified through a real static render.
  */
 
+const authState = vi.hoisted(() => ({ role: null as string | null }));
+
 vi.mock('@/stores/authStore', () => ({
-  useAuthStore: () => ({ user: null, loading: false }),
+  useAuthStore: () => ({
+    user: authState.role ? { role: authState.role } : null,
+    loading: false,
+  }),
 }));
 vi.mock('@/admin/layouts/AdminLayout', () => ({
   AdminLayout: ({ children }: { children?: ReactNode }) => <>{children}</>,
@@ -45,7 +51,9 @@ vi.mock('@/pages/DeliveryQueuePage', () => ({ DeliveryQueuePage: () => null }));
 
 import {
   ADMIN_PORTAL_ROLES,
+  AdminCustomerDirectoryUnavailable,
   AdminCustomerRecordUnavailable,
+  customerCrmEntryTarget,
 } from '../src/pages/admin/AdminRoutes';
 import { canAccessRoute } from '../src/core/auth/routePolicy';
 
@@ -68,10 +76,22 @@ describe('Admin entry routes are authoritative (R22 / PA-01 / PA-02)', () => {
     expect(adminRoutesSrc).not.toMatch(/element=\{<AdminMenuPage/);
   });
 
-  it('customers entry navigates to console /customers; the local-only CRM is no longer routed or imported', () => {
+  it('customers entry routes by role instead of bouncing a denied role (PAR-03b)', () => {
+    // brand admins still land on the authoritative CRM; every role the
+    // Firestore gate denies gets the honest fallback, never a silent
+    // /customers → /dashboard dead end.
     expect(adminRoutesSrc).toContain(
+      '<Route path="customers" element={<CustomerCrmEntry />} />'
+    );
+    expect(adminRoutesSrc).not.toContain(
       '<Route path="customers" element={<Navigate to="/customers" replace />} />'
     );
+    expect(adminRoutesSrc).toContain('function CustomerCrmEntry()');
+    for (const role of ['brand_owner', 'developer'] as const) {
+      expect(customerCrmEntryTarget(role)).toBe('crm');
+    }
+    expect(customerCrmEntryTarget('regional_manager')).toBe('unavailable');
+    expect(customerCrmEntryTarget(undefined)).toBe('unavailable');
     expect(adminRoutesSrc).not.toMatch(/import[^\n]*AdminCustomersPage/);
     expect(adminRoutesSrc).not.toMatch(/import[^\n]*customersData/);
     expect(adminRoutesSrc).not.toMatch(/element=\{<AdminCustomersPage/);
@@ -106,6 +126,15 @@ describe('Admin entry routes are authoritative (R22 / PA-01 / PA-02)', () => {
 });
 
 describe('AdminCustomerRecordUnavailable renders honestly', () => {
+  // Brand admins are the only role the CRM gate admits; the link below is
+  // role-aware, so pin the allowed case here and the denied case next.
+  beforeEach(() => {
+    authState.role = 'brand_owner';
+  });
+  afterEach(() => {
+    authState.role = null;
+  });
+
   const renderAt = (entry: string) =>
     renderToStaticMarkup(
       <MemoryRouter initialEntries={[entry]}>
@@ -128,6 +157,54 @@ describe('AdminCustomerRecordUnavailable renders honestly', () => {
     expect(html).not.toContain('LEGACY-LOCAL-9');
     // The component takes no data props and renders no record fields.
     expect(html).not.toMatch(/loyalty|phone|email|totalSpent/i);
+  });
+
+  it('sends a denied role to the orders board instead of the denied CRM (PAR-03b)', () => {
+    authState.role = 'regional_manager';
+    const html = renderAt('/admin/customers/LEGACY-LOCAL-9');
+    expect(html).toContain('href="/admin/orders"');
+    expect(html).not.toContain('href="/customers"');
+  });
+});
+
+describe('AdminCustomerDirectoryUnavailable is an honest role fallback (PAR-03b)', () => {
+  it('explains the rules limit and links only to a reachable screen', () => {
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <AdminCustomerDirectoryUnavailable />
+      </MemoryRouter>
+    );
+    expect(html).toContain('Customer directory unavailable for this role');
+    expect(html).toContain('brand owners and developers');
+    expect(html).toContain('href="/admin/orders"');
+    expect(html).not.toContain('href="/customers"');
+  });
+});
+
+describe('Dead hardcoded dashboard QuickActions tile (PAR-03b)', () => {
+  const srcRoot = fileURLToPath(new URL('../src', import.meta.url));
+  const walk = (dir: string): string[] =>
+    readdirSync(dir).flatMap((entry) => {
+      const full = path.join(dir, entry);
+      return statSync(full).isDirectory() ? walk(full) : [full];
+    });
+  const files = walk(srcRoot);
+
+  it('the unused QuickActions component is gone', () => {
+    expect(existsSync(path.join(srcRoot, 'components', 'dashboard', 'QuickActions.tsx'))).toBe(
+      false
+    );
+  });
+
+  it('nothing in src still imports or references it', () => {
+    const offenders = files.filter((file) => {
+      const source = readFileSync(file, 'utf8');
+      return (
+        source.includes('components/dashboard/QuickActions') ||
+        /\bQuickActions\b(?!Bar)/.test(source)
+      );
+    });
+    expect(offenders).toEqual([]);
   });
 });
 
