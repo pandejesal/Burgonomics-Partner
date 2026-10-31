@@ -29,6 +29,7 @@ import { adminPaymentsService } from "../services/adminPaymentsService";
 import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
 import { useAdmin } from "../hooks/useAdmin";
 import { canReleaseRefund, canRejectRefund, canRetryRefund } from "./refundRoles";
+import { useDialogFocusTrap } from "@/components/ui/useDialogFocusTrap";
 import { toast } from "sonner";
 
 export const AdminRefundsPage: React.FC = () => {
@@ -60,6 +61,15 @@ export const AdminRefundsPage: React.FC = () => {
   // money action (double POST is safe server-side too: idempotent per order).
   const [isReleasing, setIsReleasing] = useState(false);
   const [isSubmittingRejection, setIsSubmittingRejection] = useState(false);
+
+  // A11Y-05: the reject-refund dialog is a modal money/decision surface —
+  // trap Tab inside it and close on Escape (unless a rejection is in flight).
+  const rejectDialogRef = useDialogFocusTrap<HTMLDivElement>({
+    active: rejectingRefund !== null,
+    onEscape: () => {
+      if (!isSubmittingRejection) setRejectingRefund(null);
+    },
+  });
 
   // RBAC checks — canonical Firestore roles only, matching the server gates
   // (functions/src/index.ts: /payments/refund + /refunds/dispose). The previous
@@ -548,17 +558,23 @@ export const AdminRefundsPage: React.FC = () => {
         {rejectingRefund && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-[2px]">
             <motion.div
+              ref={rejectDialogRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="reject-refund-title"
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
               className="bg-white dark:bg-[#1A1A1A] w-full max-w-sm rounded-[20px] p-6 shadow-2xl border border-gray-100 dark:border-gray-800"
             >
               <div className="flex items-center justify-between border-b border-gray-50 dark:border-gray-800/60 pb-3 mb-4">
-                <h3 className="text-xs font-black text-gray-900 dark:text-white uppercase tracking-tight">
+                <h3 id="reject-refund-title" className="text-xs font-black text-gray-900 dark:text-white uppercase tracking-tight">
                   Reject Refund Request
                 </h3>
                 <button
+                  type="button"
                   onClick={() => setRejectingRefund(null)}
+                  aria-label="Close reject refund dialog"
                   className="h-6 w-6 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 hover:text-gray-900"
                 >
                   <X size={12} />

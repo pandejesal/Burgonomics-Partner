@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import { X, AlertTriangle, RefreshCw, ShieldAlert, CheckCircle2 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
+import { useDialogFocusTrap } from '@/components/ui/useDialogFocusTrap';
 import type { Order } from '@/types';
 
 interface OrderCancelRefundModalProps {
@@ -32,19 +33,9 @@ export function OrderCancelRefundModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const dialogRef = useRef<HTMLDivElement>(null);
-
-  // ESC closes; focus moves into the dialog on open (hook runs before the
-  // early return below — order stays stable across renders).
-  useEffect(() => {
-    if (!isOpen) return;
-    dialogRef.current?.querySelector<HTMLElement>('select, button')?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, onClose]);
+  // A11Y-05: role/aria-modal/Escape/focus-entry came first; the shared trap
+  // adds Tab wrapping inside the dialog and focus restoration on close.
+  const dialogRef = useDialogFocusTrap<HTMLDivElement>({ active: isOpen, onEscape: onClose });
 
   if (!isOpen) return null;
 
