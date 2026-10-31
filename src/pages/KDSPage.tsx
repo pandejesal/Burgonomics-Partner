@@ -5,6 +5,7 @@ import { useAppStore } from '@/stores/appStore';
 import {
   AcousticChimePlayer,
   KDSAudioUnlockModal,
+  KDSNewOrderAlert,
   KDSOrderCard,
   KDSQuick86Drawer,
   KOTTimerBadge,
@@ -59,6 +60,8 @@ export function KDSPage() {
     recallLastOrder,
     canRecall,
     lastBumpedOrder,
+    newOrderIds,
+    dismissNewOrderAlert,
     refresh,
     lastRefreshAt,
   } = useKDSRealtimeStream();
@@ -310,6 +313,10 @@ export function KDSPage() {
           <span>⚠️ KITCHEN OFFLINE - CHECK INTERNET & RECONNECTING WEBSOCKET...</span>
         </div>
       )}
+
+      {/* Non-audio new-order signal (A11Y-14): visible banner + persistent
+          polite live region. Sound is best-effort; this is not. */}
+      <KDSNewOrderAlert orderIds={newOrderIds} onDismiss={dismissNewOrderAlert} />
 
       {/* One-time audio-unlock onboarding (dismissible, persisted) */}
       {!isMuted && !audioUnlocked && !audioIntroDismissed && (

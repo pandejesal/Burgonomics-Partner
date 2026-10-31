@@ -242,6 +242,13 @@ export function useKDSRealtimeStream() {
   const seenOrderIdsRef = useRef<Set<string>>(new Set());
   const initialLoadDoneRef = useRef<boolean>(false);
 
+  // Non-audio arrival signal (A11Y-14): ids that arrived since the previous
+  // snapshot. The chime is best-effort; the page renders these as a visible
+  // banner plus a polite live region so a muted/blocked speaker is never the
+  // difference between seeing and missing a ticket.
+  const [newOrderIds, setNewOrderIds] = useState<string[]>([]);
+  const dismissNewOrderAlert = useCallback(() => setNewOrderIds([]), []);
+
   // Online / offline listeners + outbox drain. Queued bumps replay in
   // order when connectivity returns; entries that still fail stay queued.
   // drainingRef makes the drain single-flight: its effect deps include a
@@ -379,15 +386,18 @@ export function useKDSRealtimeStream() {
 
     // Check for genuinely new orders
     let hasNewOrder = false;
+    const arrivedIds: string[] = [];
     pendingOrders.forEach((o) => {
       if (!seenOrderIdsRef.current.has(o.id)) {
         seenOrderIdsRef.current.add(o.id);
+        arrivedIds.push(o.id);
         hasNewOrder = true;
       }
     });
 
     if (hasNewOrder) {
       playKDSChime();
+      setNewOrderIds(arrivedIds);
     }
 
     // Cap the chime dedupe set: a 12h rush on a busy makeline adds thousands
@@ -708,6 +718,8 @@ export function useKDSRealtimeStream() {
     recallLastOrder,
     canRecall,
     lastBumpedOrder: recallHistory?.order || null,
+    newOrderIds,
+    dismissNewOrderAlert,
     refresh,
     lastRefreshAt,
   };
