@@ -33,9 +33,19 @@ export function OrderCancelRefundModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  // Closing is only safe when no POST is in flight: unmounting mid-request
+  // loses the failure (and any refund outcome) after the component is gone.
+  const requestClose = () => {
+    if (isSubmitting) return;
+    onClose();
+  };
+
   // A11Y-05: role/aria-modal/Escape/focus-entry came first; the shared trap
   // adds Tab wrapping inside the dialog and focus restoration on close.
-  const dialogRef = useDialogFocusTrap<HTMLDivElement>({ active: isOpen, onEscape: onClose });
+  const dialogRef = useDialogFocusTrap<HTMLDivElement>({
+    active: isOpen,
+    onEscape: requestClose,
+  });
 
   if (!isOpen) return null;
 
@@ -87,7 +97,7 @@ export function OrderCancelRefundModal({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={requestClose}
             aria-label="Close cancel order dialog"
             className="p-1.5 text-neutral-400 hover:text-white rounded-lg hover:bg-neutral-800"
           >
@@ -106,7 +116,7 @@ export function OrderCancelRefundModal({
             </p>
             <button
               type="button"
-              onClick={onClose}
+              onClick={requestClose}
               className="mt-2 px-4 py-2 rounded-xl bg-neutral-800 text-white font-bold text-xs"
             >
               Close
@@ -191,7 +201,7 @@ export function OrderCancelRefundModal({
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-800">
               <button
                 type="button"
-                onClick={onClose}
+                onClick={requestClose}
                 className="px-4 py-2 rounded-xl bg-neutral-900 text-neutral-300 hover:text-white font-bold"
               >
                 Go Back
