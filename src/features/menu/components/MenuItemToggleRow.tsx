@@ -105,6 +105,7 @@ export function MenuItemToggleRow({
             }`}
             role="switch"
             aria-checked={isAvailable}
+            aria-label={`${item.name} availability`}
           >
             <span
               className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-black shadow ring-0 transition duration-200 ease-in-out ${
