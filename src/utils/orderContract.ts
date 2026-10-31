@@ -312,6 +312,10 @@ export function normalizeOrderDoc(id: string, data: Record<string, any>): Order 
     subtotal: num(data.subtotal ?? totals.subtotal),
     tax: num(data.tax ?? totals.taxes ?? totals.tax),
     deliveryFee: num(data.deliveryFee ?? totals.deliveryFee),
+    // Backend sets this on a cash delivery order whose courier quote could not
+    // be verified; the KDS card and order detail must warn staff before they
+    // collect cash. Passed through verbatim, never inferred.
+    ...(data.deliveryFeeUnverified === true ? { deliveryFeeUnverified: true } : {}),
     total: num(data.total ?? totals.grandTotal),
     orderType: (data.orderType ?? data.fulfillment ?? 'delivery') as Order['orderType'],
     // Delivery (customer app) saves the address at `data.address`, never at

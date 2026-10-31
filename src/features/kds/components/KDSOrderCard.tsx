@@ -11,6 +11,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { KOTTimerBadge } from './KOTTimerBadge';
+import { DeliveryFeeUnverifiedWarning } from '@/features/orders/components/DeliveryFeeUnverifiedWarning';
 import { modifierLabelsFrom } from '@/utils/orderContract';
 import type { Order, OrderStatus } from '@/types';
 
@@ -147,6 +148,9 @@ export function KDSOrderCard({
           <span>Note: "{order.specialInstructions}"</span>
         </div>
       )}
+
+      {/* Cash fee warning: the courier quote could not be verified. */}
+      <DeliveryFeeUnverifiedWarning order={order} className="mx-3 my-2" />
 
       {/* Items Checklist for Chefs */}
       <div className="p-3.5 flex-1 space-y-2.5 overflow-y-auto max-h-[320px]">

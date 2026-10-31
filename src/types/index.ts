@@ -108,6 +108,11 @@ export interface Order {
   subtotal: number;
   tax: number;
   deliveryFee: number;
+  /**
+   * Backend-written on a cash delivery order whose courier quote could not be
+   * verified. Display-only: staff must confirm the fee before collecting cash.
+   */
+  deliveryFeeUnverified?: boolean;
   total: number;
   orderType: OrderType;
   deliveryAddress?: Address;

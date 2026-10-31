@@ -6,4 +6,5 @@ export * from './components/KOTPrintPreview';
 export * from './components/OrderStatusStepper';
 export * from './components/OrderCancelRefundModal';
 export * from './components/PetpoojaTestRunnerModal';
+export * from './components/DeliveryFeeUnverifiedWarning';
 export * from './services/thermalPrinterService';

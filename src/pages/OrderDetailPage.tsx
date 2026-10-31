@@ -8,6 +8,7 @@ import {
   OrderCancelRefundModal,
   OrderStatusBadge,
   PetpoojaTestRunnerModal,
+  DeliveryFeeUnverifiedWarning,
 } from '@/features/orders';
 import {
   ArrowLeft,
@@ -551,6 +552,9 @@ export function OrderDetailPage() {
                 <p>{order.specialInstructions}</p>
               </div>
             )}
+
+            {/* Cash fee warning: the courier quote could not be verified. */}
+            <DeliveryFeeUnverifiedWarning order={order} />
 
             {/* Pricing Math Summary */}
             <div className="p-4 rounded-xl bg-neutral-950 border border-neutral-800 space-y-2 text-xs text-neutral-400">
