@@ -170,10 +170,19 @@ export async function persistUserUpdate({
         'Cannot change role or outlet access: the current role is unknown. Reload the team list and retry.'
       );
     }
-    // A partial edit must carry the rest of the claim scope, otherwise the
-    // server's empty-array defaults would wipe the target's branch/city grants.
-    const branchIds = updates.branchIds ?? current?.branchIds ?? [];
-    const cityIds = updates.cityIds ?? current?.cityIds ?? [];
+    if (!current) {
+      // The row left the cached roster before save. The server treats an
+      // explicit [] as a deliberate clear, so there is no safe scope to send:
+      // refuse and write nothing.
+      throw new Error(
+        'Cannot change role or outlet access: this team member is no longer in the loaded roster. Reload the team list and retry.'
+      );
+    }
+    // A partial edit must carry the rest of the claim scope: the server treats
+    // an explicit [] as a deliberate clear, so only a resolved roster row can
+    // supply the fields this edit leaves out.
+    const branchIds = updates.branchIds ?? current.branchIds ?? [];
+    const cityIds = updates.cityIds ?? current.cityIds ?? [];
     const { partnerFunctionsApi } = await import(
       "@/services/partnerFunctionsApi"
     );

@@ -136,4 +136,19 @@ describe('PAR-02 — role and branch edits go through the claims-authoritative s
     ).rejects.toThrow(/role is unknown/);
     expect(mocks.assignUserRole).not.toHaveBeenCalled();
   });
+
+  it('PAR-02c — refuses a claims edit when the roster row is stale or gone', async () => {
+    // The row left the cached roster before save: `current` is undefined. An
+    // explicit [] is a deliberate CLEAR server-side, so falling back to it here
+    // would wipe the target's branch/city scope. Refuse and write nothing.
+    await expect(
+      persistUserUpdate({
+        userId: 'uid_stale',
+        updates: { role: 'branch_owner', name: 'Ramesh P.' },
+      })
+    ).rejects.toThrow(/no longer in the loaded roster/i);
+    expect(mocks.assignUserRole).not.toHaveBeenCalled();
+    expect(mocks.updateDoc).not.toHaveBeenCalled();
+    expect(mocks.setDoc).not.toHaveBeenCalled();
+  });
 });
