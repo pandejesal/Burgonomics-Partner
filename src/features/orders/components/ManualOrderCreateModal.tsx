@@ -77,9 +77,15 @@ export function ManualOrderCreateModal({
   if (!isOpen) return null;
 
   const subtotal = selectedItems.reduce((acc, curr) => acc + curr.item.price * curr.quantity, 0);
-  const tax = Math.round(subtotal * 0.05); // 5% GST
+  // R9 / owner decision 31 Oct 2026: menu prices are GST-INCLUSIVE. The bill
+  // must never add tax on top of the menu value — the stored `tax` is only the
+  // share already contained in it (R1: netFood * rate / (1 + rate), to paise).
+  // Packaging sits outside the GST base and is added as its own line.
+  const GST_RATE = 0.05;
+  const round2 = (value: number) => Math.round(value * 100) / 100;
+  const gstIncluded = round2((subtotal * GST_RATE) / (1 + GST_RATE));
   const packagingFee = orderType === 'takeaway' ? 15 : 0;
-  const total = subtotal + tax + packagingFee;
+  const total = round2(subtotal + packagingFee);
 
   const tenderedNumber = parseFloat(cashTendered) || 0;
   const changeDue = Math.max(0, tenderedNumber - total);
@@ -175,7 +181,7 @@ export function ManualOrderCreateModal({
       city: branchId.includes('surat') ? 'Surat' : 'Ahmedabad',
       items: orderItems,
       subtotal,
-      tax,
+      tax: gstIncluded,
       deliveryFee: 0,
       total,
       orderType,
@@ -465,8 +471,8 @@ export function ManualOrderCreateModal({
               <span className="font-mono text-white">₹{subtotal}</span>
             </div>
             <div className="flex justify-between">
-              <span>GST (5%)</span>
-              <span className="font-mono text-white">₹{tax}</span>
+              <span>GST (5%, included)</span>
+              <span className="font-mono text-white">₹{gstIncluded.toFixed(2)}</span>
             </div>
             {packagingFee > 0 && (
               <div className="flex justify-between">

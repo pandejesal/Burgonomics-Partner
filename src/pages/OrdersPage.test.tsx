@@ -30,28 +30,29 @@ describe('Prompt 21: POS Orders Management & Live Stream Suite', () => {
   });
 
   describe('2. Walk-in Counter Order Billing Math', () => {
-    it('computes exact 5% GST on subtotal and total sum', () => {
+    it('reports inclusive 5% GST without adding it to the total (R9)', () => {
       const items = [
         { price: 199, quantity: 2 }, // 398
         { price: 99, quantity: 1 },  // 99
       ];
 
       const subtotal = items.reduce((acc, curr) => acc + curr.price * curr.quantity, 0); // 497
-      const gst = Math.round(subtotal * 0.05); // 25
+      // Menu prices include GST: report the contained share, never add it.
+      const gstIncluded = Math.round(((subtotal * 0.05) / 1.05) * 100) / 100; // 23.67
       const packaging = 15;
-      const total = subtotal + gst + packaging; // 537
+      const total = subtotal + packaging; // 512
 
       expect(subtotal).toBe(497);
-      expect(gst).toBe(25);
-      expect(total).toBe(537);
+      expect(gstIncluded).toBe(23.67);
+      expect(total).toBe(512);
     });
 
     it('calculates change to return accurately from cash tendered', () => {
-      const totalBill = 537;
+      const totalBill = 512;
       const cashTendered = 600;
       const changeDue = Math.max(0, cashTendered - totalBill);
 
-      expect(changeDue).toBe(63);
+      expect(changeDue).toBe(88);
     });
   });
 

@@ -160,9 +160,10 @@ describe('ManualOrderCreateModal — tender surface (committed behavior)', () =>
     // Default cash tender shows the explicit cash-handling surface.
     expect(html).toContain('Cash Received (₹)');
     expect(html).toContain('Change to Return');
-    // Default list: burger 199 + fries 99 = 298 subtotal, 15 tax, 15 packaging = 328.
+    // Default list: burger 199 + fries 99 = 298 of GST-inclusive menu value,
+    // plus 15 packaging outside the GST base = 313 payable (R9).
     // '&' renders escaped in static markup.
-    expect(html).toContain('Place &amp; Print KOT (₹328)');
+    expect(html).toContain('Place &amp; Print KOT (₹313)');
   });
 
   it('hides the cash change calculator when UPI is the tender', () => {
@@ -206,5 +207,33 @@ describe('ManualOrderCreateModal — walk-in payment TRUTH (HONEST BEHAVIOR DOES
     const order = submitCaptured.docs[0];
     expect(order.paymentMethod).toBe('cod');
     expect(order.paymentStatus).not.toBe('completed');
+  });
+});
+
+describe('ManualOrderCreateModal — menu prices are GST-inclusive (R9)', () => {
+  it('never adds GST on top: total = subtotal + packaging, GST is the included share', () => {
+    const html = renderModal();
+
+    // Default list: 199 + 99 = 298 inclusive food value. R1 inclusive share is
+    // round2(298 * 0.05 / 1.05) = 14.19; packaging 15 is outside the GST base.
+    expect(html).toContain('GST (5%, included)');
+    expect(html).toContain('₹14.19');
+    expect(html).toContain('Place &amp; Print KOT (₹313)');
+    // The old behavior added 5% on top (298 + 15 + 15 = 328).
+    expect(html).not.toContain('₹328');
+  });
+
+  it('persists the inclusive GST share and a total with no tax added', async () => {
+    const tree = renderTree();
+    const form = findForm(tree);
+    expect(form).toBeTruthy();
+
+    await form.props.onSubmit({ preventDefault: () => {} });
+
+    expect(submitCaptured.docs).toHaveLength(1);
+    const order = submitCaptured.docs[0];
+    expect(order.subtotal).toBe(298);
+    expect(order.tax).toBe(14.19);
+    expect(order.total).toBe(313);
   });
 });
