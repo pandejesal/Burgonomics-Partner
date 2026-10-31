@@ -1,29 +1,16 @@
 import React from 'react';
 import { BellRing, X } from 'lucide-react';
+import { formatKdsOrderLabel, formatNewOrderAnnouncement } from '../newOrderAlert';
 
 interface KDSNewOrderAlertProps {
-  /** Raw order ids that arrived since the previous makeline snapshot. */
+  /** Capped ids that arrived since the previous makeline snapshot. */
   orderIds: string[];
+  /** Full burst size; defaults to the retained id count. */
+  totalCount?: number;
   onDismiss: () => void;
 }
 
-/** Same ticket label the KDS card shows (first 6 chars, uppercased). */
-export function formatKdsOrderLabel(orderId: string): string {
-  return orderId.slice(0, 6).toUpperCase();
-}
-
-/**
- * Wording for the live region. Kept pure so the announcement text is testable
- * without a DOM: one arrival is named, several are counted AND listed.
- */
-export function formatNewOrderAnnouncement(orderIds: string[]): string {
-  if (orderIds.length === 0) return '';
-  const labels = orderIds.map(formatKdsOrderLabel);
-  if (labels.length === 1) {
-    return `New order ${labels[0]} arrived on the makeline.`;
-  }
-  return `${labels.length} new orders arrived on the makeline: ${labels.join(', ')}.`;
-}
+export { formatKdsOrderLabel, formatNewOrderAnnouncement };
 
 /**
  * Non-audio new-order signal for the KDS (A11Y-14).
@@ -34,10 +21,19 @@ export function formatNewOrderAnnouncement(orderIds: string[]): string {
  * polite live region. The region is rendered (empty) even when there is
  * nothing new: screen readers only reliably announce changes to a live
  * region that was already in the accessibility tree.
+ *
+ * Only a capped tail of a large burst is rendered; the rest is reported as
+ * "(N more)" so the announcement and the banner stay bounded.
  */
-export function KDSNewOrderAlert({ orderIds, onDismiss }: KDSNewOrderAlertProps) {
-  const announcement = formatNewOrderAnnouncement(orderIds);
+export function KDSNewOrderAlert({
+  orderIds,
+  totalCount,
+  onDismiss,
+}: KDSNewOrderAlertProps) {
+  const total = totalCount ?? orderIds.length;
+  const announcement = formatNewOrderAnnouncement(orderIds, total);
   const labels = orderIds.map(formatKdsOrderLabel);
+  const overflow = Math.max(0, total - labels.length);
 
   return (
     <>
@@ -55,8 +51,9 @@ export function KDSNewOrderAlert({ orderIds, onDismiss }: KDSNewOrderAlertProps)
         <div className="bg-emerald-600 text-white px-4 py-2.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 text-sm font-black uppercase tracking-wider shadow-md z-50">
           <BellRing className="w-5 h-5 stroke-[2.5] shrink-0" aria-hidden="true" />
           <span>
-            New order received
-            {labels.length > 1 ? ` (${labels.length})` : ''} — {labels.join(', ')}
+            New order{total > 1 ? 's' : ''} received{total > 1 ? ` (${total})` : ''} —{' '}
+            {labels.join(', ')}
+            {overflow > 0 ? ` (+${overflow} more)` : ''}
           </span>
           <button
             type="button"

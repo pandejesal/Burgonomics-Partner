@@ -15,6 +15,10 @@ import {
 } from '@/utils/orderContract';
 import { FIRESTORE_IN_LIMIT, isGlobalRole, resolveScopedBranchIds } from '@/utils/branchScope';
 import { playKDSChime, stopRepeatingKDSAlarm, syncKDSAlarmState } from '@/utils/kdsAudio';
+import {
+  capNewOrderIds,
+  type KdsNewOrderAlertState,
+} from '@/features/kds/newOrderAlert';
 import type { Order, OrderStatus } from '@/types';
 
 export interface RecalledOrderHistory {
@@ -245,9 +249,11 @@ export function useKDSRealtimeStream() {
   // Non-audio arrival signal (A11Y-14): ids that arrived since the previous
   // snapshot. The chime is best-effort; the page renders these as a visible
   // banner plus a polite live region so a muted/blocked speaker is never the
-  // difference between seeing and missing a ticket.
-  const [newOrderIds, setNewOrderIds] = useState<string[]>([]);
-  const dismissNewOrderAlert = useCallback(() => setNewOrderIds([]), []);
+  // difference between seeing and missing a ticket. Only a capped tail is
+  // retained (the full burst size is kept as `total`) so an ignored banner on
+  // a long-lived tab cannot grow one aria-live string without bound.
+  const [newOrderAlert, setNewOrderAlert] = useState<KdsNewOrderAlertState | null>(null);
+  const dismissNewOrderAlert = useCallback(() => setNewOrderAlert(null), []);
 
   // Online / offline listeners + outbox drain. Queued bumps replay in
   // order when connectivity returns; entries that still fail stay queued.
@@ -397,7 +403,12 @@ export function useKDSRealtimeStream() {
 
     if (hasNewOrder) {
       playKDSChime();
-      setNewOrderIds(arrivedIds);
+      // Arrival order for the banner: activeOrders is newest-first, so reverse
+      // before trimming to keep the MOST RECENT ids when the cap applies.
+      setNewOrderAlert({
+        ids: capNewOrderIds([...arrivedIds].reverse()),
+        total: arrivedIds.length,
+      });
     }
 
     // Cap the chime dedupe set: a 12h rush on a busy makeline adds thousands
@@ -718,7 +729,8 @@ export function useKDSRealtimeStream() {
     recallLastOrder,
     canRecall,
     lastBumpedOrder: recallHistory?.order || null,
-    newOrderIds,
+    newOrderIds: newOrderAlert?.ids ?? [],
+    newOrderTotal: newOrderAlert?.total ?? 0,
     dismissNewOrderAlert,
     refresh,
     lastRefreshAt,

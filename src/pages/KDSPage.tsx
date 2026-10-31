@@ -61,6 +61,7 @@ export function KDSPage() {
     canRecall,
     lastBumpedOrder,
     newOrderIds,
+    newOrderTotal,
     dismissNewOrderAlert,
     refresh,
     lastRefreshAt,
@@ -316,7 +317,11 @@ export function KDSPage() {
 
       {/* Non-audio new-order signal (A11Y-14): visible banner + persistent
           polite live region. Sound is best-effort; this is not. */}
-      <KDSNewOrderAlert orderIds={newOrderIds} onDismiss={dismissNewOrderAlert} />
+      <KDSNewOrderAlert
+        orderIds={newOrderIds}
+        totalCount={newOrderTotal}
+        onDismiss={dismissNewOrderAlert}
+      />
 
       {/* One-time audio-unlock onboarding (dismissible, persisted) */}
       {!isMuted && !audioUnlocked && !audioIntroDismissed && (
@@ -642,4 +647,5 @@ export function KDSPage() {
 }
 
 export default KDSPage;
+
 

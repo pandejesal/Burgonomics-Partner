@@ -49,4 +49,14 @@ describe('KDSNewOrderAlert', () => {
     expect(html).toContain('New order received');
     expect(html).toContain('aria-label="Dismiss new order alert"');
   });
+
+  it('shows the capped tail plus the overflow count for a large burst', () => {
+    const ids = Array.from({ length: 10 }, (_, i) => `ord${i}abcde`);
+    const html = renderToStaticMarkup(
+      <KDSNewOrderAlert orderIds={ids} totalCount={25} onDismiss={() => {}} />
+    );
+    expect(html).toContain('(25)');
+    expect(html).toContain('+15 more');
+    expect(html).toContain('(15 more)');
+  });
 });
