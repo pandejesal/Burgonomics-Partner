@@ -559,7 +559,7 @@ export function OrderDetailPage() {
                 <span className="font-mono text-white">₹{order.subtotal || order.total}</span>
               </div>
               <div className="flex justify-between">
-                <span>GST (5%)</span>
+                <span>GST (5%, included)</span>
                 <span className="font-mono text-white">₹{order.tax || 0}</span>
               </div>
               {order.deliveryFee ? (

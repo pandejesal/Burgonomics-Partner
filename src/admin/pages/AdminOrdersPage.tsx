@@ -1181,7 +1181,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                         </div>
                       )}
                       <div className="flex items-center justify-between text-gray-500">
-                        <span>Taxes (GST 5%)</span>
+                        <span>Taxes (GST 5%, included)</span>
                         <span className="font-mono">
                           ₹
                           {(selectedOrder.totals.tax ?? selectedOrder.totals.taxes ?? 0).toFixed(2)}

@@ -643,8 +643,15 @@ export function getThermalReceiptText(
       text += `PACKAGING CHARGE        : ₹${packVal.toFixed(2).padStart(12)}\n`;
     }
     const taxVal = order.totals.tax ?? order.totals.taxes ?? 0;
-    text += `CGST (2.5%)             : ₹${(taxVal / 2).toFixed(2).padStart(12)}\n`;
-    text += `SGST (2.5%)             : ₹${(taxVal / 2).toFixed(2).padStart(12)}\n`;
+    // R1: split in paise — CGST rounds the inclusive share, SGST is the
+    // remainder, so the two always add back to the tax line exactly. (Rupee
+    // floats misround: 4.77/2*100 is 238.4999…, printing 2.38 + 2.38 and
+    // disagreeing with the tax line and the server's 2.39 + 2.38.)
+    const taxPaise = Math.round(taxVal * 100);
+    const cgstPaise = Math.round(taxPaise / 2);
+    const sgstPaise = taxPaise - cgstPaise;
+    text += `CGST (2.5%)             : ₹${(cgstPaise / 100).toFixed(2).padStart(12)}\n`;
+    text += `SGST (2.5%)             : ₹${(sgstPaise / 100).toFixed(2).padStart(12)}\n`;
     text += doubleLineSeparator + "\n";
     text += `GRAND TOTAL             : ₹${order.totals.grandTotal.toFixed(2).padStart(12)}\n`;
     text += doubleLineSeparator + "\n";
