@@ -90,7 +90,7 @@ export function DevDiagnosticsModal({ isOpen, onClose }: DevDiagnosticsModalProp
     setIsTestingSmoke(true);
     setSmokeLogs([
       '🚀 Starting End-to-End Sandbox Smoke Test...',
-      '1. Verifying Pricing Engine (5% GST + Packaging + Delivery + Route Split)... OK (grandTotal calculated)',
+      '1. Verifying Pricing Engine (GST-inclusive prices + Packaging + Delivery)... OK (grandTotal calculated)',
       '2. Creating Razorpay Order with Notes & Linked Account Split... OK (Mock rzp_order_2026)',
       '3. Simulating Payment Confirmation & Timing-Safe HMAC Verify... OK (Signature Valid)',
       '4. Executing Razorpay Route Split Transfer to Branch Account... OK (Settlement on_hold: 0)',
@@ -208,11 +208,11 @@ export function DevDiagnosticsModal({ isOpen, onClose }: DevDiagnosticsModalProp
                 </div>
 
                 <div className="bg-surface p-4 rounded-xl border border-border space-y-1">
-                  <span className="text-zinc-400 text-[10px] uppercase font-bold tracking-wider">Razorpay Route Split</span>
+                  <span className="text-zinc-400 text-[10px] uppercase font-bold tracking-wider">Razorpay Route Settlement</span>
                   <div className="text-lg font-bold text-text-secondary flex items-center space-x-2">
                     <span>Health unknown</span>
                   </div>
-                  <p className="text-[11px] text-zinc-400">Brand Royalty % vs Branch Net</p>
+                  <p className="text-[11px] text-zinc-400">Monthly fee hold vs branch transfer</p>
                 </div>
 
                 <div className="bg-surface p-4 rounded-xl border border-border space-y-1">
@@ -242,7 +242,7 @@ export function DevDiagnosticsModal({ isOpen, onClose }: DevDiagnosticsModalProp
                   <div className="p-3 bg-bg rounded-lg border border-border space-y-1">
                     <span className="font-bold text-white block">1. Dual Razorpay Verification & Route Split</span>
                     <p className="text-[11px] text-zinc-400">
-                      Payment amounts are calculated authoritatively on the server with 5% GST. Server validates timing-safe HMAC and executes split transfer to linked branch Razorpay account.
+                      Payment amounts are calculated authoritatively on the server with GST-inclusive menu prices. Server validates timing-safe HMAC and transfers the branch's Razorpay share (fixed monthly fee held first).
                     </p>
                   </div>
                   <div className="p-3 bg-bg rounded-lg border border-border space-y-1">

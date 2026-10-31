@@ -3,15 +3,15 @@
  * zero references outside the barrel — so they were deleted and only the
  * test-consumed row types live on here).
  */
-export interface BranchRoyaltyRow {
+export interface BranchMonthlyFeeRow {
   branchId: string;
   branchName: string;
   city: string;
-  grossSales: number;
-  hqRoyalty5Percent: number;
-  netBranchPayout95Percent: number;
-  linkedAccountId?: string;
-  transferStatus: 'settled' | 'pending' | 'processing';
+  razorpayEarnings: number;
+  cashEarnings: number;
+  fee: number;
+  collected: number;
+  due: number;
 }
 
 export interface HourlyBucket {

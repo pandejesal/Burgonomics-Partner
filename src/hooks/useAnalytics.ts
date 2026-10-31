@@ -214,7 +214,7 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
       // assigned branches. The old code read selectedBranchId straight from
       // localStorage (user-writable!) before any role check, so a forged
       // selection handed any branch owner the whole brand's revenue and
-      // royalty ledger; and an unassigned scoped role fell through to an
+      // fee statement; and an unassigned scoped role fell through to an
       // unfiltered all-outlets read. resolveScopedBranchIds fails closed.
       if (!isGlobalRole(user.role)) {
         branchIds = resolveScopedBranchIds(user, selectedBranchId);

@@ -236,8 +236,8 @@ export function isFullyRefundedOrder(order: OrderRevenueShape): boolean {
 }
 
 /**
- * Cancelled or fully refunded: excluded from revenue, royalty, order volume and
- * every per-day/per-branch/per-hour aggregation.
+ * Cancelled or fully refunded: excluded from revenue, payment streams, order
+ * volume and every per-day/per-branch/per-hour aggregation.
  */
 export function isVoidOrder(order: OrderRevenueShape): boolean {
   const status = String(order?.status ?? '').trim().toLowerCase();

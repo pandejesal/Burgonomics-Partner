@@ -1,47 +1,49 @@
 import { describe, it, expect } from 'vitest';
-import type { BranchRoyaltyRow } from '@/features/analytics';
+import type { BranchMonthlyFeeRow } from '@/features/analytics';
 
-describe('Prompt 33: Analytics, Sales Reporting & Franchise Royalty Ledger Suite', () => {
-  describe('1. 5% Franchise Royalty Split Formula', () => {
-    it('accurately computes 5% HQ royalty and 95% net branch payout from gross sales', () => {
-      const grossSales = 100000;
-      const hqRoyalty = grossSales * 0.05;
-      const netPayout = grossSales * 0.95;
+describe('Prompt 33: Analytics, Sales Reporting & Monthly Fee Statement Suite', () => {
+  describe('1. Fixed Monthly Branch Fee', () => {
+    it('computes Due as Fee minus Collected, never negative', () => {
+      const fee = 2500;
+      const collected = 2000;
+      const due = Math.max(0, fee - collected);
 
-      expect(hqRoyalty).toBe(5000);
-      expect(netPayout).toBe(95000);
-      expect(hqRoyalty + netPayout).toBe(grossSales);
+      expect(due).toBe(500);
+      expect(Math.max(0, 2500 - 2500)).toBe(0);
+      expect(Math.max(0, 2500 - 3000)).toBe(0);
     });
 
-    it('aggregates multi-branch franchise royalty pool accurately', () => {
-      const branchRecords: BranchRoyaltyRow[] = [
+    it('aggregates multi-branch statements with separate payment streams', () => {
+      const branchRecords: BranchMonthlyFeeRow[] = [
         {
           branchId: 'b_cg_road',
           branchName: 'Ahmedabad - CG Road',
           city: 'Ahmedabad',
-          grossSales: 50000,
-          hqRoyalty5Percent: 2500,
-          netBranchPayout95Percent: 47500,
-          transferStatus: 'settled',
+          razorpayEarnings: 50000,
+          cashEarnings: 12000,
+          fee: 2500,
+          collected: 2500,
+          due: 0,
         },
         {
           branchId: 'b_vr_mall',
           branchName: 'Surat - VR Mall',
           city: 'Surat',
-          grossSales: 80000,
-          hqRoyalty5Percent: 4000,
-          netBranchPayout95Percent: 76000,
-          transferStatus: 'settled',
+          razorpayEarnings: 1200,
+          cashEarnings: 8000,
+          fee: 2500,
+          collected: 1200,
+          due: 1300,
         },
       ];
 
-      const totalGross = branchRecords.reduce((sum, r) => sum + r.grossSales, 0);
-      const totalRoyalty = branchRecords.reduce((sum, r) => sum + r.hqRoyalty5Percent, 0);
-      const totalPayout = branchRecords.reduce((sum, r) => sum + r.netBranchPayout95Percent, 0);
+      const totalRazorpay = branchRecords.reduce((sum, r) => sum + r.razorpayEarnings, 0);
+      const totalCash = branchRecords.reduce((sum, r) => sum + r.cashEarnings, 0);
+      const totalDue = branchRecords.reduce((sum, r) => sum + r.due, 0);
 
-      expect(totalGross).toBe(130000);
-      expect(totalRoyalty).toBe(6500);
-      expect(totalPayout).toBe(123500);
+      expect(totalRazorpay).toBe(51200);
+      expect(totalCash).toBe(20000);
+      expect(totalDue).toBe(1300);
     });
   });
 
@@ -63,21 +65,23 @@ describe('Prompt 33: Analytics, Sales Reporting & Franchise Royalty Ledger Suite
   });
 
   describe('3. CSV Export Payload Formatter', () => {
-    it('formats sanitized CSV headers and data rows for financial audit', () => {
+    it('formats sanitized CSV headers and data rows for the monthly statement', () => {
       const records = [
         {
           branch: 'Ahmedabad - CG Road',
-          gross: 50000,
-          royalty: 2500,
-          payout: 47500,
+          razorpay: 50000,
+          cash: 12000,
+          fee: 2500,
+          due: 0,
         },
       ];
 
-      const csvHeader = 'Branch,Gross Sales (INR),HQ Royalty 5% (INR),Net Payout 95% (INR)';
-      const csvRow = `${records[0].branch},${records[0].gross},${records[0].royalty},${records[0].payout}`;
+      const csvHeader = 'Branch,Razorpay Earnings (INR),Cash & Counter (INR),Monthly Fee (INR),Due (INR)';
+      const csvRow = `${records[0].branch},${records[0].razorpay},${records[0].cash},${records[0].fee},${records[0].due}`;
 
-      expect(csvHeader).toContain('HQ Royalty 5%');
-      expect(csvRow).toBe('Ahmedabad - CG Road,50000,2500,47500');
+      expect(csvHeader).toContain('Cash & Counter');
+      expect(csvHeader).not.toContain('Royalty');
+      expect(csvRow).toBe('Ahmedabad - CG Road,50000,12000,2500,0');
     });
   });
 });

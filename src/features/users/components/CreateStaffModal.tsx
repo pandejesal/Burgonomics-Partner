@@ -71,7 +71,7 @@ export function CreateStaffModal({
   const getRoleDescription = (role: UserRole) => {
     switch (role) {
       case 'brand_owner':
-        return '👑 Brand Executive: Full network oversight of all 16+ branches, Route royalty financials, and staff RBAC.';
+        return '👑 Brand Executive: Full network oversight of all 16+ branches, monthly fee statements, and staff RBAC.';
       case 'regional_manager':
         return '🏢 Regional Manager: Supervise franchise store operations across assigned metro regions.';
       case 'branch_owner':
