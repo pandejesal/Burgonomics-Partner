@@ -71,6 +71,17 @@ vi.mock('@/features/orders/utils/walkInOrder', () => ({
   },
 }));
 
+const packagingState = vi.hoisted(() => ({
+  packagingFee: 15 as number | null,
+  isLoading: false,
+  error: null as string | null,
+  retry: () => {},
+}));
+
+vi.mock('@/features/orders/hooks/useWalkInPackagingFee', () => ({
+  useWalkInPackagingFee: () => packagingState,
+}));
+
 import { ManualOrderCreateModal } from '@/features/orders/components/ManualOrderCreateModal';
 
 function flattenText(node: ReactNode): string {
@@ -156,7 +167,8 @@ describe('ManualOrderCreateModal — tender surface (committed behavior)', () =>
     // All three tenders are offered from the committed source.
     expect(findButton(lastTree as ReactNode, 'Cash')).toBeTruthy();
     expect(findButton(lastTree as ReactNode, 'UPI QR')).toBeTruthy();
-    expect(findButton(lastTree as ReactNode, 'Card Machine')).toBeTruthy();
+    // Owner decision 1 Nov 2026: staff-selected tender is not a gateway receipt.
+    expect(findButton(lastTree as ReactNode, 'Card/UPI at counter')).toBeTruthy();
     // Default cash tender shows the explicit cash-handling surface.
     expect(html).toContain('Cash Received (₹)');
     expect(html).toContain('Change to Return');

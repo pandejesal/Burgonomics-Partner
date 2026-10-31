@@ -24,6 +24,7 @@ import {
   createOrderDocIfAbsent,
   generateWalkInOrderId,
 } from '@/features/orders/utils/walkInOrder';
+import { useWalkInPackagingFee } from '@/features/orders/hooks/useWalkInPackagingFee';
 
 interface ManualOrderCreateModalProps {
   isOpen: boolean;
@@ -68,6 +69,23 @@ export function ManualOrderCreateModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [phoneError, setPhoneError] = useState<string | null>(null);
 
+  // A walk-in order must be stamped with a real branch (no fallback: a wrong
+  // outlet corrupts revenue/KDS). The same id scopes the packaging quote.
+  const branchId = selectedBranchId || user?.branchIds?.[0];
+
+  // Packaging is server-owned (Petpooja-driven). Branch + order type only; a
+  // failure blocks Create instead of guessing a fee.
+  const {
+    packagingFee,
+    isLoading: packagingLoading,
+    error: packagingError,
+    retry: retryPackaging,
+  } = useWalkInPackagingFee({
+    branchId,
+    orderType,
+    enabled: isOpen && !!branchId,
+  });
+
   /** Normalized +91XXXXXXXXXX or null. Riders/KOT need a real number — never a fake default. */
   const normalizedPhone = (raw: string): string | null => {
     const digits = raw.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
@@ -84,8 +102,7 @@ export function ManualOrderCreateModal({
   const GST_RATE = 0.05;
   const round2 = (value: number) => Math.round(value * 100) / 100;
   const gstIncluded = round2((subtotal * GST_RATE) / (1 + GST_RATE));
-  const packagingFee = orderType === 'takeaway' ? 15 : 0;
-  const total = round2(subtotal + packagingFee);
+  const total = round2(subtotal + (packagingFee ?? 0));
 
   const tenderedNumber = parseFloat(cashTendered) || 0;
   const changeDue = Math.max(0, tenderedNumber - total);
@@ -117,6 +134,12 @@ export function ManualOrderCreateModal({
   const handleCreateOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedItems.length === 0) return;
+    if (packagingFee === null) {
+      setSubmitError(
+        'The server packaging fee has not loaded. Retry before creating the order — no fee is assumed.'
+      );
+      return;
+    }
 
     // Counter orders used to persist the literal '+91 ' placeholder as the
     // customer phone (dial-fail downstream, unsearchable in CRM). Normalize
@@ -131,9 +154,8 @@ export function ManualOrderCreateModal({
     setIsSubmitting(true);
 
     // Loop 49/120: no fallback branch — a walk-in order stamped to the wrong
-    // outlet corrupts branch revenue, KDS routing, and Porter dispatch.
+    // outlet corrupts branch revenue, KDS routing, and courier dispatch.
     // Block loudly when the operator has no branch context.
-    const branchId = selectedBranchId || user?.branchIds?.[0];
     if (!branchId) {
       setSubmitError(
         "No branch context — select your outlet (or ask your manager to assign one) before creating walk-in orders."
@@ -439,7 +461,7 @@ export function ManualOrderCreateModal({
                 }`}
               >
                 <CreditCard className="w-4 h-4" />
-                <span>Card Machine</span>
+                <span>Card/UPI at counter</span>
               </button>
             </div>
           </div>
@@ -474,15 +496,33 @@ export function ManualOrderCreateModal({
               <span>GST (5%, included)</span>
               <span className="font-mono text-white">₹{gstIncluded.toFixed(2)}</span>
             </div>
-            {packagingFee > 0 && (
+            {packagingLoading ? (
+              <div className="flex justify-between text-amber-300" role="status">
+                <span>Store Packaging</span>
+                <span>Loading from server…</span>
+              </div>
+            ) : packagingError ? (
+              <div className="rounded-lg border border-rose-500/50 bg-rose-950/50 p-2 text-rose-200 space-y-1" role="alert">
+                <p className="font-bold">{packagingError}</p>
+                <button
+                  type="button"
+                  onClick={retryPackaging}
+                  className="px-2.5 py-1 rounded-lg bg-rose-800 hover:bg-rose-700 text-white font-bold text-[11px] cursor-pointer"
+                >
+                  Retry packaging fee
+                </button>
+              </div>
+            ) : (
               <div className="flex justify-between">
                 <span>Store Packaging</span>
-                <span className="font-mono text-white">₹{packagingFee}</span>
+                <span className="font-mono text-white">₹{packagingFee ?? 0}</span>
               </div>
             )}
             <div className="flex justify-between pt-1.5 border-t border-neutral-800 text-sm font-black text-white">
               <span>Total Bill</span>
-              <span className="font-mono text-[#FF6600]">₹{total}</span>
+              <span className="font-mono text-[#FF6600]">
+                ₹{packagingFee === null ? '—' : total}
+              </span>
             </div>
           </div>
 
@@ -494,11 +534,20 @@ export function ManualOrderCreateModal({
           )}
           <button
             type="submit"
-            disabled={selectedItems.length === 0 || isSubmitting}
+            disabled={
+              selectedItems.length === 0 ||
+              isSubmitting ||
+              packagingLoading ||
+              packagingFee === null
+            }
             className="w-full h-12 rounded-xl bg-[#0E4825] hover:bg-[#135d30] text-emerald-300 font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer disabled:opacity-50"
           >
             <Printer className="w-4 h-4" />
-            <span>{isSubmitting ? 'Creating Order...' : `Place & Print KOT (₹${total})`}</span>
+            <span>
+              {isSubmitting
+                ? 'Creating Order...'
+                : `Place & Print KOT (${packagingFee === null ? '—' : `₹${total}`})`}
+            </span>
           </button>
         </form>
       </div>
