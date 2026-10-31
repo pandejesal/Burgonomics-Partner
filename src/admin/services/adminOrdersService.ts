@@ -33,6 +33,7 @@ import {
 import type { Order as NormalizedOrder } from "@/types";
 import { branchIdForDeliveryStore } from "@/utils/storeBranchRegistry";
 import { logger } from "@/core/logging/logger";
+import { orderStatusWriteErrorMessage } from "@/utils/orderErrors";
 import type { QueryConstraint } from "firebase/firestore";
 
 /**
@@ -618,7 +619,7 @@ export const adminOrdersService = {
     orderId: string,
     status: RichOrder["orderStatus"],
     timelineUpdate?: { title: string; actor: string; description: string },
-  ): Promise<boolean> {
+  ): Promise<void> {
     const toPartner: Record<Exclude<RichOrder["orderStatus"], "Refunded" | "Needs Review">, string> = {
       New: "pending",
       Accepted: "accepted",
@@ -653,13 +654,15 @@ export const adminOrdersService = {
             }
           : {}),
       });
-      return true;
     } catch (e) {
       logger.warn("adminOrdersService.updateOrderStatus_failed", {
         orderIdSuffix: orderId.slice(-6),
         message: e instanceof Error ? e.message : String(e),
       });
-      return false;
+      // Rethrow: returning false made the caller show no error (and even mark
+      // the order completed locally) while the server had refused the bump.
+      // The mapped message tells staff to use the delivery OTP / courier flow.
+      throw new Error(orderStatusWriteErrorMessage(e));
     }
   },
 };

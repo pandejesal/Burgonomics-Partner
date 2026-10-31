@@ -3,6 +3,7 @@
  * Authoritative HTTP client connecting Partner POS directly to Firebase Cloud Functions v2.
  */
 import { auth } from '@/config/firebase';
+import { orderStatusWriteErrorMessage } from '@/utils/orderErrors';
 
 export interface ApiRequestOptions {
   /** Timeout in ms (default 20 000 for general, 30 000 for porter book/rebook). */
@@ -848,6 +849,12 @@ export const partnerFunctionsApi = {
     cancellationReason?: string;
     timelineEvent?: { title: string; actor?: string; description?: string };
   }): Promise<{ orderId: string; status: Record<string, any> }> {
-    return await apiRequest('/orders/bumpStatus', params);
+    try {
+      return await apiRequest('/orders/bumpStatus', params);
+    } catch (error) {
+      // Known server verdicts (e.g. DELIVERY_OTP_REQUIRED) get the action staff
+      // must take instead of a raw code; unknown failures keep their message.
+      throw new Error(orderStatusWriteErrorMessage(error));
+    }
   },
 };

@@ -31,6 +31,7 @@ import type { OrderStatus } from '@/types';
 import { ConfirmDialog } from '../admin/components/Utilities';
 import { DeliveryOtpModal } from '@/components/DeliveryOtpModal';
 import { useAuthStore } from '@/stores/authStore';
+import { orderStatusWriteErrorMessage } from '@/utils/orderErrors';
 import { useQueryClient } from '@tanstack/react-query';
 import { partnerFunctionsApi, dispatchProviderLabel } from '@/services/partnerFunctionsApi';
 import type { DispatchQuoteResult } from '@/services/partnerFunctionsApi';
@@ -246,7 +247,9 @@ export function OrderDetailPage() {
       }
       toast.success(`Order status advanced to ${nextStatus.toUpperCase()}`);
     } catch (err) {
-      toast.error('Failed to update status');
+      toast.error('Failed to update status', {
+        description: orderStatusWriteErrorMessage(err),
+      });
     } finally {
       setIsUpdatingStatus(false);
     }
