@@ -23,6 +23,7 @@ import { ProtectedRoute } from '@/core/auth/ProtectedRoute';
 import { AdminRoutes, ADMIN_PORTAL_ROLES } from '@/pages/admin/AdminRoutes';
 import { ChatPage } from '@/pages/ChatPage';
 import { titleForPath } from '@/utils/routeTitle';
+import { GlobalOfflineBanner } from '@/components/ui/OfflineBanner';
 
 import { AuthProvider } from '@/core/auth/AuthContext';
 import { Toaster, toast } from 'sonner';
@@ -90,6 +91,7 @@ function App() {
       <AuthProvider>
         <AppErrorBoundary>
           <Router>
+          <GlobalOfflineBanner />
           <RouteTitle />
           <RouteErrorBoundary>
           <Routes>
