@@ -12,6 +12,63 @@ interface EditUserModalProps {
   loading?: boolean;
 }
 
+/**
+ * The roles POST /auth/assignRole accepts (backend
+ * functions/src/core/validation.ts → assignRoleSchema). Brand-level roles are
+ * provisioned outside this console, so they can neither be assigned here nor
+ * edited through the claims route (PAR-02b).
+ */
+export const ASSIGNABLE_USER_ROLES: UserRole[] = [
+  'branch_staff',
+  'branch_owner',
+  'regional_manager',
+  'support',
+];
+
+const ROLE_LABELS: Record<UserRole, string> = {
+  branch_staff: 'Kitchen Staff (KDS Operator)',
+  branch_owner: 'Branch Owner / Store GM',
+  regional_manager: 'Regional City Manager',
+  support: 'Support Specialist',
+  developer: 'Developer / Lead Engineer',
+  brand_owner: 'Brand Executive (CEO)',
+  customer: 'Customer',
+};
+
+export function isBrandLevelRole(role: UserRole): boolean {
+  return role === 'brand_owner' || role === 'developer';
+}
+
+export interface UserEditFormData {
+  name: string;
+  phone: string;
+  role: UserRole;
+  branchIds: string[];
+  cityIds: string[];
+}
+
+/**
+ * Builds the update payload for the edit modal. A brand-level target (current
+ * role) and a brand-level request are both stripped to non-privileged profile
+ * fields: the claims route rejects those roles, and a direct role write is
+ * exactly the defect PAR-02 removed.
+ */
+export function buildUserEditUpdates(
+  target: Pick<TeamUser, 'role'>,
+  formData: UserEditFormData
+): Partial<TeamUser> {
+  const profile = { name: formData.name, phone: formData.phone };
+  if (isBrandLevelRole(target.role) || isBrandLevelRole(formData.role)) {
+    return profile;
+  }
+  return {
+    ...profile,
+    role: formData.role,
+    branchIds: formData.branchIds,
+    cityIds: formData.cityIds,
+  };
+}
+
 export const EditUserModal: React.FC<EditUserModalProps> = ({
   isOpen,
   onClose,
@@ -46,9 +103,11 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({
     e.preventDefault();
     if (!formData.name.trim()) return;
 
-    await onSave(user.id, formData);
+    await onSave(user.id, buildUserEditUpdates(user, formData));
     onClose();
   };
+
+  const roleLocked = isBrandLevelRole(user.role);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm select-none">
@@ -103,18 +162,30 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({
             <label className="block text-xs font-semibold text-zinc-300 mb-1">
               Role Permission Tier
             </label>
-            <select
-              value={formData.role}
-              onChange={(e) => setFormData({ ...formData, role: e.target.value as UserRole })}
-              className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white focus:outline-none focus:border-accent"
-            >
-              <option value="branch_staff">👨‍🍳 Kitchen Staff (KDS Operator)</option>
-              <option value="branch_owner">🏪 Branch Owner / Store GM</option>
-              <option value="regional_manager">🏢 Regional City Manager</option>
-              <option value="support">🎧 Support Specialist</option>
-              <option value="developer">💻 Developer / Lead Engineer</option>
-              <option value="brand_owner">👑 Brand Executive (CEO)</option>
-            </select>
+            {roleLocked ? (
+              <>
+                <div className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-zinc-300">
+                  {ROLE_LABELS[user.role]}
+                </div>
+                <p className="mt-1.5 text-[11px] leading-relaxed text-zinc-500">
+                  This brand-level role cannot be changed from the partner console — the
+                  role API only assigns Kitchen Staff, Branch Owner, Regional Manager and
+                  Support. Name and phone can still be updated.
+                </p>
+              </>
+            ) : (
+              <select
+                value={formData.role}
+                onChange={(e) => setFormData({ ...formData, role: e.target.value as UserRole })}
+                className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white focus:outline-none focus:border-accent"
+              >
+                {ASSIGNABLE_USER_ROLES.map((role) => (
+                  <option key={role} value={role}>
+                    {ROLE_LABELS[role]}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           {/* Branch Mapping */}
