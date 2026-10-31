@@ -331,6 +331,20 @@ export function normalizeOrderDoc(id: string, data: Record<string, any>): Order 
     ...(reasons.length > 0 ? { quarantineReason: reasons.join('; ') } : {}),
     paymentMethod: paymentMethod as Order['paymentMethod'],
     paymentStatus: paymentStatus as Order['paymentStatus'],
+    // Refund state is written by the payments backend, never derived here.
+    // Analytics must be able to exclude refunded money without re-reading the
+    // raw doc, so the real field names are carried through verbatim.
+    ...(typeof data.refundStatus === 'string'
+      ? { refundStatus: data.refundStatus }
+      : {}),
+    ...(typeof data.refundAmount === 'number' && Number.isFinite(data.refundAmount)
+      ? { refundAmount: data.refundAmount }
+      : {}),
+    ...(typeof data.refundedTotalPaise === 'number' &&
+    Number.isFinite(data.refundedTotalPaise) &&
+    data.refundedTotalPaise > 0
+      ? { refundedTotalPaise: data.refundedTotalPaise }
+      : {}),
     petpoojaOrderId: data.petpoojaOrderId ?? petpoojaDetails.posOrderId,
     petpoojaSyncStatus: petpoojaSyncStatus as Order['petpoojaSyncStatus'],
     porterOrderId: data.porterOrderId,

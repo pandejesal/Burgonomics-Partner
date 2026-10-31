@@ -13,6 +13,13 @@ import {
 } from 'firebase/firestore';
 import { startOfWeek, startOfMonth, subDays, format } from 'date-fns';
 import { fetchAliasedStoreOrders, normalizeOrderDoc } from '@/utils/orderContract';
+import {
+  billableOrders,
+  istDayKey,
+  istDayRange,
+  orderNetRevenue,
+  summarizeOrderRevenue,
+} from '@/utils/analyticsMath';
 import { FIRESTORE_IN_LIMIT, isGlobalRole, resolveScopedBranchIds } from '@/utils/branchScope';
 
 export interface DailyRevenue {
@@ -361,14 +368,17 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
 
       const totalRevenue =
         orders.length > 0
-          ? orders.reduce((sum, o) => sum + (o.total || 0), 0)
+          ? summarizeOrderRevenue(orders).totalRevenue
           : demo
             ? seedDailyRevenue.reduce((s, d) => s + d.revenue, 0)
             : 0;
 
+      // Cancelled and fully refunded orders are not billable: they never count
+      // toward order volume (and, above, never toward revenue/royalty). A
+      // partially refunded order still counts once — its net revenue does too.
       const totalOrders =
         orders.length > 0
-          ? orders.length
+          ? summarizeOrderRevenue(orders).totalOrders
           : demo
             ? seedDailyRevenue.reduce((s, d) => s + d.orders, 0)
             : 0;
@@ -390,35 +400,28 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         orderType?: string;
         total?: number;
         deliveryFee?: number;
+        refundStatus?: string;
+        refundAmount?: number | null;
+        refundedTotalPaise?: number;
         createdAt?: any;
         items?: Array<{ name?: string; quantity?: number; price?: number }>;
       };
-      const liveOrders = orders as unknown as NormOrder[];
-      const orderDay = (o: NormOrder): string => {
-        const c = o.createdAt;
-        const d =
-          c?.toDate?.() instanceof Date
-            ? c.toDate()
-            : c?.toMillis
-              ? new Date(c.toMillis())
-              : c
-                ? new Date(c)
-                : null;
-        return d && !isNaN(d.getTime()) ? d.toISOString().slice(0, 10) : "";
-      };
-      const dayRange: string[] = [];
-      {
-        const days = period === "week" ? 7 : period === "month" ? 30 : 365;
-        for (let i = days - 1; i >= 0; i--) {
-          const d = new Date(now.getTime() - i * 86400000);
-          dayRange.push(d.toISOString().slice(0, 10));
-        }
-      }
+      // PAR-01: cancelled / fully refunded orders are excluded from every
+      // aggregation below (revenue, order volume, daily chart, top items,
+      // branch ledger, hourly rush, channel split, delivery fees).
+      const liveOrders = billableOrders(orders) as unknown as NormOrder[];
+      // PAR-01: IST day buckets — `toISOString()` is UTC and split the Indian
+      // business day at 05:30, so early-morning orders fell on the prior day.
+      const orderDay = (o: NormOrder): string => istDayKey(o.createdAt);
+      const dayRange: string[] = istDayRange(
+        now,
+        period === "week" ? 7 : period === "month" ? 30 : 365
+      );
       const realDailyRevenue: DailyRevenue[] = dayRange.map((date) => {
         const dayOrders = liveOrders.filter((o) => orderDay(o) === date);
         return {
           date,
-          revenue: dayOrders.reduce((s, o) => s + (Number(o.total) || 0), 0),
+          revenue: Math.round(dayOrders.reduce((s, o) => s + orderNetRevenue(o), 0)),
           orders: dayOrders.length,
         };
       });
@@ -461,7 +464,7 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
           dinein: 0,
         };
         cur.orders += 1;
-        cur.revenue += Number(o.total) || 0;
+        cur.revenue += orderNetRevenue(o);
         const ch = String(o.orderType || "delivery");
         if (ch === "takeaway") cur.takeaway += 1;
         else if (ch === "dinein") cur.dinein += 1;
@@ -515,7 +518,7 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         const h = d.getHours();
         const cur = hourAgg.get(h) || { orders: 0, revenue: 0 };
         cur.orders += 1;
-        cur.revenue += Number((o as any).total) || 0;
+        cur.revenue += orderNetRevenue(o as any);
         hourAgg.set(h, cur);
       }
       const hourlyRush: HourlyRushData[] = Array.from({ length: 24 }, (_, hour) => {
@@ -539,7 +542,7 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         const ch = String((o as any).orderType || "delivery");
         const slot = ch === "takeaway" ? chanAgg.takeaway : ch === "dinein" ? chanAgg.dinein : chanAgg.delivery;
         slot.orders += 1;
-        slot.revenue += Number((o as any).total) || 0;
+        slot.revenue += orderNetRevenue(o as any);
       }
       const pct = (n: number) => (totalOrders > 0 ? Math.round((n / totalOrders) * 100) : 0);
       const ticket = (rev: number, n: number) => (n > 0 ? Math.round(rev / n) : 0);

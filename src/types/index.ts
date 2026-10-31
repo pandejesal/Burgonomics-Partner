@@ -119,6 +119,13 @@ export interface Order {
   status: OrderStatus;
   paymentMethod: 'razorpay' | 'cod' | 'upi';
   paymentStatus: 'pending' | 'completed' | 'failed';
+  // Refund truth as written by the payments backend (razorpay.service /
+  // webhookHandler). 'refunded' is terminal (full), 'partially_refunded' keeps
+  // the remainder billable; `refundedTotalPaise` is the cumulative amount.
+  refundStatus?: string;
+  /** Rupees refunded by the latest request; null on a full-amount intent. */
+  refundAmount?: number | null;
+  refundedTotalPaise?: number;
   petpoojaOrderId?: string;
   petpoojaStatus?: 'synced' | 'failed' | 'pending' | 'pending_retry' | 'not_applicable';
   petpoojaSyncStatus?: 'synced' | 'failed' | 'pending' | 'not_applicable';
