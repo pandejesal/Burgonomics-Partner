@@ -18,7 +18,6 @@ import {
   AlertTriangle,
   CircleAlert,
 } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
 import { useSyncHealth } from '@/admin/dashboard/hooks/useDashboardData';
 import { petpoojaBadgeMeta, type PetpoojaBadgeStatus } from '@/components/ui/PetpoojaStatusBadge';
 import type { MenuItem } from '@/types';
@@ -33,7 +32,6 @@ export function MenuPage() {
     isLoading,
     error: menuError,
     refetch: refetchMenu,
-    lastSyncedAt,
     toggleAvailability,
     syncPetpooja,
     markItem86,
@@ -150,17 +148,6 @@ export function MenuPage() {
     }
     return true;
   });
-
-  const syncedAgo = (() => {
-    try {
-      if (lastSyncedAt?.toDate) {
-        return formatDistanceToNow(lastSyncedAt.toDate(), { addSuffix: true });
-      }
-      return 'Just now';
-    } catch {
-      return 'Recently';
-    }
-  })();
 
   const outOfStockCount = (items || []).filter(
     (i) => i.isAvailable === false || i.inStock === false

@@ -45,3 +45,6 @@ GoogleService-Info.plist
 # Local backup and test harness artifacts
 *.pre-phase2
 .harness/
+
+# Playwright / harness run output
+test-results/

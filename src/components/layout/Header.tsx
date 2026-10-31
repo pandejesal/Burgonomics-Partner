@@ -4,23 +4,34 @@ import { useAppStore } from '@/stores/appStore';
 import { useAuthStore } from '@/stores/authStore';
 import { NotificationBell } from './NotificationBell';
 import { BranchSwitcher } from './BranchSwitcher';
+import { NAV_TOGGLE_ID, SIDEBAR_ID } from './Sidebar';
 import { PetpoojaStatusBadge } from '@/components/ui/PetpoojaStatusBadge';
 
 export function Header() {
-  const { toggleSidebar, selectedBranchId } = useAppStore();
+  const { toggleSidebar, selectedBranchId, sidebarOpen } = useAppStore();
   const { signOut, user } = useAuthStore();
 
   const badgeBranchId =
     selectedBranchId && selectedBranchId !== 'all' ? selectedBranchId : user?.branchIds?.[0];
 
   return (
-    <header className="h-16 bg-bg border-b border-[#1E3A24] flex items-center justify-between px-3 sm:px-4 lg:px-6 sticky top-0 z-30 shadow-md">
+    <header
+      className="bg-bg border-b border-[#1E3A24] flex items-center justify-between px-3 sm:px-4 lg:px-6 sticky top-0 z-30 shadow-md"
+      style={{
+        minHeight: 'calc(4rem + var(--safe-area-inset-top, env(safe-area-inset-top, 0px)))',
+        paddingTop: 'var(--safe-area-inset-top, env(safe-area-inset-top, 0px))',
+      }}
+    >
       {/* Left: Mobile menu + Outlet Switcher + Welcome */}
       <div className="flex min-w-0 flex-1 items-center gap-1 sm:gap-4">
         <button
+          type="button"
+          id={NAV_TOGGLE_ID}
           onClick={toggleSidebar}
-          className="lg:hidden p-2 hover:bg-surface rounded-xl text-zinc-300 hover:text-white cursor-pointer shrink-0"
+          className="lg:hidden min-h-11 min-w-11 p-2 hover:bg-surface rounded-xl text-zinc-300 hover:text-white cursor-pointer shrink-0"
           aria-label="Toggle navigation menu"
+          aria-expanded={sidebarOpen}
+          aria-controls={SIDEBAR_ID}
         >
           <Menu className="w-5 h-5" />
         </button>

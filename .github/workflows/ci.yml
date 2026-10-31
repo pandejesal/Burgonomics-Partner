@@ -54,9 +54,22 @@ jobs:
 
   ios:
     name: iOS simulator build
-    runs-on: macos-14
+    # A07 (2026-10-14): macOS 14 images deprecated (removal 2026-11-02).
+    # Moved to macos-26 + explicit discovery gate (Xcode major >= 26 AND
+    # iOS SDK >= 26, fail closed) before any xcodebuild. Web/android/
+    # release jobs, triggers and secrets above/below are untouched.
+    # No SPM patch step here: the partner SPM graph resolves cleanly
+    # (push-notifications declares from: "8.0.0" — measured, unlike customer).
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+      - name: Validate Xcode toolchain (Xcode >= 26, iOS SDK >= 26)
+        # Discovers the best installed Xcode; fails closed below either floor.
+        # Never hardpins an exact Xcode version.
+        run: bash scripts/select-xcode-toolchain.sh
+        env:
+          MIN_XCODE_MAJOR: "26"
+          MIN_IOS_SDK_MAJOR: "26"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -124,9 +137,15 @@ jobs:
   ios-archive:
     name: iOS Archive (unsigned scaffold)
     if: github.event_name == 'workflow_dispatch'
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+      - name: Validate Xcode toolchain (Xcode >= 26, iOS SDK >= 26)
+        # Same discovery gate as the ios job: fail closed below either floor.
+        run: bash scripts/select-xcode-toolchain.sh
+        env:
+          MIN_XCODE_MAJOR: "26"
+          MIN_IOS_SDK_MAJOR: "26"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -134,7 +153,7 @@ jobs:
       - run: npm ci
       - run: npm run build:mobile
       - run: npx cap sync ios
-      - name: Show Xcode version (macos-15 default)
+      - name: Show Xcode version (selected toolchain)
         run: xcodebuild -version
       - name: Archive unsigned iOS build
         run: xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release -destination 'generic/platform=iOS' -archivePath build/App.xcarchive CODE_SIGNING_ALLOWED=NO archive

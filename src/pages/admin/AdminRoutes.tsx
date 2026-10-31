@@ -1,5 +1,5 @@
 import React, { Suspense, lazy } from "react";
-import { Routes, Route, Outlet, Navigate } from "react-router-dom";
+import { Routes, Route, Outlet, Navigate, Link } from "react-router-dom";
 import { useAuthStore } from "@/stores/authStore";
 import { AdminLayout } from "@/admin/layouts/AdminLayout";
 import { PetpoojaOperationsLayout } from "@/admin/layouts/PetpoojaOperationsLayout";
@@ -12,7 +12,6 @@ import { ThemeProvider } from "@/admin/theme/ThemeContext";
 import { AdminDashboardPlaceholder } from "@/admin/pages/AdminDashboardPlaceholder";
 import { AdminOrdersPage } from "@/admin/pages/AdminOrdersPage";
 import { AdminStoresPage } from "@/admin/pages/AdminStoresPage";
-import { AdminMenuPage } from "@/admin/pages/AdminMenuPage";
 
 // Heavy recharts pages are code-split so the initial admin bundle stays lean.
 // (Previously every chart page loaded upfront → 1.2MB+ admin-analytics chunk.)
@@ -97,14 +96,11 @@ const AdminAutomationPage = lazyPage(
   () => named(() => import("@/admin/pages/AdminAutomationPage"), "AdminAutomationPage"),
   "AdminAutomationPage"
 );
-const AdminCustomersPage = lazyPage(
-  () => import("@/admin/pages/AdminCustomersPage"),
-  "AdminCustomersPage"
-);
-const AdminCustomerProfilePage = lazyPage(
-  () => import("@/admin/pages/AdminCustomerProfilePage"),
-  "AdminCustomerProfilePage"
-);
+// R22 (PA-01): the localStorage-only CRM pages (AdminCustomersPage /
+// AdminCustomerProfilePage) are intentionally NOT routed here anymore —
+// /admin/customers now navigates to the authoritative console CRM, and the
+// :id deep-link fails closed with an honest unavailable page (see
+// AdminCustomerRecordUnavailable below).
 const AdminLoyaltyConfigPage = lazyPage(
   () => import("@/admin/pages/AdminLoyaltyConfigPage"),
   "AdminLoyaltyConfigPage"
@@ -226,6 +222,42 @@ export function AdminPortalLayout() {
   );
 }
 
+/**
+ * R22 (PA-01) honest fail-closed stand-in for /admin/customers/:id.
+ *
+ * The retired admin CRM profile page rendered browser-local entries whose ids
+ * were never Firestore `customers` documents: the CRM shipped no seed, has no
+ * creation path, and persisted only to localStorage, so no local id can be
+ * mapped to a real backend record. This route therefore never forwards the id
+ * to the console /customers/:id profile (that would presume a backend record
+ * exists for a local-only reference) and renders no customer data at all —
+ * it states the limitation and points at the authoritative CRM list.
+ */
+export function AdminCustomerRecordUnavailable() {
+  return (
+    <div className="mx-auto max-w-xl space-y-4 py-16 text-center font-sans">
+      <h1 className="text-lg font-black text-gray-900 dark:text-white">
+        Customer profile unavailable from the admin portal
+      </h1>
+      <p className="text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+        Customer profiles in the former admin demo CRM were stored only in
+        this browser and were never real customer records. This link cannot be
+        opened as a customer profile, and no backend record is assumed for it.
+      </p>
+      <p className="text-xs text-gray-500 dark:text-gray-400">
+        Open the authoritative customer CRM to find and view real customer
+        records:
+      </p>
+      <Link
+        to="/customers"
+        className="inline-block rounded-xl bg-[#0E4825] px-4 py-2 text-xs font-bold text-white"
+      >
+        Open Customer CRM (/customers)
+      </Link>
+    </div>
+  );
+}
+
 export function AdminRoutes() {
   return (
     <Routes>
@@ -246,8 +278,14 @@ export function AdminRoutes() {
         <Route path="stores/create" element={<AdminStoresPage />} />
         <Route path="stores/:storeId" element={<AdminStoresPage />} />
 
-        {/* Catalog / Menu */}
-        <Route path="menu" element={<AdminMenuPage />} />
+        {/* Catalog / Menu — R22 (PA-02): the old /admin/menu mounted a
+            hardcoded 5-item demo with component-state-only toggles (no
+            Firestore/Petpooja backing). The authoritative catalog is the
+            partner console /menu (useBranchMenu → Firestore `products`, with
+            best-effort Petpooja POS propagation), which admin-portal roles
+            can already reach under the existing route policy. The entry route
+            navigates there instead of rendering fake inventory. */}
+        <Route path="menu" element={<Navigate to="/menu" replace />} />
 
         {/* Marketing / Offers / Campaigns */}
         <Route path="offers" element={<AdminOffersPage />} />
@@ -259,9 +297,17 @@ export function AdminRoutes() {
         <Route path="marketing" element={<Navigate to="/admin/orders" replace />} />
         <Route path="automation" element={<Navigate to="/admin/orders" replace />} />
 
-        {/* Customers */}
-        <Route path="customers" element={<AdminCustomersPage />} />
-        <Route path="customers/:id" element={<AdminCustomerProfilePage />} />
+        {/* Customers — R22 (PA-01): the old /admin/customers CRM read and
+            wrote localStorage only ("Local directory" badge; mutations with
+            fabricated attribution). The authoritative CRM is the partner
+            console /customers (Firestore `customers`, rules-scoped). The
+            entry route navigates there. The :id deep-link fails closed with
+            an honest unavailable page — local CRM ids were never Firestore
+            doc ids, so forwarding them would presume a backend record.
+            analytics/segments/loyalty sub-routes below are preserved
+            unchanged (static paths rank above the :id fallback). */}
+        <Route path="customers" element={<Navigate to="/customers" replace />} />
+        <Route path="customers/:id" element={<AdminCustomerRecordUnavailable />} />
         <Route
           path="customers/analytics"
           element={

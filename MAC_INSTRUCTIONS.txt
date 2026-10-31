@@ -1,0 +1,59 @@
+# MAC INSTRUCTIONS — Burgonomics Partner app (iOS archive)
+# Companion to burgonomics-foundation-core/MAC_INSTRUCTIONS.txt (read that one
+# first for the general flow; this file only lists the PARTNER differences).
+# Generated 2026-10-17 by the coordinator during release prep. LF file: copy
+# the tree as-is (git clone or zip), never a CRLF-converted copy — a CRLF
+# version of this script fails with "bad interpreter: /bin/sh^M".
+
+1. WHAT DIFFERS FROM CORE
+   - Partner has no patch-ios-spm.js step. Its inspected constraints are
+     compatible: CapApp-SPM/Package.swift pins capacitor-swift-pm exact:"8.5.2".
+     This is static inspection, NOT a successful SwiftPM resolve or archive.
+     Resolve and build on the Mac before declaring this ready. Measured on the
+     pristine tree 2026-10-17: @capacitor/push-notifications@8.1.2 declares
+     from:"8.0.0" (the "upstream hard-pins 8.5.0" note in the core R18 doc was
+     measured in an already-patched core tree).
+   - Core's mac-build.sh runs its own patch-ios-spm.js, which also rewrites
+     native plugin implementations, not just versions. Do not skip that step
+     or copy it to partner based on version inspection alone. Any change to
+     core's procedure needs a separate Mac compile/runtime validation.
+   - mac-build.sh (this repo) = npm ci -> build:mobile -> cap sync ios ->
+     cap open ios. Run it or the same steps manually.
+
+2. BEFORE ARCHIVING
+   a. Firebase: neither ios/App/App/GoogleService-Info.plist exists yet.
+      Register com.burgonomics.partner (and core's com.burgonomics) in the
+      Firebase console (project burgonomics-7faa8) with your Apple Team ID,
+      download the matching plists, and add them to the correct Xcode target
+      resources on BOTH repos. File presence alone is not proof of push:
+      configure APNs credentials/capabilities and test delivery on a device.
+   b. AASA: burgonomics-partner/public/.well-known/apple-app-site-association
+      still contains the literal TEAMID. placeholder. Replace with the real
+      10-character Team ID (Xcode > Settings > Accounts), rebuild or copy the
+      file into burgonomics-partner/dist/.well-known/, then redeploy
+      Firebase Hosting for the burgonomics-partner site (the OTHER app's
+      AASA needs the same Team ID in burgonomics-foundation-core).
+      Optional preflight check from the copied tree root (one folder up):
+        node scripts/validate-mobile-hosting.cjs
+      All rows must be green except nothing should FAIL once the Team ID is
+      in both AASAs.
+   c. Signing: project.pbxproj has no DEVELOPMENT_TEAM — pick the team in
+      Signing & Capabilities. Model: MARKETING_VERSION 1.0.0,
+      CURRENT_PROJECT_VERSION 1 (already set). The same Apple Team ID string
+      that goes in here must also reach the coordinator for the AASA files.
+   d. WKAppBoundDomains (Info.plist, 9 entries) + App-Bound-Domains toggle:
+      do NOT disable either. Apple caps app-bound domains at 10; one slot of
+      headroom remains.
+
+3. ARCHIVE + UPLOAD
+   - scripts/select-xcode-toolchain.sh gates the required Xcode version.
+   - Product > Destination > Any iOS Device (arm64) > Archive.
+   - Distribute App > App Store Connect (needs the burgonomics team's ASC
+     membership + an invite). TestFlight first is recommended; stores review
+     after the listing/privacy forms are filled in ASC.
+
+4. IF XCODE RESOLUTION ERRORS APPEAR
+   - Use npx cap open ios to open the native project appropriate to its
+     dependency manager. Do not assume an .xcworkspace exists for an SPM app.
+   - File > Packages > Reset Package Caches if SPM fetches fail on the
+     borrowed Mac's network.
