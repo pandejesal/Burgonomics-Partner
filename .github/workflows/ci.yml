@@ -56,6 +56,11 @@ jobs:
           distribution: temurin
           java-version: "21"
       - run: npm ci
+      - name: Prepare native production configuration
+        run: node scripts/prepare-native-config.mjs android
+        env:
+          MOBILE_PRODUCTION_ENV: ${{ secrets.MOBILE_PRODUCTION_ENV }}
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
       - run: npm run build:mobile
       - run: npx cap sync android
       - run: ./gradlew assembleDebug
@@ -84,6 +89,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Prepare native production configuration
+        run: node scripts/prepare-native-config.mjs ios
+        env:
+          MOBILE_PRODUCTION_ENV: ${{ secrets.MOBILE_PRODUCTION_ENV }}
+          GOOGLE_SERVICE_INFO_PLIST_BASE64: ${{ secrets.GOOGLE_SERVICE_INFO_PLIST_BASE64 }}
       - run: npm run build:mobile
       - run: npx cap sync ios
       - run: xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release -destination "generic/platform=iOS Simulator" -derivedDataPath build/DerivedData build
@@ -101,6 +111,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Prepare native production configuration
+        run: node scripts/prepare-native-config.mjs android
+        env:
+          MOBILE_PRODUCTION_ENV: ${{ secrets.MOBILE_PRODUCTION_ENV }}
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
       - run: npm run build:mobile
       - run: npx cap sync android
       - uses: actions/setup-java@v4
@@ -161,6 +176,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Prepare native production configuration
+        run: node scripts/prepare-native-config.mjs ios
+        env:
+          MOBILE_PRODUCTION_ENV: ${{ secrets.MOBILE_PRODUCTION_ENV }}
+          GOOGLE_SERVICE_INFO_PLIST_BASE64: ${{ secrets.GOOGLE_SERVICE_INFO_PLIST_BASE64 }}
       - run: npm run build:mobile
       - run: npx cap sync ios
       - name: Show Xcode version (selected toolchain)
