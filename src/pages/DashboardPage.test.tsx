@@ -1,41 +1,40 @@
 import { describe, it, expect } from 'vitest';
 import type { Order } from '@/types';
+import { summarizeCountedSales } from '@/utils/analyticsMath';
 
 describe('Prompt 32: Partner Executive Dashboard & Live Stats Cockpit Suite', () => {
   describe('1. Revenue & Metric Aggregations', () => {
-    it('calculates gross revenue strictly for completed/paid orders today', () => {
-      const today = new Date();
-      const mockOrders: Order[] = [
+    it('counts only captured Razorpay and completed cash orders; AOV divides by those', () => {
+      const mockOrders = [
         {
           id: 'ord_1',
           total: 450,
-          paymentStatus: 'completed',
+          paymentChannel: 'razorpay',
           status: 'delivered',
-          createdAt: today,
-        } as unknown as Order,
+          createdAt: new Date(),
+        },
         {
           id: 'ord_2',
           total: 650,
-          paymentStatus: 'completed',
-          status: 'preparing',
-          createdAt: today,
-        } as unknown as Order,
+          customerId: 'cust_walkin',
+          status: 'delivered',
+          createdAt: new Date(),
+        },
+        // Online order never paid: not an order yet.
         {
           id: 'ord_3',
           total: 300,
-          paymentStatus: 'pending',
+          paymentMethod: 'razorpay',
           status: 'pending',
-          createdAt: today,
-        } as unknown as Order,
-      ];
+          createdAt: new Date(),
+        },
+      ] as unknown as Order[];
 
-      const paidOrders = mockOrders.filter((o) => o.paymentStatus === 'completed');
-      const totalRevenue = paidOrders.reduce((sum, o) => sum + (o.total || 0), 0);
-      const aov = mockOrders.length > 0 ? Math.round(totalRevenue / mockOrders.length) : 0;
+      const sales = summarizeCountedSales(mockOrders);
 
-      expect(totalRevenue).toBe(1100);
-      expect(paidOrders.length).toBe(2);
-      expect(aov).toBe(367);
+      expect(sales.revenue).toBe(1100);
+      expect(sales.orderCount).toBe(2);
+      expect(sales.averageOrderValue).toBe(550);
     });
 
     it('identifies in-kitchen active grilling orders and in-transit orders', () => {

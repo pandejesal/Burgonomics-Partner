@@ -12,19 +12,8 @@ import {
 } from '@/features/dashboard';
 import { RecentOrders } from '@/components/dashboard/RecentOrders';
 import { Spinner } from '@/components/ui/Spinner';
+import { summarizeIstDaySales } from '@/utils/analyticsMath';
 import { AlertTriangle } from 'lucide-react';
-
-/** Start of the current day in Asia/Kolkata as an absolute instant (IST has no DST). */
-function kolkataTodayStart(): Date {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kolkata',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date());
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
-  return new Date(`${get('year')}-${get('month')}-${get('day')}T00:00:00+05:30`);
-}
 
 function ageLabel(fromMs: number): string {
   const s = Math.max(0, Math.round((Date.now() - fromMs) / 1000));
@@ -70,28 +59,13 @@ export function DashboardPage() {
     return orders.filter((o) => o.branchId === activeBranchId);
   }, [orders, activeBranchId]);
 
-  // Compute live metrics scoped to today (Asia/Kolkata local date)
+  // Compute live metrics scoped to today (Asia/Kolkata local date).
+  // Money and order counts come from the SAME shared rule Analytics uses
+  // (summarizeIstDaySales): a paid Razorpay order counts, cash counts only
+  // once completed, an unpaid online order is not an order yet, and cancelled
+  // or refunded orders never count. AOV divides by counted orders only.
   const metrics: DashboardMetrics = useMemo(() => {
-    const todayStart = kolkataTodayStart();
-
-    const todayOrders = branchOrders.filter((o) => {
-      const orderDate = (o.createdAt as any)?.toDate
-        ? (o.createdAt as any).toDate()
-        : (o.createdAt as any)?.toMillis
-        ? new Date((o.createdAt as any).toMillis())
-        : typeof o.createdAt === 'string' || typeof o.createdAt === 'number'
-        ? new Date(o.createdAt)
-        : new Date();
-      return orderDate >= todayStart;
-    });
-
-    const paidOrders = todayOrders.filter(
-      (o) => o.paymentStatus === 'completed' || (o.paymentStatus as string) === 'PAID'
-    );
-
-    const revenue = paidOrders.reduce((sum, o) => sum + (o.total || o.subtotal || 0), 0);
-    const ordersCount = todayOrders.length;
-    const aov = ordersCount > 0 ? Math.round(revenue / ordersCount) : 0;
+    const sales = summarizeIstDaySales(branchOrders);
 
     const inKitchen = branchOrders.filter(
       (o) =>
@@ -108,11 +82,11 @@ export function DashboardPage() {
     ).length;
 
     return {
-      todayRevenue: revenue,
-      todayOrdersCount: ordersCount,
+      todayRevenue: sales.revenue,
+      todayOrdersCount: sales.orderCount,
       activeKitchenCount: inKitchen,
       inTransitCount: inTransit,
-      averageOrderValue: aov,
+      averageOrderValue: sales.averageOrderValue,
     };
   }, [branchOrders]);
 

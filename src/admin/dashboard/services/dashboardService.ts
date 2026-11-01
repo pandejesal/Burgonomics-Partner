@@ -11,6 +11,11 @@ import {
 } from "firebase/firestore";
 import { useAuthStore } from "@/stores/authStore";
 import { isGlobalRole, FIRESTORE_IN_LIMIT } from "@/utils/branchScope";
+import {
+  isCountedSaleOrder,
+  summarizeCountedSales,
+  type OrderRevenueShape,
+} from "@/utils/analyticsMath";
 import { logger } from "@/core/logging/logger";
 import {
   DashboardCounts,
@@ -87,6 +92,67 @@ function toMonthBucket(millis: number): string {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, "0");
   return `${year}-${month}`;
+}
+
+/**
+ * Minimal order shape the shared counted-sale rule needs (analyticsMath).
+ * Admin orders keep the raw Firestore doc shape, so channel/payment fields are
+ * resolved here from the same nested locations the backend writes.
+ *
+ * Docs written before the payment gate carry NO payment evidence at all. Those
+ * are not treated as "unpaid": nothing on them contradicts a completed sale,
+ * and the admin board has always counted them. Only a doc that states a
+ * payment state is judged by the shared rule (an explicit pending/failed
+ * online order is not an order yet, a captured Razorpay marker is, and cash
+ * counts once completed).
+ */
+function toRevenueShape(order: any): OrderRevenueShape {
+  const payment = (order?.payment ?? {}) as Record<string, unknown>;
+  const channel =
+    typeof order?.paymentChannel === "string" ? order.paymentChannel : undefined;
+  const methodRaw = String(order?.paymentMethod ?? payment.method ?? "").toLowerCase();
+  const method =
+    methodRaw === "cod" || methodRaw === "cash"
+      ? "cod"
+      : methodRaw === "upi"
+        ? "upi"
+        : methodRaw
+          ? "razorpay"
+          : undefined;
+  const hasPaymentEvidence =
+    !!channel || !!method || order?.paymentStatus !== undefined || payment.status !== undefined;
+  const refunded = Number(order?.refundedTotalPaise);
+  const refundAmount = Number(order?.refundAmount);
+  return {
+    status: normalizeOrderStatus(order),
+    total: orderPaise(order) / 100,
+    // Legacy doc without payment evidence: completed counter sales of unknown
+    // tender — the branch did collect, so it stays a counted sale.
+    paymentChannel: hasPaymentEvidence ? channel : undefined,
+    customerId:
+      typeof order?.customerId === "string"
+        ? order.customerId
+        : hasPaymentEvidence
+          ? undefined
+          : "cust_walkin",
+    paymentMethod: method ?? null,
+    refundStatus: typeof order?.refundStatus === "string" ? order.refundStatus : null,
+    refundAmount: Number.isFinite(refundAmount) ? refundAmount : null,
+    refundedTotalPaise: Number.isFinite(refunded) ? refunded : null,
+  };
+}
+
+/** Amount in paise (Order model stores totals.grandTotal; legacy shapes used totalAmount/total). */
+function orderPaise(order: any): number {
+  return order?.pricing?.finalTotal
+    ? Math.round(order.pricing.finalTotal * 100)
+    : order?.totals?.grandTotal
+      ? Math.round(order.totals.grandTotal * 100)
+      : order?.totalAmount
+        ? Math.round(order.totalAmount * 100)
+        : order?.total
+          ? Math.round(order.total * 100)
+          : 0;
 }
 
 export class DashboardService {
@@ -367,27 +433,23 @@ export class DashboardService {
       return orderMillis >= fromMillis && orderMillis <= toMillisVal;
     });
 
-    // Compute revenue & status breakdown
-    let totalRevenuePaise = 0;
+    // Compute revenue & status breakdown. Money and the order count come from
+    // the SAME shared rule the partner dashboard and analytics use
+    // (analyticsMath.summarizeCountedSales): only a server-marked Razorpay
+    // capture or a completed cash/counter order counts; an unpaid online order
+    // is not an order yet, and cancelled/refunded orders never count. AOV then
+    // divides by those counted orders instead of every fetched doc.
+    const countedSales = summarizeCountedSales(ordersInRange.map(toRevenueShape));
+    // Invoiced value of the counted orders; the refund ledger is netted below.
+    // `revenue` (post courier-fee) is what the branch keeps; this board has
+    // always shown the invoiced gross before the fee, so keep that meaning
+    // explicit in the KPI caption.
+    const totalRevenuePaise = Math.round(countedSales.grossRevenue * 100);
     const statusMap = new Map<string, number>();
     const productAgg = new Map<string, { name: string; units: number; revenuePaise: number }>();
 
     for (const order of ordersInRange) {
-      // Amount in paise (Order model stores totals.grandTotal; legacy shapes used totalAmount/total)
-      const totalPaise = order.pricing?.finalTotal
-        ? Math.round(order.pricing.finalTotal * 100)
-        : order.totals?.grandTotal
-          ? Math.round(order.totals.grandTotal * 100)
-          : order.totalAmount
-            ? Math.round(order.totalAmount * 100)
-            : order.total
-              ? Math.round(order.total * 100)
-              : 0;
-
       const status = normalizeOrderStatus(order);
-      if (!["cancelled", "refunded"].includes(status.toLowerCase())) {
-        totalRevenuePaise += totalPaise;
-      }
 
       statusMap.set(status, (statusMap.get(status) || 0) + 1);
 
@@ -421,9 +483,9 @@ export class DashboardService {
       }
     }
 
-    const orderCount = ordersInRange.length;
+    const orderCount = countedSales.orderCount;
     const netRevenuePaise = Math.max(0, totalRevenuePaise - refundsPaise);
-    const aov = orderCount > 0 ? Math.round(totalRevenuePaise / orderCount) : 0;
+    const aov = countedSales.averageOrderValue * 100;
 
     const revenue: RevenueSummary = {
       totalRevenuePaise,
@@ -529,6 +591,9 @@ export class DashboardService {
     for (const order of orders) {
       const orderMillis = toMillis(order.placedAt || order.createdAt);
       if (orderMillis >= fromMillis && orderMillis <= toMillisVal) {
+        // The sparkline sits inside the same KPI card as the total, so it must
+        // obey the same counted-sale rule (no unpaid online order, no void).
+        if (!isCountedSaleOrder(toRevenueShape(order))) continue;
         let bucket: string;
         if (params.granularity === "hour") {
           bucket = toHourBucket(orderMillis);
@@ -538,11 +603,7 @@ export class DashboardService {
           bucket = toDayBucket(orderMillis);
         }
 
-        const totalPaise = order.pricing?.finalTotal
-          ? Math.round(order.pricing.finalTotal * 100)
-          : order.totalAmount
-            ? Math.round(order.totalAmount * 100)
-            : 0;
+        const totalPaise = orderPaise(order);
 
         bucketMap.set(bucket, (bucketMap.get(bucket) || 0) + totalPaise);
       }
@@ -578,6 +639,8 @@ export class DashboardService {
     for (const order of orders) {
       const orderMillis = toMillis(order.placedAt || order.createdAt);
       if (orderMillis >= fromMillis && orderMillis <= toMillisVal) {
+        // Counted sales only — an unpaid online order is not an order yet.
+        if (!isCountedSaleOrder(toRevenueShape(order))) continue;
         let bucket: string;
         if (params.granularity === "hour") {
           bucket = toHourBucket(orderMillis);

@@ -34,7 +34,10 @@ export function LiveStatsGrid({ metrics }: LiveStatsGridProps) {
         <p className="font-mono text-2xl font-black text-[#4ADE80]">
           ₹{metrics.todayRevenue.toLocaleString('en-IN')}
         </p>
-        <span className="text-[10px] text-neutral-500">Paid orders gross</span>
+        {/* Honest caption: only a captured Razorpay payment and a completed
+            cash/counter order count, and the figure is what the branch keeps
+            after the courier fee it pays. It is NOT every paid order's gross. */}
+        <span className="text-[10px] text-neutral-500">Razorpay + completed cash, net of courier fee</span>
       </div>
 
       {/* 2. Total Orders Today */}
@@ -46,7 +49,7 @@ export function LiveStatsGrid({ metrics }: LiveStatsGridProps) {
         <p className="font-mono text-2xl font-black text-white">
           {metrics.todayOrdersCount}
         </p>
-        <span className="text-[10px] text-neutral-500">Counter + Delivery</span>
+        <span className="text-[10px] text-neutral-500">Paid + completed counter orders</span>
       </div>
 
       {/* 3. Kitchen Active (In-Prep) */}
@@ -82,7 +85,7 @@ export function LiveStatsGrid({ metrics }: LiveStatsGridProps) {
         <p className="font-mono text-2xl font-black text-white">
           ₹{metrics.averageOrderValue.toLocaleString('en-IN')}
         </p>
-        <span className="text-[10px] text-neutral-500">Average ticket size</span>
+        <span className="text-[10px] text-neutral-500">Revenue ÷ counted orders</span>
       </div>
     </div>
   );

@@ -18,6 +18,7 @@ import { fetchAliasedStoreOrders, normalizeOrderDoc } from '@/utils/orderContrac
 import {
   billableOrders,
   isCompletedOrder,
+  isCountedSaleOrder,
   istDayKey,
   istDayRange,
   istMonthKey,
@@ -29,6 +30,7 @@ import {
   startOfIstMonth,
   startOfIstMonthKey,
   startOfIstWeek,
+  summarizeCountedSales,
   summarizeOrderRevenue,
 } from '@/utils/analyticsMath';
 import { FIRESTORE_IN_LIMIT, isGlobalRole, resolveScopedBranchIds } from '@/utils/branchScope';
@@ -449,21 +451,32 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
       }
 
       const summary = orders.length > 0 ? summarizeOrderRevenue(orders) : null;
-      const totalRevenue = summary
-        ? summary.totalRevenue
+      // Headline money/volume use the SAME shared rule as the dashboard
+      // (summarizeCountedSales): only a server-marked Razorpay capture and a
+      // completed cash/counter order count as a sale. An unpaid online order
+      // never reached the kitchen, so it is not an order yet — it used to
+      // inflate `totalOrders` and therefore deflate the Average Order Value.
+      const countedSales = orders.length > 0 ? summarizeCountedSales(orders) : null;
+      const totalRevenue = countedSales
+        ? countedSales.revenue
         : demo
           ? seedDailyRevenue.reduce((s, d) => s + d.revenue, 0)
           : 0;
 
-      // Cancelled and fully refunded orders are not billable: they never count
-      // toward order volume. A partially refunded order still counts once.
-      const totalOrders = summary
-        ? summary.totalOrders
+      // Cancelled and fully refunded orders are not billable, and neither are
+      // unpaid online orders or in-progress counter orders — those never count
+      // as orders at all.
+      const totalOrders = countedSales
+        ? countedSales.orderCount
         : demo
           ? seedDailyRevenue.reduce((s, d) => s + d.orders, 0)
           : 0;
 
-      const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+      const averageOrderValue = countedSales
+        ? countedSales.averageOrderValue
+        : totalOrders > 0
+          ? totalRevenue / totalOrders
+          : 0;
 
       // Owner decision 1 Nov 2026: two real earnings streams, no per-order
       // royalty (fixed monthly branch fee instead). Unpaid online orders earn
@@ -474,8 +487,6 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
       const cashRevenue = summary?.cashRevenue ?? 0;
       const cashOrders = summary?.cashOrders ?? 0;
       const cashPendingOrders = summary?.cashPendingOrders ?? 0;
-      const unpaidOrders =
-        (summary?.totalOrders ?? 0) - (summary?.razorpayOrders ?? 0) - (summary?.cashOrders ?? 0) - cashPendingOrders;
 
       // Loop 51/120: everything below aggregates the REAL fetched orders.
       // The old code scaled fixed percentages (58/56 splits, 60/25/15
@@ -660,6 +671,11 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
       };
 
       const liveOrders = billableOrders(orders) as unknown as NormOrder[];
+      // Unpaid online orders: billable, visible in the order list, but never a
+      // sale — they earn nothing and do not count as orders (see
+      // summarizeCountedSales, the single rule the dashboard also uses).
+      const unpaidOrders = liveOrders.filter((o) => orderPaymentChannel(o) === 'unpaid').length;
+
       // Money aggregations use earnings (net of refunds and the courier fee).
       // Unpaid online orders are not sales: they stay out of item mix/delivery
       // fees and contribute 0 to every money total.
@@ -672,11 +688,15 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         period === "week" ? 7 : period === "month" ? 30 : 365
       );
       const realDailyRevenue: DailyRevenue[] = dayRange.map((date) => {
-        const dayOrders = liveOrders.filter((o) => orderDay(o) === date);
+        // Same counted-sale rule as the headline: a day chart that sums every
+        // fetched order would disagree with its own totals above.
+        const daySales = summarizeCountedSales(
+          liveOrders.filter((o) => orderDay(o) === date)
+        );
         return {
           date,
-          revenue: Math.round(dayOrders.reduce((s, o) => s + orderNetEarnings(o), 0)),
-          orders: dayOrders.length,
+          revenue: daySales.revenue,
+          orders: daySales.orderCount,
         };
       });
       const itemAgg = new Map<string, { name: string; quantity: number; revenue: number }>();
@@ -737,10 +757,19 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
           takeaway: 0,
           dinein: 0,
         };
-        cur.orders += 1;
-        const earnings = orderNetEarnings(o);
-        cur.revenue += earnings;
         const stream = orderPaymentChannel(o);
+        // Order count, revenue, channel mix and AOV all come from the same
+        // counted-sale rule, so one card can never quote a total, a channel
+        // split and an average that disagree with each other.
+        if (isCountedSaleOrder(o)) {
+          cur.orders += 1;
+          cur.revenue += orderNetEarnings(o);
+          const ch = String(o.orderType || "delivery");
+          if (ch === "takeaway") cur.takeaway += 1;
+          else if (ch === "dinein") cur.dinein += 1;
+          else cur.delivery += 1;
+        }
+        const earnings = orderNetEarnings(o);
         if (stream === "razorpay") {
           cur.razorpayRevenue += earnings;
           cur.razorpayOrders += 1;
@@ -754,10 +783,6 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         } else {
           cur.unpaidOrders += 1;
         }
-        const ch = String(o.orderType || "delivery");
-        if (ch === "takeaway") cur.takeaway += 1;
-        else if (ch === "dinein") cur.dinein += 1;
-        else cur.delivery += 1;
         branchAgg.set(bid, cur);
       }
 
@@ -797,6 +822,9 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
       // order timestamps. avgPrepMinutes is unmeasured: 0, never 13.5/8.2.
       const hourAgg = new Map<number, { orders: number; revenue: number }>();
       for (const o of liveOrders) {
+        // Only counted sales shape the rush profile; unpaid online orders never
+        // reached the kitchen and would fake a peak.
+        if (!isCountedSaleOrder(o as any)) continue;
         const c = (o as any).createdAt;
         const d =
           c?.toDate?.() instanceof Date
@@ -831,6 +859,7 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
       // 3-Way Fulfillment Breakdown — real channel counts off orderType.
       const chanAgg = { delivery: { orders: 0, revenue: 0 }, takeaway: { orders: 0, revenue: 0 }, dinein: { orders: 0, revenue: 0 } };
       for (const o of liveOrders) {
+        if (!isCountedSaleOrder(o as any)) continue;
         const ch = String((o as any).orderType || "delivery");
         const slot = ch === "takeaway" ? chanAgg.takeaway : ch === "dinein" ? chanAgg.dinein : chanAgg.delivery;
         slot.orders += 1;

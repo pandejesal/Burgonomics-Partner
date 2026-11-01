@@ -243,7 +243,7 @@ export const AdminAnalyticsPage: React.FC = () => {
               title="Average Order Value"
               value={!hasSnapshot ? "—" : formatINR(aovPaise)}
               icon={Eye}
-              subtext="Net revenue per completed order"
+              subtext="Revenue ÷ counted orders (paid + completed)"
             />
           </div>
 

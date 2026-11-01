@@ -37,6 +37,8 @@ export interface OrderRevenueShape {
   status?: string | null;
   total?: number | null;
   deliveryFee?: number | null;
+  /** Order timestamp (Firestore Timestamp, Date, ISO string or millis). */
+  createdAt?: unknown;
   /** Server-stamped top-level marker; the only proof of a gateway capture. */
   paymentChannel?: string | null;
   /** Walk-in sentinel customer id (staff-created counter order). */
@@ -331,6 +333,78 @@ export interface OrderRevenueSummary {
   cashOrders: number;
   /** Non-completed counter/cash orders — a receivable, never earnings. */
   cashPendingOrders: number;
+}
+
+/** Sales figures for one slice (a day, a branch, a period) under the shared rule. */
+export interface CountedSalesSummary {
+  /**
+   * Rupees actually earned: what the branch keeps, net of the courier fee the
+   * brand paid and of any partial refund. This is the figure Analytics shows.
+   */
+  revenue: number;
+  /**
+   * Invoiced value of the same counted orders before refunds/courier fee — the
+   * admin revenue board subtracts its own refund ledger from this.
+   */
+  grossRevenue: number;
+  /** Orders that count: captured Razorpay + completed cash/counter. */
+  orderCount: number;
+  /** `revenue / orderCount` — never divided by unpaid or void orders. */
+  averageOrderValue: number;
+}
+
+/**
+ * Owner decision (1 Nov 2026), the ONE rule every revenue surface uses:
+ *   - Only the server `paymentChannel === "razorpay"` proves an online payment;
+ *     a walk-in or COD order is cash & counter.
+ *   - Cash counts only once the order is completed (delivered / picked up).
+ *   - An unpaid online order is not an order yet — it never reached the kitchen.
+ *   - A cancelled or refunded order never counts.
+ * Dashboard and Analytics both call this, so the same order set can never
+ * produce two different revenue/order/AOV numbers.
+ */
+export function isCountedSaleOrder(order: OrderRevenueShape): boolean {
+  if (isVoidOrder(order)) return false;
+  const stream = orderPaymentChannel(order);
+  if (stream === 'razorpay') return true;
+  return stream === 'cash' && isCompletedOrder(order);
+}
+
+/** Same rule, scoped to one Asia/Kolkata calendar day (the dashboard's "today"). */
+export function summarizeIstDaySales(
+  orders: readonly OrderRevenueShape[],
+  now: Date = new Date()
+): CountedSalesSummary {
+  const dayKey = istDayKey(now);
+  if (!dayKey) return { revenue: 0, grossRevenue: 0, orderCount: 0, averageOrderValue: 0 };
+  return summarizeCountedSales(
+    orders.filter((order) => istDayKey((order as { createdAt?: unknown }).createdAt) === dayKey)
+  );
+}
+
+export function summarizeCountedSales(
+  orders: readonly OrderRevenueShape[]
+): CountedSalesSummary {
+  let revenue = 0;
+  let grossRevenue = 0;
+  let orderCount = 0;
+  for (const order of orders) {
+    if (!isCountedSaleOrder(order)) continue;
+    revenue += orderNetEarnings(order);
+    grossRevenue += orderNetRevenue(order);
+    orderCount += 1;
+  }
+  // Whole-paise precision: prices are GST-inclusive rupee amounts, so a
+  // rounded-to-rupee total would lose real money (₹10.45 → ₹10) and the
+  // admin dashboard divides this back into paise.
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const roundedRevenue = round2(revenue);
+  return {
+    revenue: roundedRevenue,
+    grossRevenue: round2(grossRevenue),
+    orderCount,
+    averageOrderValue: orderCount > 0 ? Math.round(roundedRevenue / orderCount) : 0,
+  };
 }
 
 /**

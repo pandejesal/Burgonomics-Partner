@@ -382,7 +382,7 @@ export const AdminPaymentsPage: React.FC<AdminPaymentsPageProps> = ({
         <AdminCard className="relative overflow-hidden">
           <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-full blur-3xl -mr-8 -mt-8" />
           <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest font-mono">
-            TODAY'S REVENUE
+            TODAY'S GATEWAY REVENUE
           </span>
           <span className="block text-3xl font-black font-mono tracking-tight text-gray-900 dark:text-white mt-1">
             {streamError

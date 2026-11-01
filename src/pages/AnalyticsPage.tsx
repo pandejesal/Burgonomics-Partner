@@ -70,7 +70,7 @@ export function AnalyticsPage() {
       [
         { header: 'Branch Name', accessor: (r: any) => r.branchName },
         { header: 'City', accessor: (r: any) => r.city },
-        { header: 'Total Earnings (INR)', accessor: (r: any) => r.grossRevenue },
+        { header: 'Total Net Earnings (INR)', accessor: (r: any) => r.grossRevenue },
         { header: 'Razorpay Earnings (INR)', accessor: (r: any) => r.razorpayRevenue },
         { header: 'Razorpay Orders', accessor: (r: any) => r.razorpayOrders },
         { header: 'Cash & Counter (INR)', accessor: (r: any) => r.cashCounterRevenue },
@@ -102,7 +102,7 @@ export function AnalyticsPage() {
             </span>
           </div>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Gross sales velocity, separate Razorpay and Cash & counter earnings, peak rush heatmaps, and courier logistics audit
+            Net branch earnings (courier fee and refunds already deducted), separate Razorpay and Cash &amp; counter streams, peak rush heatmaps, and courier logistics audit
           </p>
         </div>
 
@@ -138,7 +138,7 @@ export function AnalyticsPage() {
       {/* Executive KPI Cards (5 Cards) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
         <StatsCard
-          title="Total Gross Revenue"
+          title="Total Net Revenue"
           value={`₹${analytics.totalRevenue.toLocaleString()}`}
           icon={DollarSign}
           color="primary"

@@ -164,6 +164,8 @@ interface KpiCardProps {
   };
   sparklineData?: number[];
   lastUpdated?: string;
+  /** What basis the value is measured on — stated, never implied. */
+  caption?: string;
   isLoading: boolean;
   isError: boolean;
   refetch: () => void;
@@ -177,6 +179,7 @@ const KpiCard: React.FC<KpiCardProps> = ({
   trend,
   sparklineData,
   lastUpdated,
+  caption,
   isLoading,
   isError,
   refetch,
@@ -244,6 +247,11 @@ const KpiCard: React.FC<KpiCardProps> = ({
           <span className="block text-2xl font-black font-mono tracking-tight text-gray-900 dark:text-white">
             {value}
           </span>
+          {caption ? (
+            <span className="block text-[9px] font-semibold text-gray-400 leading-tight max-w-[160px]">
+              {caption}
+            </span>
+          ) : null}
         </div>
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gray-50 dark:bg-gray-900/50 text-primary dark:text-emerald-400 group-hover:bg-primary group-hover:text-white dark:group-hover:bg-emerald-800 dark:group-hover:text-white transition-all">
           <Icon size={18} />
@@ -399,6 +407,7 @@ export const KpiSection: React.FC<KpiSectionProps> = ({ dateRange, storeId }) =>
         trend={revenueTrend}
         sparklineData={revenueSparkline}
         lastUpdated={summaryFreshness}
+        caption="Paid + completed cash, net of refunds"
         isLoading={isSummaryLoading}
         isError={isSummaryError}
         refetch={refetchSummary}
@@ -413,6 +422,7 @@ export const KpiSection: React.FC<KpiSectionProps> = ({ dateRange, storeId }) =>
         trend={ordersTrend}
         sparklineData={orderSparkline}
         lastUpdated={summaryFreshness}
+        caption="Paid + completed cash orders"
         isLoading={isSummaryLoading}
         isError={isSummaryError}
         refetch={refetchSummary}
@@ -464,6 +474,7 @@ export const KpiSection: React.FC<KpiSectionProps> = ({ dateRange, storeId }) =>
         icon={Calculator}
         trend={aovTrend}
         lastUpdated={summaryFreshness}
+        caption="Revenue ÷ counted orders"
         isLoading={isSummaryLoading}
         isError={isSummaryError}
         refetch={refetchSummary}
