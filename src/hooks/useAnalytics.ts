@@ -117,6 +117,7 @@ export interface MonthlyStatementMonth {
   monthKey: string;
   label: string;
   rows: MonthlyStatementRow[];
+  summary?: { razorpayRevenue: number; cashRevenue: number };
   /** False when `branch_monthly_fees` could not be read for this role. */
   available: boolean;
   unavailableReason?: 'not_available_for_role' | 'read_failed';
@@ -358,6 +359,7 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
       const startTimestamp = Timestamp.fromDate(startDate);
 
       let orders: any[] = [];
+      let aliasedOrders: Array<{ id: string; data: Record<string, any> }> = [];
       try {
         // Loop 51/120: bounded — a year view must not pull unbounded history.
         const ORDER_CAP = 2000;
@@ -391,6 +393,7 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         if (branchIds.length > 0) {
           try {
             const aliased = await fetchAliasedStoreOrders(db, branchIds);
+            aliasedOrders = aliased;
             const seen = new Set(rawDocs.map((d) => d.id));
             for (const doc of aliased) {
               if (!seen.has(doc.id)) {
@@ -412,7 +415,8 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
           .filter((o: any) => {
             const c = (o as any).createdAt;
             const ms = c?.toMillis?.() ?? (c?.toDate ? c.toDate().getTime() : new Date(c ?? 0).getTime());
-            return Number.isFinite(ms) ? ms >= startDate.getTime() : false;
+            return Number.isFinite(ms) && ms >= startDate.getTime() &&
+              (period !== 'month' || istMonthKey(c) === istMonthKey(now));
           });
       } catch (err) {
         console.warn('Error querying orders for analytics:', err);
@@ -523,8 +527,16 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
                   limit(2000)
                 );
           const snap = await getDocs(statementQuery);
-          statementOrders = snap.docs
-            .map((d) => normalizeOrderDoc(d.id, d.data() as Record<string, any>))
+          const rawStatement = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
+          const seen = new Set(rawStatement.map((d) => d.id));
+          for (const order of aliasedOrders) {
+            if (!seen.has(order.id)) {
+              seen.add(order.id);
+              rawStatement.push(order);
+            }
+          }
+          statementOrders = rawStatement
+            .map((d) => normalizeOrderDoc(d.id, d.data))
             .filter((o: any) => !branchIds.length || branchIds.includes(o.branchId)) as unknown as NormOrder[];
         } catch {
           warnings.push('Monthly statement orders could not be loaded.');
@@ -570,7 +582,10 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
       }
 
       const buildMonthlyStatement = (monthKey: string): MonthlyStatementMonth => {
-        const monthOrders = statementOrders.filter((o) => istMonthKey(o.createdAt) === monthKey);
+        // In the month view, use the exact same current-month population as
+        // the headline, including alias merges and any query cap.
+        const source = period === 'month' && monthKey === currentMonthKey ? orders : statementOrders;
+        const monthOrders: NormOrder[] = source.filter((o: NormOrder) => istMonthKey(o.createdAt) === monthKey);
         const ids = new Set<string>();
         branchIds.forEach((id) => ids.add(id));
         monthOrders.forEach((o) => {
@@ -585,15 +600,11 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         const rows: MonthlyStatementRow[] = [...ids]
           .map((bid) => {
             const branchOrders = monthOrders.filter((o) => String(o.branchId ?? '') === bid);
-            let razorpayEarnings = 0;
-            let cashEarnings = 0;
+            const branchSummary = summarizeOrderRevenue(branchOrders);
             let courierOnCash = 0;
             for (const o of branchOrders) {
               const stream = orderPaymentChannel(o);
-              if (stream === 'razorpay') {
-                razorpayEarnings += orderNetEarnings(o);
-              } else if (stream === 'cash' && isCompletedOrder(o)) {
-                cashEarnings += orderNetEarnings(o);
+              if (stream === 'cash' && isCompletedOrder(o)) {
                 courierOnCash += Number(o.deliveryFee) || 0;
               }
             }
@@ -621,8 +632,8 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
               city: branchMeta[bid]?.city || firstOrder?.city || '',
               linkedAccountId: hasRealAccount ? accountId : 'unlinked',
               linkedStatus: (hasRealAccount ? 'verified' : 'pending') as MonthlyStatementRow['linkedStatus'],
-              razorpayEarnings: Math.round(razorpayEarnings),
-              cashEarnings: Math.round(cashEarnings),
+              razorpayEarnings: branchSummary.razorpayRevenue,
+              cashEarnings: branchSummary.cashRevenue,
               courierOnCash: Math.round(courierOnCash),
               fee,
               collected,
@@ -635,6 +646,7 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
           monthKey,
           label: istMonthLabel(monthKey),
           rows,
+          summary: summarizeOrderRevenue(monthOrders),
           available: ledgerAvailable,
           ...(ledgerUnavailableReason && !ledgerAvailable
             ? { unavailableReason: ledgerUnavailableReason }

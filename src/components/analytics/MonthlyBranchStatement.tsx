@@ -21,8 +21,8 @@ export function MonthlyBranchStatement({ current, previous }: MonthlyBranchState
   const [selected, setSelected] = useState<'current' | 'previous'>('current');
   const statement = selected === 'current' ? current : previous;
 
-  const totalRazorpay = statement.rows.reduce((s, r) => s + r.razorpayEarnings, 0);
-  const totalCash = statement.rows.reduce((s, r) => s + r.cashEarnings, 0);
+  const totalRazorpay = statement.summary?.razorpayRevenue ?? statement.rows.reduce((s, r) => s + r.razorpayEarnings, 0);
+  const totalCash = statement.summary?.cashRevenue ?? statement.rows.reduce((s, r) => s + r.cashEarnings, 0);
   const totalCourierOnCash = statement.rows.reduce((s, r) => s + r.courierOnCash, 0);
   const totalCollected = statement.available
     ? statement.rows.reduce((s, r) => s + (r.collected ?? 0), 0)
