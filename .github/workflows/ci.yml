@@ -92,15 +92,14 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Prepare native production configuration
-        run: node scripts/prepare-native-config.mjs ios
+      - name: Prepare simulator-only compile fixture
+        run: node scripts/prepare-simulator-config.mjs
         env:
-          MOBILE_PRODUCTION_ENV: ${{ secrets.MOBILE_PRODUCTION_ENV }}
-          GOOGLE_SERVICE_INFO_PLIST_BASE64: ${{ secrets.GOOGLE_SERVICE_INFO_PLIST_BASE64 }}
-      - run: npm run build:mobile
+          CI_SIMULATOR_ONLY: 'true'
+      - run: npm run build:mobile -- --mode staging
       - run: npx cap sync ios
       - run: node scripts/configure-ios-firebase.mjs
-      - run: xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release -destination "generic/platform=iOS Simulator" -derivedDataPath build/DerivedData build
+      - run: xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release -destination "generic/platform=iOS Simulator" -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO build
         working-directory: .
 
   release-aab:
