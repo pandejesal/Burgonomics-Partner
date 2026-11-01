@@ -4,6 +4,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "prebuild": "node scripts/generate-aasa.mjs",
+    "prebuild:mobile": "node scripts/generate-aasa.mjs",
     "dev": "vite",
     "build": "tsc && vite build",
     "build:mobile": "node scripts/mobile-config-preflight.mjs --platform=shared && tsc && vite build",

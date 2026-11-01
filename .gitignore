@@ -48,3 +48,6 @@ GoogleService-Info.plist
 
 # Playwright / harness run output
 test-results/
+
+# Generated only with a real TEAM_ID; never commit a placeholder.
+public/.well-known/apple-app-site-association
