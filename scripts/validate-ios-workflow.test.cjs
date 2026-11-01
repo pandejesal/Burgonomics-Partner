@@ -150,18 +150,16 @@ test('no hardcoded Xcode app path in executable config (comments stripped)', () 
 // 4. iOS jobs stay credential-free / unsigned (this lane's safety posture)
 // ---------------------------------------------------------------------------
 
-test('ios jobs: no secrets, no store-upload/signing tooling; archive keeps CODE_SIGNING_ALLOWED=NO', (t) => {
-  if (!yaml) return t.skip('js-yaml not resolvable from this checkout');
-  const doc = loadYaml(WORKFLOW);
-  for (const name of ['ios', 'ios-archive']) {
-    const jobText = JSON.stringify(doc.jobs[name]);
-    assert.ok(!jobText.includes('secrets.'), `${name}: references secrets — iOS jobs must stay credential-free`);
-    for (const token of FORBIDDEN_SIGNING_TOKENS) {
-      assert.ok(!jobText.includes(token), `${name}: forbidden signing/store token: ${token}`);
-    }
-  }
-  const archiveRuns = jobSteps(doc, 'ios-archive').map(stepRun).join('\n');
-  assert.ok(archiveRuns.includes('CODE_SIGNING_ALLOWED=NO'), 'ios-archive must keep CODE_SIGNING_ALLOWED=NO');
+test('distribution signing is manual, complete-secret gated and export-only', () => {
+  const source = fs.readFileSync(path.join(__dirname, 'archive_ios.py'), 'utf8');
+  assert.ok(source.includes("return 'unsigned'"));
+  assert.ok(source.includes('Incomplete iOS signing secrets'));
+  assert.ok(source.includes('CODE_SIGNING_ALLOWED=NO'));
+  assert.ok(source.includes('-exportArchive'));
+  assert.ok(source.includes("'destination': 'export'"));
+  const workflow = fs.readFileSync(WORKFLOW, 'utf8');
+  assert.ok(workflow.includes("steps.archive.outputs.signed == 'true'"));
+  assert.ok(workflow.includes('ASC_API_KEY_BASE64'));
 });
 
 // ---------------------------------------------------------------------------
