@@ -1,5 +1,7 @@
 name: iOS Build (Capacitor)
 on:
+  push:
+    branches: ['review/**']
   workflow_dispatch:
 permissions:
   contents: read
