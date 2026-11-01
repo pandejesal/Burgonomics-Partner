@@ -9,10 +9,18 @@ import {
   CheckCircle2,
   Clock,
   ArrowUpRight,
+  ImageIcon,
 } from 'lucide-react';
 import { EscalationTierBadge } from './EscalationTierBadge';
 import type { Ticket, TicketPriority } from '@/types';
 import { resolveTicketTier } from '@/utils/ticketContract';
+import { safeEvidenceUrl } from '@/components/tickets/TicketEvidence';
+
+/** How many trusted evidence photos a ticket carries (for the queue hint). */
+function countEvidencePhotos(ticket: Ticket): number {
+  const list = Array.isArray(ticket.attachments) ? ticket.attachments : [];
+  return new Set(list.map((raw) => safeEvidenceUrl(raw)).filter((u): u is string => u !== null)).size;
+}
 
 interface TicketQueueTableProps {
   tickets: Ticket[];
@@ -148,6 +156,18 @@ export function TicketQueueTable({
                           #{shortCode}
                         </span>
                         <span className="text-sm">{catIcon}</span>
+                        {/* Evidence hint: lets staff see a ticket carries photos
+                            without opening it. Counts only https Storage URLs,
+                            the same filter the detail view renders. */}
+                        {countEvidencePhotos(t) > 0 && (
+                          <span
+                            title={`${countEvidencePhotos(t)} customer photo(s) attached`}
+                            className="inline-flex items-center gap-0.5 rounded-md bg-neutral-800 px-1.5 py-0.5 text-[10px] font-bold text-neutral-300"
+                          >
+                            <ImageIcon className="w-3 h-3" aria-hidden />
+                            {countEvidencePhotos(t)}
+                          </span>
+                        )}
                       </div>
                       <Link
                         to={`/tickets/${t.id}`}

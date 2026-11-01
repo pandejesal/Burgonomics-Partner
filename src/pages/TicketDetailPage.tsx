@@ -12,6 +12,7 @@ import {
   canEscalateToTier,
   type CanonicalTierLevel,
 } from '@/utils/ticketContract';
+import { TicketEvidence } from '@/components/tickets/TicketEvidence';
 import {
   ArrowLeft,
   ShieldAlert,
@@ -483,6 +484,15 @@ export function TicketDetailPage() {
             {ticket.message || (ticket as any).description || 'No description provided.'}
           </div>
         </div>
+
+        {/* Customer photo evidence — the attachments the customer uploaded.
+            Renders nothing when there are none. URLs are filtered to Firebase
+            Storage https hosts inside TicketEvidence because they are
+            customer-supplied input. */}
+        <TicketEvidence
+          attachments={ticket.attachments}
+          ticketLabel={(ticket as any).ticketNumber || ticket.id}
+        />
 
         {/* Developer Diagnostics Drawer — role-gated (developer/brand_owner
             only, fail-closed) and only for Tier 3 or when diagnostics present) */}
