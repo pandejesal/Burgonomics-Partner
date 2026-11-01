@@ -1,13 +1,11 @@
 import { auth, db } from "@/config/firebase";
 import {
   collection,
-  addDoc,
   getDocs,
   limit,
   onSnapshot,
   orderBy,
   query,
-  serverTimestamp,
 } from "firebase/firestore";
 import { mapOrderToPetpoojaSaveOrder, type PetpoojaSaveOrderPayload } from "./mapper";
 import type {
@@ -64,8 +62,6 @@ interface OutboxEntry {
 
 const DEFAULT_OUTBOX_KEY = "burgonomics.petpooja.outbox.v1";
 const CACHE_TTL_MS = 60_000;
-/** Firestore log writes must never hang the UI — bounded best-effort. */
-const LOG_WRITE_TIMEOUT_MS = 4_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
@@ -124,7 +120,6 @@ export class HttpPetpoojaGateway implements PetpoojaGateway {
   private readonly fetchImpl: typeof fetch;
   private readonly outboxKey: string;
   private readonly breakerThreshold: number;
-  private readonly logTimeout: number;
 
   private breakers = new Map<string, { state: "closed" | "open" | "half-open"; failures: number }>();
   private readonly store = createKeyValueStore();
@@ -139,7 +134,6 @@ export class HttpPetpoojaGateway implements PetpoojaGateway {
     this.fetchImpl = opts.fetchImpl || fetch.bind(globalThis);
     this.outboxKey = opts.outboxKey || DEFAULT_OUTBOX_KEY;
     this.breakerThreshold = opts.breakerThreshold ?? 5;
-    this.logTimeout = opts.logWriteTimeoutMs ?? LOG_WRITE_TIMEOUT_MS;
   }
 
   // -- transport ---------------------------------------------------------
@@ -309,11 +303,10 @@ export class HttpPetpoojaGateway implements PetpoojaGateway {
       );
       const itemsSynced = res.itemCount ?? res.syncedItems ?? 0;
       const categoriesCount = res.categoriesCount ?? res.syncedCategories ?? 0;
-      await this.writeSyncLog(storeId, "FULL", itemsSynced, categoriesCount, null);
+      // Sync logging is server-side (`petpooja_sync_logs` is `allow write: if
+      // false`); the server already records this push.
       return { itemsSynced, syncedAt: new Date().toISOString(), categoriesCount, addonGroupsCount: 0 };
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Menu sync failed";
-      await this.writeSyncLog(storeId, "FULL", 0, 0, message);
       return { itemsSynced: 0, syncedAt: new Date().toISOString(), categoriesCount: 0, addonGroupsCount: 0 };
     }
   }
@@ -710,39 +703,6 @@ export class HttpPetpoojaGateway implements PetpoojaGateway {
 
   // -- private ---------------------------------------------------------------
 
-  private async writeSyncLog(
-    storeId: string,
-    scope: "FULL" | "INCREMENTAL" | "STOCK" | "STATUS",
-    created: number,
-    updated: number,
-    error: string | null
-  ) {
-    try {
-      await withTimeout(
-        addDoc(collection(db, "petpooja_sync_logs"), {
-          storeName: storeId,
-          storeId,
-          scope,
-          status: error ? "FAILED" : "COMPLETED",
-          version: "live",
-          startedAt: new Date().toISOString(),
-          finishedAt: new Date().toISOString(),
-          createdAt: serverTimestamp(),
-          duration: "live",
-          created,
-          updated,
-          deleted: 0,
-          conflicts: 0,
-          error,
-          simulated: false,
-          source: "httpGateway",
-        }),
-        this.logTimeout
-      );
-    } catch (err) {
-      console.warn("HttpPetpoojaGateway: sync log persist failed:", err);
-    }
-  }
 }
 
 function openBreakersCount(breakers: Map<string, { state: string }>): number {
