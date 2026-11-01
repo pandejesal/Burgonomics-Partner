@@ -28,6 +28,28 @@ describe('ticketContract — partner ticket normalization', () => {
     expect(normalizeTimeline(undefined)).toEqual([]);
   });
 
+  it('reduces a server resolution object to its notes, never handing the page an object', () => {
+    // resolveTicket stores this object; React cannot render it, and the page crashed.
+    const resolution = {
+      action: 'full_refund',
+      amount: 0,
+      couponCode: null,
+      notes: 'Approved by operator',
+      refundResult: { id: 'rfnd_1', payment_id: 'pay_1', status: 'processed', reused: true },
+      resolvedBy: 'uid_1',
+      resolvedByName: 'Staff',
+      resolvedAt: { seconds: 1 },
+    };
+    expect(normalizeTicketDoc('t1', { resolution }).resolution).toBe('Approved by operator');
+    expect(normalizeSupportTicketDoc('t1', { resolution }).resolution).toBe('Approved by operator');
+    // resolveTicketNote stores a plain string.
+    expect(normalizeTicketDoc('t2', { resolution: 'Spoke to the customer' }).resolution).toBe(
+      'Spoke to the customer',
+    );
+    expect(normalizeTicketDoc('t3', { resolution: { action: 'explanation' } }).resolution).toBe('');
+    expect(normalizeTicketDoc('t4', {}).resolution).toBeUndefined();
+  });
+
   it('passes every real writer status through, including escalated', () => {
     for (const s of ['open', 'in_progress', 'escalated', 'resolved', 'closed'] as const) {
       expect(normalizeTicketStatus(s)).toBe(s);

@@ -94,6 +94,7 @@ export function normalizeTicketDoc(id: string, data: Record<string, any>): Ticke
   const normalized = {
     ...data,
     id,
+    resolution: resolutionText(data.resolution),
     status: normalizeTicketStatus(data.status),
     ...(quarantined ? { quarantineReason: ticketStatusQuarantineReason(data.status) } : {}),
     assignedTo:
@@ -103,6 +104,14 @@ export function normalizeTicketDoc(id: string, data: Record<string, any>): Ticke
     timeline: normalizeTimeline(data.timeline),
   };
   return normalized as unknown as Ticket;
+}
+
+/** resolveTicket stores an object and resolveTicketNote a string; pages render text. */
+function resolutionText(resolution: unknown): string | undefined {
+  if (resolution === undefined || resolution === null) return undefined;
+  if (typeof resolution === 'string') return resolution;
+  const notes = (resolution as { notes?: unknown }).notes;
+  return typeof notes === 'string' ? notes : '';
 }
 
 export type CanonicalTierLevel = 'L1_STORE' | 'L2_REGIONAL' | 'L3_EXECUTIVE';
@@ -142,7 +151,7 @@ export function normalizeSupportTicketDoc(id: string, data: Record<string, any>)
     escalationLevel: data.escalationLevel,
     assignedToName: data.assignedToName,
     attachments: data.attachments || [],
-    resolution: data.resolution?.notes || data.resolution || '',
+    resolution: data.resolution ?? '',
     createdAt: data.createdAt || { seconds: Math.floor(Date.now() / 1000) },
     updatedAt: data.updatedAt || { seconds: Math.floor(Date.now() / 1000) },
   });
