@@ -25,6 +25,7 @@ import {
   generateWalkInOrderId,
 } from '@/features/orders/utils/walkInOrder';
 import { useWalkInPackagingFee } from '@/features/orders/hooks/useWalkInPackagingFee';
+import { stripUndefinedDeep } from '@/utils/firestorePayload';
 
 interface ManualOrderCreateModalProps {
   isOpen: boolean;
@@ -178,7 +179,8 @@ export function ManualOrderCreateModal({
       name: i.item.name,
       quantity: i.quantity,
       price: i.item.price,
-      specialInstructions: i.notes,
+      // Omit the key entirely: Firestore rejects an undefined field value.
+      ...(i.notes ? { specialInstructions: i.notes } : {}),
     }));
 
     // Random Firestore auto-id — never Date.now(): the old 6-digit stamp
@@ -207,7 +209,7 @@ export function ManualOrderCreateModal({
       deliveryFee: 0,
       total,
       orderType,
-      tableNumber: orderType === 'dinein' ? tableNumber || '01' : undefined,
+      ...(orderType === 'dinein' ? { tableNumber: tableNumber || '01' } : {}),
       // Delivery-compatible object form (see orderContract): ALL readers go
       // through normalizeOrderDoc/toPartnerStatus, which map this to
       // 'pending' (pinned by tests/order-contract.test.ts). Never read
@@ -225,10 +227,13 @@ export function ManualOrderCreateModal({
     // Success-only close: the old code closed + toasted success even when the
     // write failed (offline/denied) — staff lost the whole form believing the
     // order existed. On failure the modal stays open with every field intact.
+    const safeOrder = stripUndefinedDeep(newOrder);
     setSubmitError(null);
     try {
       const orderRef = doc(db, 'orders', orderId);
-      await createOrderDocIfAbsent(orderRef, newOrder, {
+      // getFirestore has no ignoreUndefinedProperties: any undefined field
+      // (top-level or nested item) throws client-side before the write.
+      await createOrderDocIfAbsent(orderRef, safeOrder, {
         get: (ref) => getDoc(ref as typeof orderRef),
         set: (ref, data) => setDoc(ref as typeof orderRef, data as Order),
       });
@@ -241,7 +246,7 @@ export function ManualOrderCreateModal({
     }
 
     setIsSubmitting(false);
-    onOrderCreated?.(newOrder);
+    onOrderCreated?.(safeOrder);
     onClose();
   };
 

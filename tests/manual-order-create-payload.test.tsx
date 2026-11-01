@@ -154,6 +154,37 @@ describe('Manual walk-in order — actual create payload', () => {
       'terminal',
     ]);
 
+    // Real Firestore rejects `undefined` field values (getFirestore has no
+    // ignoreUndefinedProperties) — the submitted doc must contain none, at any
+    // depth. Takeaway defaults used to send tableNumber: undefined and per-item
+    // specialInstructions: undefined, so this failed client-side before any
+    // network call.
+    const findUndefinedPaths = (value: unknown, path = ''): string[] => {
+      if (value === undefined) return [path || '<root>'];
+      if (Array.isArray(value)) {
+        return value.flatMap((entry, index) => findUndefinedPaths(entry, `${path}[${index}]`));
+      }
+      if (value && typeof value === 'object') {
+        return Object.entries(value as Record<string, unknown>).flatMap(([key, entry]) =>
+          findUndefinedPaths(entry, path ? `${path}.${key}` : key)
+        );
+      }
+      return [];
+    };
+    expect(findUndefinedPaths(payload)).toEqual([]);
+
+    // Every top-level key is on the rules' create allowlist.
+    const CREATE_ALLOWLIST = [
+      'id', 'shortCode', 'orderId', 'customerId', 'userId', 'branchId', 'branchName', 'city',
+      'branchCoordinates', 'orderType', 'fulfillment', 'tableNumber', 'customerName', 'customerPhone',
+      'items', 'subtotal', 'tax', 'deliveryFee', 'total', 'totals', 'tipAmount', 'promo',
+      'loyaltyPointsRedeemed', 'checkoutFingerprint', 'store', 'address', 'deliveryAddress',
+      'deliveryQuoteId', 'notes', 'specialInstructions', 'fulfillmentInstructions', 'status',
+      'payment', 'paymentMethod', 'paymentStatus', 'whatsappOptIn', 'placedAt', 'estimatedAt',
+      'createdAt', 'updatedAt', 'petpoojaError',
+    ];
+    expect(Object.keys(payload).filter((key) => !CREATE_ALLOWLIST.includes(key))).toEqual([]);
+
     // Cash walk-in totals and line items remain the operator's payload.
     expect(payload.paymentMethod).toBe('cod');
     expect(payload.paymentStatus).toBe('completed');
@@ -164,7 +195,6 @@ describe('Manual walk-in order — actual create payload', () => {
         name: 'Paneer Makhani Burst Burger',
         quantity: 1,
         price: 199,
-        specialInstructions: undefined,
       },
       {
         itemId: 'itm_peri_peri_fries',
@@ -172,7 +202,6 @@ describe('Manual walk-in order — actual create payload', () => {
         name: 'Peri-Peri Crinkle Fries',
         quantity: 1,
         price: 99,
-        specialInstructions: undefined,
       },
     ]);
     expect(payload.subtotal).toBe(298);
