@@ -1,3 +1,4 @@
+import { LegalLinks } from '@/components/LegalLinks';
 import { useState, type FormEvent } from 'react';
 import { useAuthContext } from '@/core/auth/AuthContext';
 import { useAuthStore } from '@/stores/authStore';
@@ -196,6 +197,7 @@ export function LoginPage() {
               )}
             </button>
           </form>
+          <LegalLinks />
         </div>
       </div>
     </main>

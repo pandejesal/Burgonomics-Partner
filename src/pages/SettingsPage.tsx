@@ -1,3 +1,4 @@
+import { LegalLinks } from '@/components/LegalLinks';
 import React, { useState } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { useBranches } from '@/hooks/useBranches';
@@ -107,6 +108,8 @@ export function SettingsPage() {
           </div>
         </div>
       </div>
+
+      <LegalLinks />
 
       {/* 5. System Diagnostics & Info */}
       <div className="p-4 rounded-2xl bg-neutral-950 border border-neutral-850 flex items-center justify-between text-xs text-neutral-400">

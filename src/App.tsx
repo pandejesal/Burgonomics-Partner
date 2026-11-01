@@ -2,6 +2,7 @@ import { BrowserRouter, HashRouter, Routes, Route, Navigate, useLocation } from 
 import { useEffect, type ReactNode } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { QueryClient, QueryClientProvider, QueryCache, MutationCache } from '@tanstack/react-query';
+import { PrivacyPage, SupportPage } from '@/pages/PrivacyPage';
 import { LoginPage } from '@/pages/LoginPage';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { OrdersPage } from '@/pages/OrdersPage';
@@ -98,6 +99,8 @@ function App() {
           {/* Public routes — single sign-in lives here. The legacy
               second login at /admin/login is gone (redirects to /login). */}
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/support" element={<SupportPage />} />
 
           {/* Protected partner routes — one Firebase session for everything,
               including the migrated Control Room (/admin/*). */}
