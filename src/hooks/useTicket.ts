@@ -4,6 +4,7 @@ import { doc, getDoc, updateDoc, Timestamp, setDoc, collection, arrayUnion } fro
 import type { Ticket, TicketStatus } from '@/types';
 import { normalizeTicketDoc } from '@/utils/ticketContract';
 import { resolveTicketActorRole } from '@/utils/ticketActorRole';
+import { canWriteTicketTimelineDirectly } from '@/core/auth/routePolicy';
 import { useAuthStore } from '@/stores/authStore';
 
 export function useTicket(ticketId: string) {
@@ -173,6 +174,15 @@ export function useTicket(ticketId: string) {
           senderName: messageData.authorName,
         });
       } catch (serverErr) {
+        // Rules ticket update arms exclude support/regional_manager. Do not
+        // attempt a write that can only be denied, and never surface the raw
+        // permission error: the screen keeps the typed draft on rejection.
+        const callerRole = useAuthStore.getState().user?.role;
+        if (!canWriteTicketTimelineDirectly(callerRole)) {
+          throw new Error(
+            'Reply not sent — the ticket server is unavailable for your role and a direct timeline write is not permitted. Your draft is kept; retry shortly.'
+          );
+        }
         const event = {
           action: 'message_added',
           actorName: messageData.authorName,

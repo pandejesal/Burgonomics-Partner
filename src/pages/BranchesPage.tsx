@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useBranches, type CreateBranchInput } from '@/hooks/useBranches';
 import { useAuthStore } from '@/stores/authStore';
-import { canReadFranchiseLeads, isBrandRole } from '@/core/auth/routePolicy';
+import { canReadFranchiseLeads, canPublishBranchAnnouncement, isBrandRole } from '@/core/auth/routePolicy';
 import { BranchConfigModal } from '@/features/branches/components/BranchConfigModal';
 import { BranchSettingsModal } from '@/components/stores/BranchSettingsModal';
 import { FranchiseLeadsPipeline } from '@/components/stores/FranchiseLeadsPipeline';
@@ -352,7 +352,7 @@ export function BranchesPage() {
                           </button>
                         )}
 
-                        {isComingSoon && (
+                        {isComingSoon && canPublishBranchAnnouncement(user?.role) && (
                           <button
                             onClick={() => setBroadcastingBranch(branch)}
                             className="px-3 py-1.5 rounded-xl bg-[#0E4825] hover:bg-[#155e32] text-white border border-[#4ADE80]/30 font-bold text-xs transition-colors flex items-center gap-1.5 cursor-pointer"

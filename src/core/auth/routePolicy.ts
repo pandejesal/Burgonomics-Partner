@@ -77,6 +77,29 @@ export function canCreateWalkInOrders(role: UserRole | undefined): boolean {
 }
 
 /**
+ * firestore.rules branch_announcements create: globalAnnouncementWriter()
+ * (brand_owner, developer, support) or ownsBranch (branch roles are not on
+ * this screen). regional_manager matches no arm.
+ */
+export function canPublishBranchAnnouncement(role: UserRole | undefined): boolean {
+  return role === 'brand_owner' || role === 'developer' || role === 'support';
+}
+
+/**
+ * firestore.rules ticket update arms: brand_owner/developer, or
+ * branch_owner/branch_staff with ownsBranch. support and regional_manager may
+ * only use the server ticket routes.
+ */
+export function canWriteTicketTimelineDirectly(role: UserRole | undefined): boolean {
+  return (
+    role === 'brand_owner' ||
+    role === 'developer' ||
+    role === 'branch_owner' ||
+    role === 'branch_staff'
+  );
+}
+
+/**
  * Console roles that may hold a partner session. 'customer' is excluded by
  * design (denied above) — it never appears in sidebar/header navigation.
  */
