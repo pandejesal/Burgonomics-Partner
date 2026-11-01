@@ -42,7 +42,17 @@ vi.mock('@tanstack/react-query', () => ({
 
 import { useBranches } from '@/hooks/useBranches';
 
-const PROTECTED = ['monthlyFee', 'packaging', 'packagingFee', 'royaltyPercentage', 'brandRoyaltyPercent'];
+const PROTECTED = [
+  'monthlyFee',
+  'packaging',
+  'packagingFee',
+  'royaltyPercentage',
+  'brandRoyaltyPercent',
+  'petpoojaStoreId',
+  'petpooja',
+  'razorpayAccountId',
+  'servicedRadiusKm',
+];
 
 const protectedPayload = () => ({
   announcementBanner: 'Weekend special',
@@ -51,6 +61,10 @@ const protectedPayload = () => ({
   packagingFee: 15,
   royaltyPercentage: 5,
   brandRoyaltyPercent: 5,
+  petpoojaStoreId: 'PP_SURAT_01',
+  petpooja: { restId: 'x' },
+  razorpayAccountId: 'acc_A1B2C3D4E5F6G7',
+  servicedRadiusKm: 12,
 });
 
 beforeEach(() => {
@@ -83,5 +97,6 @@ describe('useBranches.updateBranchSettings — protected fields', () => {
 
     expect(state.updates).toHaveLength(1);
     expect(state.updates[0].data.monthlyFee).toBe(999);
+    expect(state.updates[0].data.petpoojaStoreId).toBe('PP_SURAT_01');
   });
 });

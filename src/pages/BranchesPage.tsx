@@ -419,6 +419,7 @@ export function BranchesPage() {
           branch={editingBranch}
           onSave={handleSaveBranchSettings}
           loading={updateBranchSettings.isPending}
+          readOnly={user?.role === 'support' || user?.role === 'regional_manager'}
         />
       )}
 

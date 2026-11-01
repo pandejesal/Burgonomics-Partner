@@ -19,6 +19,8 @@ interface BranchSettingsModalProps {
   branch: Branch | null;
   onSave: (branchId: string, updatedSettings: Partial<Branch>) => Promise<void>;
   loading?: boolean;
+  /** support/regional_manager cannot write branches (rules): view only. */
+  readOnly?: boolean;
 }
 
 export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
@@ -27,6 +29,7 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
   branch,
   onSave,
   loading = false,
+  readOnly = false,
 }) => {
   const [name, setName] = useState('');
   const [city, setCity] = useState('');
@@ -102,6 +105,12 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
+          {readOnly && (
+            <div role="note" className="rounded-xl border border-amber-800/60 bg-amber-950/30 p-3 text-xs font-bold text-amber-200">
+              This outlet is read-only for your role. Ask a brand admin to change its settings.
+            </div>
+          )}
+          <fieldset disabled={readOnly} className="space-y-5 border-0 p-0 m-0 min-w-0">
           {/* Order Acceptance Status Switcher */}
           <div className="bg-bg p-4 rounded-xl border border-border space-y-2">
             <label className="block text-xs font-bold text-zinc-300">
@@ -310,6 +319,7 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
               <span>{loading ? 'Broadcasting...' : 'Save & Sync to Delivery App'}</span>
             </button>
           </div>
+          </fieldset>
         </form>
       </div>
     </div>

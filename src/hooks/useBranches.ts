@@ -20,6 +20,13 @@ const BRANCH_DENIED_UPDATE_KEYS = [
   'packagingFee',
   'royaltyPercentage',
   'brandRoyaltyPercent',
+  // firestore.rules branches update deny-list: restIDs and the Route account
+  // are brand-owned. A default-filled form value counts as a change, so these
+  // must be omitted from a branch-role payload.
+  'petpoojaStoreId',
+  'petpooja',
+  'razorpayAccountId',
+  'servicedRadiusKm',
 ] as const;
 
 export interface CreateBranchInput {
