@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { fetchCheckoutFees, type CheckoutFeesOrderType } from '@/services/checkoutFees';
+import { fetchCheckoutFees, packagingQuoteOrderType, type CheckoutFeesOrderType } from '@/services/checkoutFees';
 
 export interface WalkInPackagingFee {
   /** Server value; null while loading or after a failure (never a guess). */
@@ -41,7 +41,7 @@ export function useWalkInPackagingFee({
     setError(null);
     setPackagingFee(null);
 
-    fetchCheckoutFees({ branchId, orderType })
+    fetchCheckoutFees({ branchId, orderType: packagingQuoteOrderType(orderType) })
       .then((fees) => {
         if (cancelled) return;
         setPackagingFee(fees.packagingFee);

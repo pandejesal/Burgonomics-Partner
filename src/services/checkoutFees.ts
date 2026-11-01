@@ -31,6 +31,16 @@ export interface CheckoutFeesResult {
   deliveryFee: number;
 }
 
+/**
+ * Packaging is order-level, so a walk-in delivery has no courier quote: ask
+ * for the takeaway packaging value instead (no courier fee on a walk-in).
+ */
+export function packagingQuoteOrderType(
+  orderType: CheckoutFeesOrderType
+): CheckoutFeesOrderType {
+  return orderType === 'delivery' ? 'takeaway' : orderType;
+}
+
 /** Absolute Functions URL for the fee quote. */
 export function checkoutFeesUrl(): string {
   return `${getFunctionsBaseUrl()}${CHECKOUT_FEES_PATH}`;

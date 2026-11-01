@@ -19,10 +19,19 @@ vi.mock('@/config/firebase', () => ({
 import {
   checkoutFeesUrl,
   fetchCheckoutFees,
+  packagingQuoteOrderType,
 } from '@/services/checkoutFees';
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe('packagingQuoteOrderType', () => {
+  it('asks for takeaway packaging on a walk-in delivery (order-level, no courier fee)', () => {
+    expect(packagingQuoteOrderType('delivery')).toBe('takeaway');
+    expect(packagingQuoteOrderType('takeaway')).toBe('takeaway');
+    expect(packagingQuoteOrderType('dinein')).toBe('dinein');
+  });
 });
 
 describe('checkoutFeesUrl', () => {

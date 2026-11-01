@@ -81,9 +81,10 @@ function findButton(node: ReactNode, text: string): any {
   return findButton(node.props.children, text);
 }
 
-function render(): any {
+function render(overrides?: Map<number, unknown>): any {
   reactState.index = 0;
   reactState.overrides.clear();
+  overrides?.forEach((value, key) => reactState.overrides.set(key, value));
   return (ManualOrderCreateModal as unknown as (props: any) => any)({
     isOpen: true,
     onClose: vi.fn(),
@@ -135,5 +136,13 @@ describe('ManualOrderCreateModal — server packaging fee', () => {
     const html = renderToStaticMarkup(render() as ReactElement);
     expect(html).toContain('Card/UPI at counter');
     expect(html).not.toContain('Card Machine');
+  });
+
+  it('keeps walk-in delivery priced and enabled (takeaway packaging, no courier fee)', () => {
+    // useState index 0 is orderType.
+    const tree = render(new Map([[0, 'delivery']]));
+    const html = renderToStaticMarkup(tree as ReactElement);
+    expect(html).toContain('₹318');
+    expect(findButton(tree, 'Place & Print KOT').props.disabled).toBe(false);
   });
 });
