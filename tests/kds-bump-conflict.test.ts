@@ -135,6 +135,7 @@ const order = (id: string, status: string) => ({
   id,
   branchId: 'branch_1',
   status,
+  paymentMethod: 'cod',
   items: [],
   total: 100,
   createdAt: { toMillis: () => Date.now() },

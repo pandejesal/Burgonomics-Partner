@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { KDSOrderCard } from '../src/features/kds/components/KDSOrderCard';
+import { KDSNewOrderAlert } from '../src/features/kds/components/KDSNewOrderAlert';
 
 /**
  * Hook-level arrival cue: the audio helper's own tests cannot prove the hook
@@ -17,6 +21,8 @@ const h = vi.hoisted(() => ({
   dirty: false,
   snapshot: null as null | { next: (snap: any) => void; error: (err: any) => void },
   renderHook: null as null | (() => void),
+  result: null as any,
+  bump: vi.fn(async () => undefined),
   user: { id: 'kds_staff', role: 'branch_staff', branchIds: ['branch_1', 'branch_2'] } as any,
   selectedBranchId: 'branch_1',
 }));
@@ -69,7 +75,7 @@ vi.mock('@tanstack/react-query', () => ({
 }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock('@/hooks/useOrders', () => ({
-  useOrders: () => ({ orders: [], isLoading: false, error: null, updateOrderStatus: undefined }),
+  useOrders: () => ({ orders: [], isLoading: false, error: null, updateOrderStatus: { mutateAsync: h.bump } }),
 }));
 vi.mock('@/stores/authStore', () => ({
   useAuthStore: Object.assign(() => ({ user: h.user }), {
@@ -93,9 +99,9 @@ vi.mock('firebase/firestore', () => ({
     return vi.fn();
   },
 }));
-vi.mock('@/utils/orderContract', () => ({
+vi.mock('@/utils/orderContract', async (original) => ({
+  ...(await original<typeof import('@/utils/orderContract')>()),
   fetchAliasedStoreOrders: vi.fn(async () => []),
-  normalizeOrderDoc: (id: string, data: Record<string, any>) => ({ id, ...data }),
   orderDocTimeMs: () => 0,
   createKdsIngestionGate: () => ({ next: () => 1, isCurrent: () => true }),
 }));
@@ -188,6 +194,7 @@ const order = (id: string, status: string, branchId: string = h.selectedBranchId
   id,
   branchId,
   status,
+  paymentMethod: 'cod',
   items: [],
   total: 100,
   createdAt: { toMillis: () => Date.now() },
@@ -226,7 +233,7 @@ describe('useKDSRealtimeStream — one arrival cue after an acknowledge', () => 
     __resetKDSAudioStateForTests();
     h.renderHook = () => {
       // eslint-disable-next-line react-hooks/rules-of-hooks -- test harness invokes the hook directly
-      useKDSRealtimeStream();
+      h.result = useKDSRealtimeStream();
     };
     settle();
   });
@@ -267,6 +274,40 @@ describe('useKDSRealtimeStream — one arrival cue after an acknowledge', () => 
     await emit([order('A', 'preparing'), order('B', 'pending'), order('C', 'pending')]);
     expect(createdOscillators).toHaveLength(0);
     expect(isKDSAlarmRepeating()).toBe(true);
+  });
+
+  it('hides unpaid customer orders and alerts exactly once when capture arrives', async () => {
+    h.bump.mockClear();
+    const unpaid = { ...order('ord_1793526177472_uiI9kl', 'pending'), paymentMethod: undefined,
+      payment: { method: 'razorpay', status: 'pending' }, status: { code: 'PLACED', kind: 'upcoming', terminal: false } };
+    await emit([]);
+    createdOscillators.length = 0;
+    await emit([unpaid]);
+    expect(h.result.activeOrders).toHaveLength(0);
+    expect(h.result.newOrderTotal).toBe(0);
+    expect(createdOscillators).toHaveLength(0);
+    const renderBoard = () => renderToStaticMarkup(createElement('div', null,
+      createElement(KDSNewOrderAlert, { orderIds: h.result.newOrderIds, totalCount: h.result.newOrderTotal, onDismiss: () => {} }),
+      ...h.result.pendingOrders.map((o: any) => createElement(KDSOrderCard, { key: o.id, order: o, checkedItems: {}, onToggleItemCheck: () => {}, onBumpOrder: () => {} }))));
+    expect(renderBoard()).not.toContain('New order received');
+    expect(renderBoard()).not.toContain('Accept');
+    await h.result.bumpOrder(unpaid.id, 'preparing');
+    expect(h.bump).not.toHaveBeenCalled();
+    await emit([{ ...unpaid, paymentChannel: 'razorpay' }]);
+    expect(h.result.pendingOrders.map((o: any) => o.id)).toEqual([unpaid.id]);
+    expect(h.result.newOrderIds).toEqual([unpaid.id]);
+    expect(renderBoard()).toContain('New order received');
+    expect(renderBoard()).toContain('Accept');
+    expect(createdOscillators).toHaveLength(2);
+    createdOscillators.length = 0;
+    await emit([{ ...unpaid, paymentChannel: 'razorpay' }]);
+    expect(createdOscillators).toHaveLength(0);
+  });
+
+  it('keeps COD and walk-in tickets visible without a gateway marker', async () => {
+    await emit([{ ...order('cash', 'pending'), paymentMethod: 'cod' },
+      { ...order('walkin', 'pending'), customerId: 'cust_walkin', paymentMethod: 'upi' }]);
+    expect(h.result.pendingOrders.map((o: any) => o.id)).toEqual(['cash', 'walkin']);
   });
 
   it('an outlet switch clears the acknowledge latch so the new outlet alarms', async () => {

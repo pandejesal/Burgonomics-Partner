@@ -21,6 +21,7 @@ import {
   type KdsNewOrderAlertState,
 } from '@/features/kds/newOrderAlert';
 import { isStaleOrderConflict } from '@/utils/orderConflict';
+import { orderPaymentChannel } from '@/utils/analyticsMath';
 import type { Order, OrderStatus } from '@/types';
 
 export interface RecalledOrderHistory {
@@ -389,6 +390,7 @@ export function useKDSRealtimeStream() {
   // branchId via the store↔branch registry), so it must not render on
   // every branch's makeline.
   const activeOrders = liveOrders.filter((o) => {
+    if (orderPaymentChannel(o) === 'unpaid') return false;
     if (selectedBranchId && o.branchId !== selectedBranchId) {
       return false;
     }
@@ -532,6 +534,8 @@ export function useKDSRealtimeStream() {
   // accepted (card gone + Recall offered) while Firestore never changed.
   const bumpOrder = useCallback(
     async (orderId: string, targetStatus: OrderStatus) => {
+      const order = activeOrders.find((o) => o.id === orderId);
+      if (!order) return;
       if (bumpingRef.current.has(orderId)) return;
       bumpingRef.current.add(orderId);
       setBumpingIds((prev) => ({ ...prev, [orderId]: true }));
@@ -598,7 +602,7 @@ export function useKDSRealtimeStream() {
         });
       }
     },
-    [liveOrders, updateOrderStatus, refresh]
+    [activeOrders, liveOrders, updateOrderStatus, refresh]
   );
 
   // Recall the most recent bump within 60s (stack depth 5 — rapid
