@@ -25,6 +25,8 @@ interface OrderFiltersBarProps {
   searchQuery: string;
   onSearchChange: (query: string) => void;
   onOpenCreateModal: () => void;
+  /** Rules allow walk-in create only for branch_owner/branch_staff. */
+  canCreateWalkInOrder?: boolean;
   totalCount: number;
   filteredCount: number;
   className?: string;
@@ -52,6 +54,7 @@ export function OrderFiltersBar({
   searchQuery,
   onSearchChange,
   onOpenCreateModal,
+  canCreateWalkInOrder = true,
   totalCount,
   filteredCount,
   className = '',
@@ -97,15 +100,17 @@ export function OrderFiltersBar({
             </select>
           </div>
 
-          {/* + New Walk-in Order Modal Trigger */}
-          <button
-            type="button"
-            onClick={onOpenCreateModal}
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#FF6600] hover:bg-[#e05a00] text-white font-black text-xs uppercase tracking-wider shadow-md transition-all active:scale-[0.98] cursor-pointer shrink-0"
-          >
-            <Plus className="w-4 h-4 stroke-[2.5]" />
-            <span>+ Walk-in Order</span>
-          </button>
+          {/* + New Walk-in Order Modal Trigger (branch roles only) */}
+          {canCreateWalkInOrder && (
+            <button
+              type="button"
+              onClick={onOpenCreateModal}
+              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#FF6600] hover:bg-[#e05a00] text-white font-black text-xs uppercase tracking-wider shadow-md transition-all active:scale-[0.98] cursor-pointer shrink-0"
+            >
+              <Plus className="w-4 h-4 stroke-[2.5]" />
+              <span>+ Walk-in Order</span>
+            </button>
+          )}
         </div>
       </div>
 

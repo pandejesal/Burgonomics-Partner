@@ -67,6 +67,16 @@ export function canReadFranchiseLeads(role: UserRole | undefined): boolean {
 }
 
 /**
+ * Walk-in order create is branch-only: firestore.rules `orders` create admits
+ * the `cust_walkin` arm only for isBranchOwner() (branch_owner/branch_staff)
+ * with ownsBranch(branchId). Brand/support/regional roles must not be offered
+ * an action that can only end in permission-denied.
+ */
+export function canCreateWalkInOrders(role: UserRole | undefined): boolean {
+  return role === 'branch_owner' || role === 'branch_staff';
+}
+
+/**
  * Console roles that may hold a partner session. 'customer' is excluded by
  * design (denied above) — it never appears in sidebar/header navigation.
  */

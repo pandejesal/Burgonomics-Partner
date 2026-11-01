@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useOrders } from '@/hooks/useOrders';
 import { useAuthStore } from '@/stores/authStore';
+import { canCreateWalkInOrders } from '@/core/auth/routePolicy';
 import { exportToCsv } from '@/utils/exportCsv';
 import {
   OrderFiltersBar,
@@ -24,6 +25,8 @@ import type { Order, OrderStatus, OrderType } from '@/types';
 
 export function OrdersPage() {
   const { user } = useAuthStore();
+  // Rules admit a walk-in create only for branch_owner/branch_staff.
+  const canCreateWalkInOrder = canCreateWalkInOrders(user?.role);
 
   const [channelFilter, setChannelFilter] = useState<OrderType | 'all'>('all');
   const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('all');
@@ -171,6 +174,7 @@ export function OrdersPage() {
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         onOpenCreateModal={() => setIsCreateModalOpen(true)}
+        canCreateWalkInOrder={canCreateWalkInOrder}
         totalCount={orders.length}
         filteredCount={filteredOrders.length}
       />
@@ -203,14 +207,16 @@ export function OrdersPage() {
         }}
       />
 
-      {/* Walk-in Order Creation Modal */}
-      <ManualOrderCreateModal
-        isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
-        onOrderCreated={(order) => {
-          toast.success(`Order #${order.id.slice(0, 6).toUpperCase()} created & KOT dispatched!`);
-        }}
-      />
+      {/* Walk-in Order Creation Modal (branch roles only) */}
+      {canCreateWalkInOrder && (
+        <ManualOrderCreateModal
+          isOpen={isCreateModalOpen}
+          onClose={() => setIsCreateModalOpen(false)}
+          onOrderCreated={(order) => {
+            toast.success(`Order #${order.id.slice(0, 6).toUpperCase()} created & KOT dispatched!`);
+          }}
+        />
+      )}
 
       {/* Row-level KOT print (real preview → real print) */}
       {printOrder && (
