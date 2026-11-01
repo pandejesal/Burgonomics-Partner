@@ -41,7 +41,7 @@ export const AdminPaymentHealthPage: React.FC = () => {
   const [latencyHistory, setLatencyHistory] = useState<{ time: string; razorpay: number }[]>([]);
 
   // RBAC checks
-  const canModifyInfrastructure = role === "Developer" || role === "Finance";
+  const canModifyInfrastructure = role === "brand_owner" || role === "developer";
 
   useEffect(() => {
     const unsubscribe = adminPaymentsService.listenLiveDiscrepancies(

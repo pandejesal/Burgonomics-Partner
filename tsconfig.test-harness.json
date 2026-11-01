@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "vite/client"]
+  },
+  "include": [
+    "vitest.config.ts",
+    "vitest.setup.ts",
+    "tests/testEnv.ts",
+    "tests/hermeticNetworkGuard.ts",
+    "tests/hermetic-network-guard.test.ts",
+    "tests/production-config-integrity.test.ts"
+  ]
+}

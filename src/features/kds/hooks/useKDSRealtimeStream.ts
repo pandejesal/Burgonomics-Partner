@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { logger } from '@/core/logging/logger';
@@ -12,13 +12,15 @@ import {
   fetchAliasedStoreOrders,
   normalizeOrderDoc,
   orderDocTimeMs,
+  createKdsIngestionGate,
 } from '@/utils/orderContract';
 import { FIRESTORE_IN_LIMIT, isGlobalRole, resolveScopedBranchIds } from '@/utils/branchScope';
-import { playKDSChime, stopRepeatingKDSAlarm, syncKDSAlarmState } from '@/utils/kdsAudio';
+import { playKDSArrivalCue, stopRepeatingKDSAlarm, resetKDSAlarmState, syncKDSAlarmState } from '@/utils/kdsAudio';
 import {
   capNewOrderIds,
   type KdsNewOrderAlertState,
 } from '@/features/kds/newOrderAlert';
+import { isStaleOrderConflict } from '@/utils/orderConflict';
 import type { Order, OrderStatus } from '@/types';
 
 export interface RecalledOrderHistory {
@@ -99,6 +101,31 @@ export function writePendingKdsBumps(queue: PendingKdsBump[]): void {
  * consequence is identical, so the feed is not live either way.
  */
 export type KdsStreamFailureKind = 'missing_index' | 'listener_error';
+
+export { createKdsIngestionGate } from '@/utils/orderContract';
+export type { KdsIngestionGate } from '@/utils/orderContract';
+
+/**
+ * STRESS SWEEP 2026-10-24 (H3): eviction for the chime-dedupe set must not
+ * evict ids that are STILL PENDING — the blind FIFO delete re-alarmed
+ * long-pending tickets once their id scrolled out of the first 100 entries.
+ */
+export const pruneKdsSeenOrderIds = (
+  seen: Set<string>,
+  pendingIds: readonly string[],
+  cap = 500,
+  slice = 100
+): void => {
+  if (seen.size <= cap) return;
+  const pendingSet = new Set(pendingIds);
+  let evicted = 0;
+  for (const id of seen) {
+    if (evicted >= slice) break;
+    if (pendingSet.has(id)) continue; // never evict an active ticket
+    seen.delete(id);
+    evicted++;
+  }
+};
 
 /**
  * Classify an onSnapshot error callback argument. `failed-precondition` is
@@ -200,6 +227,14 @@ export function formatKdsDataAge(
   return streamLive ? `data ${value} old` : `last good data ${value} old`;
 }
 
+/**
+ * F11: a 409 / stale-precondition rejection means ANOTHER terminal already
+ * moved this order. Reporting "order unchanged" is a lie in that case — and
+ * leaves the operator staring at a stale card. Surface the conflict and force
+ * a resubscribe so the board catches up.
+ */
+export { isStaleOrderConflict } from '@/utils/orderConflict';
+
 export function useKDSRealtimeStream() {
   const { user } = useAuthStore();
   const { selectedBranchId } = useAppStore();
@@ -224,6 +259,14 @@ export function useKDSRealtimeStream() {
   // column state must re-render the moment the listener's first snapshot
   // lands (or its failure proves no snapshot is coming).
   const [streamHydrated, setStreamHydrated] = useState<boolean>(false);
+
+  // Resubscribe + refetch. Declared before bumpOrder so a stale-precondition
+  // (409) failure can force the board to catch up with the terminal that won.
+  const queryClient = useQueryClient();
+  const refresh = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['orders'] });
+    setListenerEpoch((epoch) => epoch + 1);
+  }, [queryClient]);
 
   // Surface the live-stream error when present, else the one-shot query error.
   const streamError = liveError ?? ordersError ?? null;
@@ -370,6 +413,18 @@ export function useKDSRealtimeStream() {
     (o) => o.status === 'ready' || (o.status as string) === 'ready_for_pickup'
   );
 
+  // F6: the branch scope the stream actually reads — surfaced so the KDS
+  // header can say when the Firestore `in` cap truncates it (no silent drop).
+  const scopeBranchIds = useMemo(
+    () => resolveScopedBranchIds(user, selectedBranchId),
+    [user, selectedBranchId]
+  );
+
+  useEffect(() => {
+    resetKDSAlarmState();
+    return () => resetKDSAlarmState();
+  }, [user?.id, selectedBranchId]);
+
   // Audio chime alarm triggering on new pending orders
   useEffect(() => {
     // Arm the dedupe set only once the makeline has actually delivered data.
@@ -390,7 +445,7 @@ export function useKDSRealtimeStream() {
       return;
     }
 
-    // Check for genuinely new orders
+    // Check for genuinely new orders (the seen-set still tracks them)
     let hasNewOrder = false;
     const arrivedIds: string[] = [];
     pendingOrders.forEach((o) => {
@@ -402,7 +457,6 @@ export function useKDSRealtimeStream() {
     });
 
     if (hasNewOrder) {
-      playKDSChime();
       // Arrival order for the banner: activeOrders is newest-first, so reverse
       // before trimming to keep the MOST RECENT ids when the cap applies.
       setNewOrderAlert({
@@ -410,6 +464,10 @@ export function useKDSRealtimeStream() {
         total: arrivedIds.length,
       });
     }
+
+    // Exactly one immediate cue for the arrival, without double-firing with
+    // the repeating alarm or the acknowledge latch (candidate behaviour).
+    playKDSArrivalCue(hasNewOrder, pendingOrders.length);
 
     // Cap the chime dedupe set: a 12h rush on a busy makeline adds thousands
     // of ids and never releases them (Set is insertion-ordered, so the
@@ -426,15 +484,12 @@ export function useKDSRealtimeStream() {
 
     // Sync repeating alarm for unacknowledged orders
     syncKDSAlarmState(pendingOrders.length);
-  }, [pendingOrders.length, activeOrders]);
 
-  // Leaving /kds must silence the 10s repeating alarm. It is module-level
-  // state, so without this unmount cleanup the loop kept chiming on every
-  // other screen (and in the background) until the pending count hit 0.
-  // pending-count-0 stop still happens inside syncKDSAlarmState above.
-  useEffect(() => {
-    return () => stopRepeatingKDSAlarm();
-  }, []);
+    // Cap the chime dedupe set — bounded (no slow leak), and ACTIVE tickets
+    // are never evicted (H3): the blind FIFO delete re-alarmed long-pending
+    // orders once their id scrolled out of the first 100 entries.
+    pruneKdsSeenOrderIds(seenOrderIdsRef.current, pendingOrders.map((o) => o.id));
+  }, [pendingOrders.length, activeOrders]);
 
   // Clean up timer on recall-stack expiration (60s) + 1s tick while any
   // recall is live: canRecall is computed during render, so without a
@@ -480,8 +535,9 @@ export function useKDSRealtimeStream() {
       if (bumpingRef.current.has(orderId)) return;
       bumpingRef.current.add(orderId);
       setBumpingIds((prev) => ({ ...prev, [orderId]: true }));
-      // Precondition: the status THIS card is showing. If another terminal
-      // already moved the order, the server refuses instead of clobbering.
+      // Precondition: the status THIS card is showing. The client sends
+      // expectedStatus as containment; transaction-side lost-update
+      // enforcement is owned by the backend lane.
       const currentStatus = liveOrders.find((o) => o.id === orderId)?.status;
       try {
         if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
@@ -502,7 +558,7 @@ export function useKDSRealtimeStream() {
         }
       } catch (err: any) {
         const offline =
-          (typeof navigator !== 'undefined' && !navigator.onLine) ||
+          (typeof navigator !== 'undefined' && navigator.onLine === false) ||
           /offline|network|failed to fetch|firestore/i.test(err?.message || '');
         if (offline) {
           const { fresh } = readPendingKdsBumps(window.localStorage.getItem(PENDING_BUMPS_KEY));
@@ -519,6 +575,14 @@ export function useKDSRealtimeStream() {
           toast.error('Offline — bump queued', {
             description: 'It will apply automatically when you are back online.',
           });
+        } else if (isStaleOrderConflict(err)) {
+          // F11: the order DID change — another terminal got there first. Do
+          // not claim "unchanged"; reload so the card shows the winning state.
+          logger.warn('kds.bump_conflict', { orderId, message: err?.message });
+          toast.error('Another terminal already moved this order — refreshing', {
+            description: 'Your tap was not applied. The board is loading the latest status.',
+          });
+          refresh();
         } else {
           logger.warn('kds.bump_failed', { orderId, message: err?.message });
           toast.error('Bump failed — order unchanged', {
@@ -534,7 +598,7 @@ export function useKDSRealtimeStream() {
         });
       }
     },
-    [liveOrders, updateOrderStatus]
+    [liveOrders, updateOrderStatus, refresh]
   );
 
   // Recall the most recent bump within 60s (stack depth 5 — rapid
@@ -565,12 +629,19 @@ export function useKDSRealtimeStream() {
       return true;
     } catch (err: any) {
       logger.warn('kds.recall_failed', { message: err?.message });
-      toast.error('Recall failed — order unchanged', {
-        description: err?.message || 'Check connection and retry.',
-      });
+      if (isStaleOrderConflict(err)) {
+        toast.error('Another terminal already moved this order — refreshing', {
+          description: 'Your recall was not applied. The board is loading the latest status.',
+        });
+        refresh();
+      } else {
+        toast.error('Recall failed — order unchanged', {
+          description: err?.message || 'Check connection and retry.',
+        });
+      }
       return false;
     }
-  }, [recallStack, updateOrderStatus, liveOrders]);
+  }, [recallStack, updateOrderStatus, liveOrders, refresh]);
 
   const canRecall = liveRecallStack.length > 0;
 
@@ -579,22 +650,15 @@ export function useKDSRealtimeStream() {
   // dot whenever Firestore stalled. This branch-scoped, RBAC-clamped
   // onSnapshot replaces the poll; every snapshot is truth. lastRefreshAt
   // tracks the last successful stream delivery — never a manual tap
-  // (refresh() resubscribes to force a fresh snapshot).
-  const queryClient = useQueryClient();
+  // (refresh() resubscribes to force a fresh snapshot) and NEVER the
+  // background HTTP poll: a successful useOrders refetch proves the REST
+  // read worked, not that the displayed makeline moved, so stamping it here
+  // is exactly the frozen-board lie this field exists to prevent.
   const [lastRefreshAt, setLastRefreshAt] = useState<number>(Date.now());
-  const refresh = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['orders'] });
-    setListenerEpoch((epoch) => epoch + 1);
-  }, [queryClient]);
-
-  useEffect(() => {
-    if (!isLoading && !ordersError) setLastRefreshAt(Date.now());
-  }, [isLoading, ordersError, orders]);
 
   useEffect(() => {
     if (!user) return;
 
-    const scopeBranchIds = resolveScopedBranchIds(user, selectedBranchId);
     // Scoped roles with no assigned branches must never read the global
     // collection (mirrors useOrders' fail-closed read guard).
     if (scopeBranchIds.length === 0 && !isGlobalRole(user.role)) {
@@ -602,20 +666,22 @@ export function useKDSRealtimeStream() {
       return;
     }
 
-    // `in` + `orderBy('createdAt')` on different fields is exactly what
-    // forces a composite (compound) index — `FirebaseError: The query
-    // requires an index` whenever it is not deployed, and a dead listener.
-    // Scoped reads therefore pass only the `in` filter; the stream already
-    // sorts client-side at merge time (orderDocTimeMs below). The global
-    // branch-less read keeps the latest-first orderBy (single-field index).
+    // Select the newest page before applying the cap. The scoped composite
+    // is in the root index manifest; its deployment is an ops prerequisite.
+    // Client sorting alone cannot rescue tickets omitted by an unordered cap.
     const constraints: QueryConstraint[] = [
       ...(scopeBranchIds.length
         ? [where('branchId', 'in', scopeBranchIds.slice(0, FIRESTORE_IN_LIMIT))]
-        : [orderBy('createdAt', 'desc')]),
+        : []),
+      orderBy('createdAt', 'desc'),
       limit(100),
     ];
 
     let alive = true;
+    // H1 sweep fix: every merge into state checks in through the generation
+    // gate — a slower earlier alias-fetch must never overwrite a newer
+    // snapshot's makeline.
+    const ingestionGate = createKdsIngestionGate();
     const ingest = (rawDocs: Array<{ id: string; data: Record<string, any> }>): void => {
       if (!alive) return;
       streamHydratedRef.current = true;
@@ -631,6 +697,32 @@ export function useKDSRealtimeStream() {
       setLastRefreshAt(Date.now());
     };
 
+    const globalPages = new Map<string, Array<{ id: string; data: Record<string, any> }>>();
+    const ingestGlobalPage = (field: string, page: Array<{ id: string; data: Record<string, any> }>) => {
+      if (!alive) return;
+      // The secondary date feed owns only documents missing createdAt; it
+      // must never overwrite the primary feed with a delayed older snapshot.
+      globalPages.set(field, field === 'placedAt'
+        ? page.filter((doc) => doc.data.createdAt === undefined)
+        : page);
+      const merged = new Map([...globalPages.values()].flat().map((doc) => [doc.id, doc]));
+      ingest([...merged.values()]);
+    };
+    const handleStreamError = (err: any) => {
+      // Preserve last-good data on an index deployment gap; a cold query
+      // failure remains visible through useOrders' error state.
+      if (!alive) return;
+      const kind = classifyKdsStreamFailure(err);
+      const code = (err as { code?: string } | null)?.code;
+      if (kind === 'missing_index') {
+        logger.warn('kds.stream_index_missing', { message: err?.message, code });
+        return;
+      }
+      logger.warn('kds.stream_error', { message: err?.message, code });
+      setLiveError(err instanceof Error ? err : new Error(String(err?.message ?? 'Live order stream failed')));
+      // lastRefreshAt tracks successful deliveries, never failed reads.
+    };
+
     const unsubscribe = onSnapshot(
       query(collection(db, 'orders'), ...constraints),
       (snap) => {
@@ -639,11 +731,15 @@ export function useKDSRealtimeStream() {
         // Branch-scoped reads can't see Delivery docs (they store store.id,
         // not branchId) — merge the aliased store orders like useOrders does.
         if (scopeBranchIds.length === 0) {
-          ingest(direct);
+          ingestGlobalPage('createdAt', direct);
           return;
         }
+        // Gate the async merge: snapshot #5 must not be overwritten by
+        // snapshot #1's slower fetch resolving later.
+        const mergeToken = ingestionGate.next();
         fetchAliasedStoreOrders(db, scopeBranchIds)
           .then((aliased) => {
+            if (!ingestionGate.isCurrent(mergeToken)) return;
             const seen = new Set(direct.map((d) => d.id));
             const merged = [...direct];
             for (const doc of aliased) {
@@ -657,6 +753,7 @@ export function useKDSRealtimeStream() {
           })
           .catch((err) => {
             logger.warn('kds.alias_stream_merge_failed', { message: err?.message });
+            if (!ingestionGate.isCurrent(mergeToken)) return;
             ingest(direct);
           });
       },
@@ -690,14 +787,22 @@ export function useKDSRealtimeStream() {
         // stale the on-screen (last good) data is.
       }
     );
+    // The global feed cannot use branch aliases. Listen to the Delivery date
+    // field too, otherwise orderBy(createdAt) hides that entire order schema.
+    const unsubscribeDelivery = scopeBranchIds.length === 0 ? onSnapshot(
+      query(collection(db, 'orders'), orderBy('placedAt', 'desc'), limit(100)),
+      (snap) => ingestGlobalPage('placedAt', snap.docs.map((d) => ({ id: d.id, data: d.data() }))),
+      handleStreamError
+    ) : null;
 
     return () => {
       alive = false;
       unsubscribe();
+      unsubscribeDelivery?.();
       // Resubscribing on user or branch change keeps the stream scoped to
       // the current RBAC decision; listenerEpoch lets refresh() force one.
     };
-  }, [user, selectedBranchId, listenerEpoch]);
+  }, [user, selectedBranchId, listenerEpoch, scopeBranchIds]);
 
   // Derived feed honesty for the header/columns: what the makeline may
   // claim about liveness, and whether the data on screen was ever verified
@@ -734,6 +839,8 @@ export function useKDSRealtimeStream() {
     dismissNewOrderAlert,
     refresh,
     lastRefreshAt,
+    /** Branch scope this stream reads (F6: render truncation honestly). */
+    scopeBranchIds,
   };
 }
 

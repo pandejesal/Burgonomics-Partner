@@ -3,6 +3,7 @@ import {
   collection,
   query,
   where,
+  orderBy,
   limit,
   getDocs,
   onSnapshot,
@@ -29,12 +30,14 @@ import {
   normalizeOrderDoc,
   fetchAliasedStoreOrders,
   orderDocTimeMs,
+  createKdsIngestionGate,
+  resolveGatewayPaymentId,
 } from "@/utils/orderContract";
 import type { Order as NormalizedOrder } from "@/types";
 import { branchIdForDeliveryStore } from "@/utils/storeBranchRegistry";
 import { logger } from "@/core/logging/logger";
 import { orderStatusWriteErrorMessage } from "@/utils/orderErrors";
-import type { QueryConstraint } from "firebase/firestore";
+import type { QueryConstraint, QuerySnapshot } from "firebase/firestore";
 
 /**
  * Brand-wide reads are reserved for global roles (brand_owner, developer,
@@ -146,8 +149,7 @@ function toPaymentMethod(rawMethod: unknown): OrderPaymentInfo["method"] {
 function toPaymentInfo(o: NormalizedOrder, raw: Record<string, any>): OrderPaymentInfo {
   const src = (raw.payment ?? {}) as Record<string, any>;
   const method = toPaymentMethod(strOf(src.method) || raw.paymentMethod);
-  const transactionId =
-    strOf(src.transactionId) || strOf(raw.razorpayPaymentId) || strOf(raw.paymentId);
+  const transactionId = resolveGatewayPaymentId(raw);
   const paidAtRaw = src.paidAt ?? raw.paidAt;
   const paidAt = paidAtRaw ? isoTime(paidAtRaw, "") : "";
   return {
@@ -438,11 +440,11 @@ async function fetchScopedOrders(storeId: string | null): Promise<Array<{ id: st
   const queryBranches = [...wantedBranchIds].slice(0, FIRESTORE_IN_LIMIT);
 
   const merged = new Map<string, Record<string, any>>();
-  if (!global || storeId) {
+  if (!global || (storeId && storeId !== "all")) {
     // Scoped (or store-filtered) read: branch match first.
     if (queryBranches.length > 0) {
       const snap = await getDocs(
-        query(collection(db, "orders"), where("branchId", "in", queryBranches), limit(100))
+        query(collection(db, "orders"), where("branchId", "in", queryBranches), orderBy("createdAt", "desc"), limit(100))
       );
       snap.forEach((d) => merged.set(d.id, d.data() as Record<string, any>));
     }
@@ -455,9 +457,14 @@ async function fetchScopedOrders(storeId: string | null): Promise<Array<{ id: st
       if (!merged.has(doc.id)) merged.set(doc.id, doc.data);
     }
   } else {
-    // Global brand-wide read, bounded.
-    const snap = await getDocs(query(collection(db, "orders"), limit(100)));
-    snap.forEach((d) => merged.set(d.id, d.data() as Record<string, any>));
+    // Both order schemas need an ordered page: Delivery docs can lack createdAt.
+    const pages = await Promise.all(["createdAt", "placedAt"].map((field) =>
+      getDocs(query(collection(db, "orders"), orderBy(field, "desc"), limit(100)))
+    ));
+    for (const [index, snap] of pages.entries()) snap.forEach((d) => {
+      const data = d.data() as Record<string, any>;
+      if (index === 0 || data.createdAt === undefined) merged.set(d.id, data);
+    });
   }
 
   // Store filter applies to the merged set (covers both id shapes).
@@ -504,7 +511,19 @@ export const adminOrdersService = {
     onUpdate: (orders: RichOrder[]) => void,
     onError: (err: Error) => void,
   ) {
-    if (!storeId && !globalReadAllowed()) {
+    let cancelled = false;
+    // Live snapshot on the branch query; the aliased merge refreshes
+    // alongside. Snapshot errors surface via onError (never silent-empty).
+    const user = useAuthStore.getState().user;
+    const { selectedBranchId } = useAppStore.getState();
+    const global = globalReadAllowed();
+    const scopeIds = global ? [] : resolveScopedBranchIds(user, selectedBranchId);
+    const storeFilter = !!storeId && storeId !== "all";
+
+    // A scoped role with no assigned branch must never fall through to a
+    // brand-wide query. The `"all"` sentinel is not a scope grant: without an
+    // assignment there is nothing to read, so deny before any listener starts.
+    if (!global && !storeFilter && scopeIds.length === 0) {
       logger.warn("adminOrdersService.global_read_denied", {
         reason: "scoped_role_without_store",
       });
@@ -512,41 +531,49 @@ export const adminOrdersService = {
       return () => {};
     }
 
-    let cancelled = false;
-    // Live snapshot on the branch query; the aliased merge refreshes
-    // alongside. Snapshot errors surface via onError (never silent-empty).
-    const user = useAuthStore.getState().user;
-    const { selectedBranchId } = useAppStore.getState();
-    const scopeIds = globalReadAllowed() ? [] : resolveScopedBranchIds(user, selectedBranchId);
     const constraints: QueryConstraint[] = [
-      ...(scopeIds.length > 0 || storeId
-        ? [where("branchId", "in", [...new Set([...scopeIds, ...(storeId && storeId !== "all" ? [storeId] : [])])].slice(0, FIRESTORE_IN_LIMIT))]
+      ...(scopeIds.length > 0 || storeFilter
+        ? [where("branchId", "in", [...new Set([...scopeIds, ...(storeFilter ? [storeId as string] : [])])].slice(0, FIRESTORE_IN_LIMIT))]
         : []),
+      orderBy("createdAt", "desc"),
       limit(100),
     ];
-    const unsub = onSnapshot(
-      query(collection(db, "orders"), ...constraints),
-      (snapshot) => {
+    const pages = new Map<string, Map<string, Record<string, any>>>();
+    // The alias merge is an async read: a slower snapshot must never repaint
+    // the board after a newer snapshot already dropped a completed order.
+    const ingestionGate = createKdsIngestionGate();
+    const receivePage = (field: string) => (snapshot: QuerySnapshot) => {
         void (async () => {
           if (cancelled) return;
+          const mergeToken = ingestionGate.next();
           try {
-            const merged = new Map<string, Record<string, any>>();
-            snapshot.forEach((d) => merged.set(d.id, d.data() as Record<string, any>));
+            const page = new Map<string, Record<string, any>>();
+            snapshot.forEach((d) => {
+              const data = d.data() as Record<string, any>;
+              // Keep primary-schema documents out of the fallback feed so a
+              // delayed duplicate cannot re-open a completed ticket.
+              if (field === "createdAt" || data.createdAt === undefined) page.set(d.id, data);
+            });
+            pages.set(field, page);
             const aliasedScope =
-              storeId && storeId !== "all"
-                ? [storeId]
+              storeFilter
+                ? [storeId as string]
                 : scopeIds.length > 0
                   ? scopeIds
                   : [];
-            for (const doc of await fetchAliasedStoreOrders(db, aliasedScope)) {
+            const aliased = await fetchAliasedStoreOrders(db, aliasedScope);
+            // Drop a stale generation: a newer snapshot has already started
+            // (and may have painted), so this merge must not write state.
+            if (cancelled || !ingestionGate.isCurrent(mergeToken)) return;
+            const merged = new Map([...pages.values()].flatMap((p) => [...p.entries()]));
+            for (const doc of aliased) {
               if (!merged.has(doc.id)) merged.set(doc.id, doc.data);
             }
-            if (cancelled) return;
             const live: RichOrder[] = [];
             for (const [id, data] of merged) {
               const rich = toRichOrder(id, data);
               if (!LIVE_STATUSES.has(rich.orderStatus)) continue;
-              if (storeId && storeId !== "all") {
+              if (storeFilter) {
                 const sid = typeof data.store?.id === "string" ? data.store.id : data.storeId;
                 const bid = typeof data.branchId === "string" ? data.branchId : null;
                 if (sid !== storeId && bid !== storeId) continue;
@@ -565,15 +592,25 @@ export const adminOrdersService = {
               onUpdate(live);
             }
           } catch (err) {
+            if (cancelled || !ingestionGate.isCurrent(mergeToken)) return;
             onError(err instanceof Error ? err : new Error(String(err)));
           }
         })();
-      },
+      };
+    const unsub = onSnapshot(
+      query(collection(db, "orders"), ...constraints),
+      receivePage("createdAt"),
       (error) => onError(error),
     );
+    const unsubDelivery = scopeIds.length === 0 && (!storeId || storeId === "all") ? onSnapshot(
+      query(collection(db, "orders"), orderBy("placedAt", "desc"), limit(100)),
+      receivePage("placedAt"),
+      (error) => onError(error),
+    ) : null;
     return () => {
       cancelled = true;
       unsub();
+      unsubDelivery?.();
     };
   },
 

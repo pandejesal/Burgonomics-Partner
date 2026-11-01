@@ -47,15 +47,37 @@ export function resolveScopedBranchIds(
  */
 export const FIRESTORE_IN_LIMIT = 10;
 
-export function isScopeTruncated(branchIds: string[]): boolean {
-  return branchIds.length > FIRESTORE_IN_LIMIT;
+export function isScopeTruncated(branchIds?: string[] | null): boolean {
+  return (branchIds?.length ?? 0) > FIRESTORE_IN_LIMIT;
 }
 
 /** Honest UI copy when scoped reads cover only the first 10 outlets. */
-export function scopeTruncationNotice(branchIds: string[]): string | null {
+export function scopeTruncationNotice(branchIds?: string[] | null): string | null {
   if (!isScopeTruncated(branchIds)) return null;
   return (
     `Scoped views (orders, tickets) read the first ${FIRESTORE_IN_LIMIT} of ` +
-    `${branchIds.length} assigned outlets — narrow the outlet filter to see the rest.`
+    `${branchIds!.length} assigned outlets - narrow the outlet filter to see the rest.`
   );
+}
+
+/**
+ * Store/outlet filter argument for a Control-Room order board.
+ *
+ * - Global roles: the UI selection wins (one outlet) — `null` means "all".
+ * - Scoped roles: the board must read the FULL assigned scope (every branch the
+ *   session owns) and let the UI filter narrow *within* that scope. Clamping
+ *   the read to `branchIds[0]` made the outlet filter inert for a branch_owner
+ *   with several outlets: the other outlets always rendered empty.
+ *
+ * A forged selection (localStorage is user-writable) never widens scope: it
+ * falls back to `null`, and the data layer clamps to the assigned branches.
+ */
+export function resolveBoardStoreFilter(
+  role: UserRole | undefined,
+  assignedBranchIds: readonly string[],
+  selectedFilter: string | null | undefined
+): string | null {
+  if (!selectedFilter || selectedFilter === 'all') return null;
+  if (isGlobalRole(role)) return selectedFilter;
+  return assignedBranchIds.includes(selectedFilter) ? selectedFilter : null;
 }

@@ -38,9 +38,15 @@ function permissionsForRole(roleName: string): string[] {
 export function useAdmin() {
   const { user, firebaseUser, loading } = useAuthStore();
 
-  const { admin, permissions, roleName, isDeveloper } = useMemo(() => {
+  const { admin, permissions, roleName, isDeveloper, assignedStoreIds } = useMemo(() => {
     if (!user) {
-      return { admin: null as AdminUser | null, permissions: [] as string[], roleName: "", isDeveloper: false };
+      return {
+        admin: null as AdminUser | null,
+        permissions: [] as string[],
+        roleName: "",
+        isDeveloper: false,
+        assignedStoreIds: [] as string[],
+      };
     }
     const role = user.role;
     const permissions = permissionsForRole(role);
@@ -51,9 +57,14 @@ export function useAdmin() {
       fullName: user.name,
       avatar: user.avatar ?? null,
       role: { name: role, permissions },
+      // Legacy single-outlet field kept for callers that still expect one id.
       assignedStoreId: user.branchIds?.[0],
     };
-    return { admin, permissions, roleName: role, isDeveloper };
+    // A branch_owner can own several outlets: the single `assignedStoreId` was
+    // never the whole truth and clamping boards to it made their outlet filter
+    // inert. Expose the full assigned scope alongside the legacy field.
+    const assignedStoreIds = [...(user.branchIds ?? [])];
+    return { admin, permissions, roleName: role, isDeveloper, assignedStoreIds };
   }, [user]);
 
   // Legacy `accessToken` field: the old admin store minted it on its own
@@ -91,6 +102,8 @@ export function useAdmin() {
     role: roleName,
     isDeveloper,
     permissions,
+    /** Full branch assignment (empty for brand-wide roles). */
+    assignedStoreIds,
     hasPermission,
     hasAllPermissions,
     hasAnyPermission,

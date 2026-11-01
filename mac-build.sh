@@ -23,21 +23,10 @@ if ! command -v npm &> /dev/null; then
 fi
 echo "✅ npm is installed ($(npm -v))"
 
-# 3. Check for CocoaPods
-if ! command -v pod &> /dev/null; then
-    echo "❌ CocoaPods is not installed. Capacitor requires CocoaPods to install iOS native dependencies."
-    echo "Attempting to install CocoaPods using Homebrew..."
-    
-    if command -v brew &> /dev/null; then
-        brew install cocoapods
-    else
-        echo "❌ Homebrew is not installed. Please run this command in terminal to install CocoaPods:"
-        echo "   sudo gem install cocoapods"
-        echo "Then re-run this script."
-        exit 1
-    fi
-fi
-echo "✅ CocoaPods is installed ($(pod --version))"
+# 3. Capacitor 8 uses Swift Package Manager (CapApp-SPM). CocoaPods is not
+#    required; the old `pod install` bootstrap is intentionally removed. Xcode
+#    resolves the package when the project is opened/archived.
+echo "i. CocoaPods not required (Capacitor 8 uses Swift Package Manager)"
 
 echo ""
 echo "================================================="

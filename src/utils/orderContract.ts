@@ -85,6 +85,29 @@ const PARTNER_TO_DELIVERY: Record<OrderStatus, DeliveryStatusMeta> = {
   quarantine: { code: 'QUARANTINED', label: 'Needs review', kind: 'unknown', terminal: false },
 };
 
+/**
+ * STRESS SWEEP 2026-10-24 (K) — canonical forward-transition matrix, exported
+ * as a pure helper for future UI gating. NOT wired into any live call path:
+ * the 60-second Recall (`recallLastOrder`) and the module's own
+ * `toPartnerStatus` semantics treat BACKWARD moves as deliberate operator
+ * corrections, and the server's transactional freeze (functions
+ * orderStatus.ts) plus the offline-queue TTL already bound the harmful
+ * replays. Enabling the matrix as a hard gate is a product decision.
+ */
+const ALLOWED_TRANSITIONS: Record<OrderStatus, readonly OrderStatus[]> = {
+  pending: ['accepted', 'preparing', 'cancelled'],
+  accepted: ['preparing', 'cancelled'],
+  preparing: ['ready', 'cancelled'],
+  ready: ['out_for_delivery', 'delivered', 'cancelled'],
+  out_for_delivery: ['delivered', 'cancelled'],
+  delivered: [],
+  cancelled: [],
+  quarantine: ['cancelled'],
+};
+
+export const canTransitionStatus = (from: OrderStatus, to: OrderStatus): boolean =>
+  (ALLOWED_TRANSITIONS[from] ?? []).includes(to);
+
 /** Normalize any status shape (object, UPPER, lower) to Partner status.
  * Unknown codes fail CLOSED to 'quarantine' — never to 'pending', which would
  * surface a corrupt doc as fresh kitchen/dispatch work. */
@@ -126,6 +149,27 @@ function num(v: unknown, fallback = 0): number {
 
 function str(v: unknown, fallback = ''): string {
   return typeof v === 'string' ? v : fallback;
+}
+
+/**
+ * The gateway capture id for an order doc. Both screens that can refund
+ * (order detail and the Control Room board) resolve it here, so the same
+ * document can never send one id from one screen and a different (or empty)
+ * id from the other. Ranked by the board's documented order, and blank or
+ * whitespace-only fields fall through instead of stopping the chain.
+ */
+export function resolveGatewayPaymentId(data: Record<string, any>): string | undefined {
+  const payment = (data.payment ?? {}) as Record<string, any>;
+  for (const candidate of [
+    payment.transactionId,
+    payment.razorpayPaymentId,
+    data.razorpayPaymentId,
+    payment.paymentId,
+    data.paymentId,
+  ]) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
+  return undefined;
 }
 
 /**
@@ -352,6 +396,8 @@ export function normalizeOrderDoc(id: string, data: Record<string, any>): Order 
     data.refundedTotalPaise > 0
       ? { refundedTotalPaise: data.refundedTotalPaise }
       : {}),
+    // Gateway payment id for the refund API (normalized from payment.*).
+    razorpayPaymentId: resolveGatewayPaymentId(data),
     petpoojaOrderId: data.petpoojaOrderId ?? petpoojaDetails.posOrderId,
     petpoojaSyncStatus: petpoojaSyncStatus as Order['petpoojaSyncStatus'],
     porterOrderId: data.porterOrderId,
@@ -373,6 +419,29 @@ export interface RawOrderDoc {
   id: string;
   data: Record<string, any>;
 }
+
+export interface KdsIngestionGate {
+  /** Issue the next generation token for a started read/fetch. */
+  next: () => number;
+  /** Whether a generation token is still the newest one (stale merges drop). */
+  isCurrent: (token: number) => boolean;
+}
+
+/**
+ * STRESS SWEEP 2026-10-24 (H1): order views that merge an async alias fetch
+ * into a live snapshot ran unsequenced — a SLOWER earlier fetch could resolve
+ * AFTER a newer snapshot and clobber the view with stale order states (a
+ * bumped ticket reappearing in 'pending' during a rush). The gate is the
+ * latest-wins seam shared by the KDS makeline and the Control Room board:
+ * every merge checks in before touching state.
+ */
+export const createKdsIngestionGate = (): KdsIngestionGate => {
+  let latest = 0;
+  return {
+    next: () => ++latest,
+    isCurrent: (token: number) => token === latest,
+  };
+};
 
 /**
  * Fetch Delivery-shaped docs for branch-scoped views.

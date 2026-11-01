@@ -16,7 +16,9 @@ import {
   setKDSAudioMuted,
   unlockKDSAudio,
   isKDSAudioUnlocked,
+  acknowledgeKDSAlarm,
 } from '@/utils/kdsAudio';
+import { scopeTruncationNotice } from '@/utils/branchScope';
 import {
   deriveKdsColumnState,
   formatKdsDataAge,
@@ -65,14 +67,17 @@ export function KDSPage() {
     dismissNewOrderAlert,
     refresh,
     lastRefreshAt,
+    scopeBranchIds,
   } = useKDSRealtimeStream();
+  // F6: the Firestore `in` cap covers only the first 10 assigned outlets —
+  // state that on the header instead of silently hiding the remaining ones.
+  const scopeNotice = scopeTruncationNotice(scopeBranchIds);
   const [nowTick, setNowTick] = useState(0);
   useEffect(() => {
     const t = window.setInterval(() => setNowTick(Date.now()), 15000);
     return () => window.clearInterval(t);
   }, []);
   void nowTick;
-
   // Feed honesty: a failed listener must never read as "Makeline Live", and
   // the data-age chip must say the numbers on screen are the LAST GOOD read
   // whenever the live stream is not delivering.
@@ -302,8 +307,53 @@ export function KDSPage() {
     ));
   };
 
+  // Honest filtered-empty copy: a column whose selected channel is empty must
+  // not claim the kitchen is clear while other channels hold tickets. Each
+  // column reports its OWN hidden count (pending/preparing/ready differ) and
+  // offers a one-tap way back to every ticket.
+  const channelFilterLabel: string | null =
+    channelFilter === 'delivery'
+      ? 'Delivery'
+      : channelFilter === 'takeaway'
+        ? 'Takeaway'
+        : channelFilter === 'dinein'
+          ? 'Dine-In'
+          : null;
+  const hiddenPending = pendingOrders.length - filteredPending.length;
+  const hiddenPreparing = preparingOrders.length - filteredPreparing.length;
+  const hiddenReady = readyOrders.length - filteredReady.length;
+
+  // `columnLabel` completes the accessible name only: three columns render a
+  // "Show all" button on the same screen, so a screen-reader user must hear
+  // which column each one restores. The visible text stays short (WCAG 2.5.3:
+  // the accessible name still starts with the visible label).
+  // `min-h-48`, not `h-48`: a fixed height clips this three-line block plus
+  // its button once the reader's text size reaches 200%.
+  const renderFilteredEmpty = (
+    icon: React.ReactNode,
+    hidden: number,
+    title: string,
+    columnLabel: string
+  ) => (
+    <div className="min-h-48 rounded-xl border border-dashed border-amber-500/40 bg-amber-950/20 flex flex-col items-center justify-center text-center p-4 text-amber-200">
+      {icon}
+      <p className="text-xs font-bold">{title}</p>
+      <p className="text-[11px] text-amber-300">
+        {hidden} hidden by {channelFilterLabel} filter
+      </p>
+      <button
+        type="button"
+        onClick={() => setChannelFilter('all')}
+        aria-label={`Show all ${columnLabel}`}
+        className="mt-2 px-3 py-1.5 rounded-lg bg-neutral-900 border border-neutral-700 text-white text-xs font-bold hover:bg-neutral-800 transition-colors cursor-pointer"
+      >
+        Show all
+      </button>
+    </div>
+  );
+
   return (
-    <div className="min-h-screen bg-[#050505] text-white flex flex-col font-sans select-none">
+    <div className="min-h-screen bg-[#050505] text-white flex flex-col font-sans select-none pt-safe">
       {/* Offline Loss Alert Banner */}
       {!isOnline && (
         <div
@@ -515,6 +565,8 @@ export function KDSPage() {
             audioUnlocked={audioUnlocked}
             onToggleMute={toggleMute}
             onUnlockAudio={handleUnlockAudio}
+            pendingCount={pendingOrders.length}
+            onAcknowledge={acknowledgeKDSAlarm}
           />
 
           <button
@@ -543,6 +595,16 @@ export function KDSPage() {
             )}
           </button>
         </div>
+
+        {/* F6: scoped reads stop at the Firestore `in` cap — never silent. */}
+        {scopeNotice && (
+          <div
+            role="note"
+            className="w-full rounded-lg border border-amber-500/40 bg-amber-950/40 px-3 py-2 text-[11px] font-bold text-amber-200"
+          >
+            {scopeNotice}
+          </div>
+        )}
       </header>
 
       {/* Main 3-Column Makeline Kanban Grid */}
@@ -568,11 +630,20 @@ export function KDSPage() {
             {renderColumnBody(
               pendingColumn,
               filteredPending,
-              <div className="h-48 rounded-xl border border-dashed border-neutral-800 flex flex-col items-center justify-center text-center p-4 text-neutral-300">
-                <ChefHat className="w-8 h-8 stroke-1 text-neutral-500 mb-1" aria-hidden="true" />
-                <p className="text-xs font-bold">No new orders waiting.</p>
-                <p className="text-xs text-neutral-400">Kitchen grill is clear.</p>
-              </div>,
+              filteredPending.length === 0 && hiddenPending > 0 ? (
+                renderFilteredEmpty(
+                  <ChefHat className="w-8 h-8 stroke-1 text-amber-500/80 mb-1" />,
+                  hiddenPending,
+                  `No ${channelFilterLabel} orders waiting.`,
+                  'New KOTs orders'
+                )
+              ) : (
+                <div className="h-48 rounded-xl border border-dashed border-neutral-800 flex flex-col items-center justify-center text-center p-4 text-neutral-300">
+                  <ChefHat className="w-8 h-8 stroke-1 text-neutral-500 mb-1" aria-hidden="true" />
+                  <p className="text-xs font-bold">No new orders waiting.</p>
+                  <p className="text-xs text-neutral-400">Kitchen grill is clear.</p>
+                </div>
+              ),
               'Loading new KOTs'
             )}
           </div>
@@ -599,11 +670,20 @@ export function KDSPage() {
             {renderColumnBody(
               preparingColumn,
               filteredPreparing,
-              <div className="h-48 rounded-xl border border-dashed border-neutral-800 flex flex-col items-center justify-center text-center p-4 text-neutral-300">
-                <Flame className="w-8 h-8 stroke-1 text-neutral-500 mb-1" aria-hidden="true" />
-                <p className="text-xs font-bold">No burgers on the grill.</p>
-                <p className="text-xs text-neutral-400">Accept orders to start cooking.</p>
-              </div>,
+              filteredPreparing.length === 0 && hiddenPreparing > 0 ? (
+                renderFilteredEmpty(
+                  <Flame className="w-8 h-8 stroke-1 text-amber-500/80 mb-1" />,
+                  hiddenPreparing,
+                  `No ${channelFilterLabel} orders on the grill.`,
+                  'orders on the grill'
+                )
+              ) : (
+                <div className="h-48 rounded-xl border border-dashed border-neutral-800 flex flex-col items-center justify-center text-center p-4 text-neutral-300">
+                  <Flame className="w-8 h-8 stroke-1 text-neutral-500 mb-1" aria-hidden="true" />
+                  <p className="text-xs font-bold">No burgers on the grill.</p>
+                  <p className="text-xs text-neutral-400">Accept orders to start cooking.</p>
+                </div>
+              ),
               'Loading grill orders'
             )}
           </div>
@@ -630,11 +710,20 @@ export function KDSPage() {
             {renderColumnBody(
               readyColumn,
               filteredReady,
-              <div className="h-48 rounded-xl border border-dashed border-neutral-800 flex flex-col items-center justify-center text-center p-4 text-neutral-300">
-                <CheckCircle2 className="w-8 h-8 stroke-1 text-neutral-500 mb-1" aria-hidden="true" />
-                <p className="text-xs font-bold">No orders waiting for handover.</p>
-                <p className="text-xs text-neutral-400">All prepared orders dispatched.</p>
-              </div>,
+              filteredReady.length === 0 && hiddenReady > 0 ? (
+                renderFilteredEmpty(
+                  <CheckCircle2 className="w-8 h-8 stroke-1 text-amber-500/80 mb-1" />,
+                  hiddenReady,
+                  `No ${channelFilterLabel} orders ready for handover.`,
+                  'ready orders'
+                )
+              ) : (
+                <div className="h-48 rounded-xl border border-dashed border-neutral-800 flex flex-col items-center justify-center text-center p-4 text-neutral-300">
+                  <CheckCircle2 className="w-8 h-8 stroke-1 text-neutral-500 mb-1" aria-hidden="true" />
+                  <p className="text-xs font-bold">No orders waiting for handover.</p>
+                  <p className="text-xs text-neutral-400">All prepared orders dispatched.</p>
+                </div>
+              ),
               'Loading ready orders'
             )}
           </div>

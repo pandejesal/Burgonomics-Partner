@@ -24,6 +24,7 @@ import {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe('packagingQuoteOrderType', () => {
@@ -35,14 +36,22 @@ describe('packagingQuoteOrderType', () => {
 });
 
 describe('checkoutFeesUrl', () => {
-  it('resolves to the real Cloud Functions base, never a placeholder host', () => {
+  it('resolves to the configured Cloud Functions base, never a placeholder host', () => {
+    const url = checkoutFeesUrl();
+    // `vitest.setup.ts` pins the hermetic test base (reserved .invalid host).
+    expect(url).toBe('https://functions.invalid/api/checkout/fees');
+    expect(url).not.toContain('example');
+    expect(url).not.toContain('localhost');
+    expect(url).not.toContain('undefined');
+  });
+
+  it('falls back to the real regional Cloud Functions host with no override', () => {
+    vi.stubEnv('VITE_FUNCTIONS_API_URL', '');
     const url = checkoutFeesUrl();
     expect(url).toMatch(
       /^https:\/\/asia-south1-[a-z0-9-]+\.cloudfunctions\.net\/api\/checkout\/fees$/
     );
     expect(url).not.toContain('example');
-    expect(url).not.toContain('localhost');
-    expect(url).not.toContain('undefined');
   });
 });
 

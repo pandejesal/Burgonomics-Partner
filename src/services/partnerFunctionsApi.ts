@@ -4,6 +4,7 @@
  */
 import { auth } from '@/config/firebase';
 import { orderStatusWriteErrorMessage } from '@/utils/orderErrors';
+import { validateRefundRequestId } from '@/utils/refundRequestIdentity';
 
 export interface ApiRequestOptions {
   /** Timeout in ms (default 20 000 for general, 30 000 for porter book/rebook). */
@@ -623,16 +624,25 @@ export const partnerFunctionsApi = {
 
   /**
    * Releases a Razorpay refund server-side (POST /payments/refund, staff-only,
-   * idempotent per order). Loop 5/120: the refunds page MUST use this — never
+   * idempotent per refundRequestId). Loop 5/120: the refunds page MUST use this — never
    * flip local state and claim money moved.
    */
   async releaseRefund(params: {
+    refundRequestId: string;
     orderId: string;
     razorpayPaymentId: string;
     amountRupees?: number;
     reason?: string;
   }): Promise<{ id?: string; status?: string; reused?: boolean }> {
-    return await apiRequest('/payments/refund', params);
+    validateRefundRequestId(params?.refundRequestId);
+    if (typeof params?.razorpayPaymentId !== 'string' || !params.razorpayPaymentId.trim()) {
+      throw new Error(
+        'No gateway payment id recorded — refund not attempted. A brand admin must locate the capture in Payments.'
+      );
+    }
+    return await apiRequest('/payments/refund', params, {
+      idempotencyKey: params.refundRequestId,
+    });
   },
 
   /**

@@ -71,10 +71,14 @@ vi.mock('@/services/partnerFunctionsApi', () => ({
   },
 }));
 
-vi.mock('@/utils/ticketContract', () => ({
-  normalizeTier: (raw: unknown) => (typeof raw === 'string' ? raw : 'branch'),
-  normalizeTimeline: (raw: unknown) => (Array.isArray(raw) ? raw : []),
-}));
+vi.mock('@/utils/ticketContract', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/utils/ticketContract')>();
+  return {
+    ...actual,
+    normalizeTier: (raw: unknown) => (typeof raw === 'string' ? raw : 'branch'),
+    normalizeTimeline: (raw: unknown) => (Array.isArray(raw) ? raw : []),
+  };
+});
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 

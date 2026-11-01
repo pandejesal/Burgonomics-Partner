@@ -25,7 +25,9 @@ export function EscalationTierBadge({
       ? 'L3_EXECUTIVE'
       : level === 'brand_support' || level === 'L2_REGIONAL'
       ? 'L2_REGIONAL'
-      : 'L1_STORE';
+      : level === 'branch' || level === 'L1_STORE'
+      ? 'L1_STORE'
+      : 'unknown';
 
   const getElapsedMinutes = () => {
     if (!createdAt) return 0;
@@ -71,15 +73,24 @@ export function EscalationTierBadge({
     );
   }
 
+  if (normalizedLevel === 'L1_STORE') {
+    return (
+      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-[#0E4825]/90 border border-emerald-500/60 text-emerald-300 font-bold text-[10px] uppercase tracking-wider shadow-sm">
+        <ShieldCheck className="w-3 h-3 text-emerald-400 shrink-0" />
+        <span>L1 Store Queue</span>
+        {showTimer && (
+          <span className="font-mono text-emerald-400 bg-emerald-950 px-1.5 py-0.5 rounded-md text-[9px]">
+            {elapsedMins < 15 ? `${15 - elapsedMins}m SLA` : `${elapsedMins}m elapsed`}
+          </span>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-[#0E4825]/90 border border-emerald-500/60 text-emerald-300 font-bold text-[10px] uppercase tracking-wider shadow-sm">
-      <ShieldCheck className="w-3 h-3 text-emerald-400 shrink-0" />
-      <span>L1 Store Queue</span>
-      {showTimer && (
-        <span className="font-mono text-emerald-400 bg-emerald-950 px-1.5 py-0.5 rounded-md text-[9px]">
-          {elapsedMins < 15 ? `${15 - elapsedMins}m SLA` : `${elapsedMins}m elapsed`}
-        </span>
-      )}
+    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-neutral-900 border border-neutral-700 text-neutral-400 font-bold text-[10px] uppercase tracking-wider shadow-sm">
+      <Clock className="w-3 h-3 text-neutral-400 shrink-0" />
+      <span>Unassigned Tier</span>
     </div>
   );
 }

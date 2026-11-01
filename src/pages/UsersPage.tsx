@@ -28,9 +28,10 @@ export function UsersPage() {
   const [revokingUser, setRevokingUser] = useState<TeamUser | null>(null);
 
   const filteredUsers = users.filter((member) => {
+    const query = searchQuery.toLowerCase();
     const matchesSearch =
-      member.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      member.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (member.name || '').toLowerCase().includes(query) ||
+      (member.email || '').toLowerCase().includes(query) ||
       (member.phone && member.phone.includes(searchQuery));
 
     if (!matchesSearch) return false;

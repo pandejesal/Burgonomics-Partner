@@ -1,5 +1,4 @@
 import React, { Suspense, lazy } from "react";
-import { SystemOperationsLayout } from "../layouts/SystemOperationsLayout";
 import { SystemDashboardTab } from "./system/SystemDashboardTab";
 // Metrics tab pulls in recharts — code-split so diagnostics visits don't
 // tax every admin bundle load.
@@ -77,6 +76,10 @@ export const AdminSystemPage: React.FC<AdminSystemPageProps> = ({ activeView }) 
     }
   };
 
-  return <SystemOperationsLayout>{renderTabContent()}</SystemOperationsLayout>;
+  // The /admin/system route owns the single SystemOperationsLayout shell
+  // (header, sidebar, permission filter, mobile tab bar). Wrapping again here
+  // mounted a second shell inside the first and collapsed every tab panel to
+  // the ~58px screenshot defect.
+  return <>{renderTabContent()}</>;
 };
 export default AdminSystemPage;

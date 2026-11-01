@@ -183,16 +183,12 @@ export function useOrders(params: UseOrdersParams = {}) {
       const scopeBranchIds = resolveScopedBranchIds(user, selectedBranchId);
       if (!scopeBranchIds.length && !isGlobalRole(user?.role)) return [];
 
-      // Bounded reads: the old code downloaded the ENTIRE orders collection
-      // on every mount (5k docs ≈ 10MB + 5k billed reads), and the newer
-      // compound query (`branchId in …` + `createdAt >= …` + `orderBy
-      // createdAt desc`) throws `FirebaseError: The query requires an index`
-      // wherever that composite index is not deployed — and it can never
-      // match customer docs whose `createdAt` is an ISO string instead of a
-      // Firestore Timestamp (cross-type comparisons are not index-served).
-      // So the Firestore read stays single-field, and ordering + dateRange
-      // narrowing happen in memory below, where Timestamp and string dates
-      // compare correctly.
+      // Order BEFORE limiting: sorting an arbitrary 100 document names cannot
+      // recover newer orders excluded by the limit. Scoped reads require the
+      // branchId/createdAt composite already declared in the root manifest.
+      // An unavailable index is a query error, never an unordered success.
+      // Legacy mixed createdAt types still require data normalization: server
+      // ordering groups Firestore value types; the merge sort is page-local.
       const toRawDocs = (snap: {
         docs: Array<{ id: string; data: () => unknown }>;
       }): Array<{ id: string; data: Record<string, any> }> =>
@@ -204,14 +200,11 @@ export function useOrders(params: UseOrdersParams = {}) {
       let rawDocs: Array<{ id: string; data: Record<string, any> }> = [];
 
       if (scopeBranchIds.length > 0) {
-        // `in` + inequality/orderBy on another field is exactly the
-        // composite-index trap. A plain `in` + `limit` is served by the
-        // automatic single-field index alone (same approach as
-        // fetchAliasedStoreOrders).
         const scopedSnap = await getDocs(
           query(
             collection(db, 'orders'),
             where('branchId', 'in', scopeBranchIds.slice(0, 10)),
+            orderBy('createdAt', 'desc'),
             limit(100)
           )
         );
@@ -219,23 +212,18 @@ export function useOrders(params: UseOrdersParams = {}) {
       } else {
         // Global role: latest-first ordering on a lone orderBy needs only
         // the automatic single-field index on createdAt.
-        try {
-          const globalSnap = await getDocs(
-            query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(100))
-          );
-          rawDocs = toRawDocs(globalSnap);
-        } catch (err) {
-          // Index/precondition failure (undeployed composite index, or any
-          // other rejection of the sorted read): retry once with a plain
-          // bounded read — the in-memory sort below produces the same
-          // latest-first list without asking Firestore to order anything.
-          console.warn(
-            'createdAt orderBy read failed, falling back to bounded unordered read:',
-            err
-          );
-          const fallbackSnap = await getDocs(query(collection(db, 'orders'), limit(100)));
-          rawDocs = toRawDocs(fallbackSnap);
-        }
+        // Delivery-shaped orders use placedAt and may have no createdAt.
+        // Firestore orderBy excludes a missing field, so merge both schema
+        // pages; never substitute an unordered page after an ordered failure.
+        const pages = await Promise.all(['createdAt', 'placedAt'].map((field) =>
+          getDocs(query(collection(db, 'orders'), orderBy(field, 'desc'), limit(100)))
+        ));
+        // A record with both fields belongs to the primary createdAt feed.
+        // Otherwise a delayed placedAt snapshot could rewind its status.
+        const rows = pages.flatMap((page, index) => toRawDocs(page).filter((doc) =>
+          index === 0 || doc.data.createdAt === undefined
+        ));
+        rawDocs = [...new Map(rows.map((doc) => [doc.id, doc])).values()];
       }
 
       // Branch-scoped views: also pull Delivery docs whose store links to
@@ -255,9 +243,8 @@ export function useOrders(params: UseOrdersParams = {}) {
         }
       }
 
-      // Server-side ordering is deliberately gone (composite-index +
-      // cross-type createdAt issues) — latest-first is restored here, where
-      // Firestore Timestamps and ISO-string dates both sort correctly.
+      // Normalize ordering within the fetched/aliased pages. This cannot
+      // recover documents omitted by any query's limit or missing sort field.
       rawDocs.sort((a, b) => orderDocTimeMs(b.data) - orderDocTimeMs(a.data));
 
       let list: Order[] = rawDocs.map((d) => normalizeOrderDoc(d.id, d.data));

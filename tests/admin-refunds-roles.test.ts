@@ -5,6 +5,7 @@ import {
   canReleaseRefund,
   canRetryRefund,
   canRejectRefund,
+  canTriggerBoardRefund,
 } from '../src/admin/pages/refundRoles';
 
 /**
@@ -60,6 +61,36 @@ describe('canReleaseRefund / canRetryRefund (POST /payments/refund)', () => {
       expect(canReleaseRefund(role)).toBe(false);
       expect(canRetryRefund(role)).toBe(false);
     }
+  });
+});
+
+describe('canTriggerBoardRefund (Control Room order board)', () => {
+  const completedPaid = { orderStatus: 'Completed', paymentStatus: 'Paid' };
+
+  it('offers the refund action only to the server-approved release roles', () => {
+    for (const role of SERVER_RELEASE_ROLES) {
+      expect(canTriggerBoardRefund(role, completedPaid)).toBe(true);
+    }
+    for (const role of [
+      'regional_manager',
+      'branch_owner',
+      'branch_staff',
+      'customer',
+      null,
+      undefined,
+    ]) {
+      expect(canTriggerBoardRefund(role, completedPaid)).toBe(false);
+    }
+  });
+
+  it('stays off unless the order is Completed and Paid', () => {
+    expect(
+      canTriggerBoardRefund('brand_owner', { orderStatus: 'Preparing', paymentStatus: 'Paid' })
+    ).toBe(false);
+    expect(
+      canTriggerBoardRefund('brand_owner', { orderStatus: 'Completed', paymentStatus: 'Pending' })
+    ).toBe(false);
+    expect(canTriggerBoardRefund('brand_owner', null)).toBe(false);
   });
 });
 

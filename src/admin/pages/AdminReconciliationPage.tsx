@@ -168,8 +168,6 @@ export const AdminReconciliationPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedType, setSelectedType] = useState("all");
 
-  const isStoreManager = role === "Store Manager";
-
   // RBAC checks
   const canPerformReconciliation = role === "brand_owner" || role === "developer";
 

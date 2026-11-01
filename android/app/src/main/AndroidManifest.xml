@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <application
         android:allowBackup="false"
@@ -38,7 +39,11 @@
     <!-- Permissions: India QSR store operations — geolocation for branch routing, vibrate for KDS haptics, POST_NOTIFICATIONS for FCM loud alarms (Android 13+ gated) -->
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- The geolocation plugin is dormant (no src call sites). Strip the
+         permissions it merges in so the release manifest does not request
+         location access the app never uses (Play/App Store policy). -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

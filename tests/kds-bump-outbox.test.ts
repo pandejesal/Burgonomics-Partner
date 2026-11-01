@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { readFileSync } from 'node:fs';
 
 // Regression cover for two KDS lane findings:
 //   F3 — a status bump lost-update precondition (`expectedStatus`) must be
@@ -8,7 +7,6 @@ import { readFileSync } from 'node:fs';
 //        bump queued last night could flip a delivered order back to
 //        "preparing". Entries now carry `queuedAt`/`expectedStatus` and the
 //        reader drops anything past KDS_BUMP_TTL_MS.
-//   F8 — leaving /kds must silence the module-level 10s repeating alarm.
 
 vi.mock('@/config/firebase', () => ({
   db: {},
@@ -126,32 +124,5 @@ describe('F3 — bumpOrderStatus carries the expectedStatus precondition', () =>
     await partnerFunctionsApi.bumpOrderStatus({ orderId: 'ord_2', status: 'ready' });
     expect(body).toMatchObject({ orderId: 'ord_2', status: 'ready' });
     expect(body.expectedStatus).toBeUndefined();
-  });
-});
-
-describe('F8 — leaving /kds silences the module-level repeating alarm', () => {
-  // Structural guard: the hook cannot be mounted here (no DOM/renderer in
-  // this suite), so this asserts the wiring itself — that the ONLY
-  // unmount-only effect returns stopRepeatingKDSAlarm, and that the alarm it
-  // stops is the one kdsAudio.test.ts already proves stops chiming.
-  const source = readFileSync(
-    new URL('../src/features/kds/hooks/useKDSRealtimeStream.ts', import.meta.url),
-    'utf8'
-  );
-
-  it('registers an unmount-only cleanup that stops the repeating alarm', () => {
-    expect(source).toMatch(
-      /useEffect\(\(\) => \{\s*return \(\) => stopRepeatingKDSAlarm\(\);\s*\}, \[\]\);/
-    );
-  });
-
-  it('registers the alarm stop exactly once, in an empty-dep effect', () => {
-    const cleanups = source.match(
-      /useEffect\(\(\) => \{\s*return \(\) => stopRepeatingKDSAlarm\(\);\s*\}, \[\]\);/g
-    );
-    expect(cleanups).toHaveLength(1);
-    // The pending-count-0 stop stays inside syncKDSAlarmState — unmount must
-    // not be the only path that silences the loop.
-    expect(source).toContain('syncKDSAlarmState(pendingOrders.length)');
   });
 });

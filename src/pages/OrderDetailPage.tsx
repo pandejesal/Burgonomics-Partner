@@ -27,28 +27,22 @@ import {
   FlaskConical,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAuthStore } from '@/stores/authStore';
+import { canCancelOrder } from '@/features/orders/orderCancelRoles';
 import type { OrderStatus } from '@/types';
 import { ConfirmDialog } from '../admin/components/Utilities';
 import { DeliveryOtpModal } from '@/components/DeliveryOtpModal';
-import { useAuthStore } from '@/stores/authStore';
 import { orderStatusWriteErrorMessage } from '@/utils/orderErrors';
 import { useQueryClient } from '@tanstack/react-query';
 import { partnerFunctionsApi, dispatchProviderLabel } from '@/services/partnerFunctionsApi';
+import { buildCancelRefundRequest } from '@/utils/refundRequestIdentity';
 import type { DispatchQuoteResult } from '@/services/partnerFunctionsApi';
-
-/**
- * POST /payments/refund is requireRole(["brand_owner","developer","support"])
- * server-side — anyone else gets a 403. Mirrored here so branch staff get an
- * honest message instead of a guaranteed server rejection.
- */
-const REFUND_ROLES = ['brand_owner', 'developer', 'support'];
 
 export function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuthStore();
   const queryClient = useQueryClient();
-  const canReleaseRefund = !!user?.role && REFUND_ROLES.includes(user.role);
+  const { user } = useAuthStore();
 
   const {
     order,
@@ -240,8 +234,9 @@ export function OrderDetailPage() {
       if (updateStatus && typeof updateStatus.mutateAsync === 'function') {
         await updateStatus.mutateAsync({
           status: nextStatus,
-          // Precondition: what this screen is showing — a concurrent bump on
-          // another terminal is refused server-side instead of clobbered.
+          // Precondition: what this screen is showing — sent as the
+          // expectedStatus precondition for the backend lane; the client
+          // only carries the value.
           ...(order ? { expectedStatus: order.status } : {}),
         });
       }
@@ -279,20 +274,8 @@ export function OrderDetailPage() {
       return;
     }
 
-    if (!canReleaseRefund) {
-      // The server would 403 this caller anyway — say so honestly instead of
-      // firing a request we know is refused.
-      toast.info('Order cancelled — refund NOT issued by this screen.', {
-        description: `Refunds of ₹${order.total} are released by brand admins. Ask a brand admin to release it.`,
-      });
-      return;
-    }
-
-    const paymentId =
-      (order as any)?.payment?.razorpayPaymentId ||
-      (order as any)?.razorpayPaymentId ||
-      '';
-    if (!paymentId) {
+    const request = buildCancelRefundRequest(order, reason);
+    if (!request) {
       toast.error('Order cancelled, but NO refund was issued.', {
         description:
           'No Razorpay payment id is recorded on this order — a brand admin must locate the capture and release the refund manually.',
@@ -301,12 +284,7 @@ export function OrderDetailPage() {
     }
 
     try {
-      const res = await partnerFunctionsApi.releaseRefund({
-        orderId: order.id,
-        razorpayPaymentId: paymentId,
-        amountRupees: order.total,
-        reason: `Cancelled (${reason})`,
-      });
+      const res = await partnerFunctionsApi.releaseRefund(request);
       toast.success(
         `Order cancelled and refund released via Razorpay${
           (res as any)?.reused ? ' (already processed — idempotent replay)' : ''
@@ -473,17 +451,23 @@ export function OrderDetailPage() {
             <span>Petpooja Test Lab</span>
           </button>
 
-          {/* Cancel Order */}
-          {order.status !== 'cancelled' && order.status !== 'delivered' && (
-            <button
-              type="button"
-              onClick={() => setShowCancelModal(true)}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900 border border-rose-800/60 text-rose-300 font-bold text-xs transition-colors cursor-pointer"
-            >
-              <XCircle className="w-4 h-4" />
-              <span>Cancel / Refund</span>
-            </button>
-          )}
+          {/* Cancel Order — gated by the SAME shared role matrix the modal
+              enforces: support/regional_manager can open /orders but the
+              server refuses their cancel, so offering the button only led to
+              a dead-end authorization wall. Unauthorized roles see a truthful
+              read-only view with no destructive option. */}
+          {order.status !== 'cancelled' &&
+            order.status !== 'delivered' &&
+            canCancelOrder(user?.role) && (
+              <button
+                type="button"
+                onClick={() => setShowCancelModal(true)}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900 border border-rose-800/60 text-rose-300 font-bold text-xs transition-colors cursor-pointer"
+              >
+                <XCircle className="w-4 h-4" />
+                <span>Cancel / Refund</span>
+              </button>
+            )}
         </div>
       </div>
 

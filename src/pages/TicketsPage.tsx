@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useTickets } from '@/hooks/useTickets';
 import { useAuthStore } from '@/stores/authStore';
 import { RaiseTicketModal } from '@/components/tickets/RaiseTicketModal';
@@ -21,9 +22,16 @@ import {
 import type { Ticket } from '@/types';
 import { DataWarningBanner } from '@/components/ui/DataWarningBanner';
 import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
+import {
+  resolveTicketTier,
+  getNextEscalationTarget,
+  isActiveTicketStatus,
+  isTerminalTicketStatus,
+} from '@/utils/ticketContract';
+import { filterTicketQueue } from '@/utils/ticketQueue';
 import { toast } from 'sonner';
 
-export function TicketsPage() {
+export function TicketsPage({ initialTickets }: { initialTickets?: Ticket[] } = {}) {
   const { user } = useAuthStore();
   const [activeTierTab, setActiveTierTab] = useState<
     'all' | 'L1_STORE' | 'L2_REGIONAL' | 'L3_EXECUTIVE' | 'resolved'
@@ -33,9 +41,15 @@ export function TicketsPage() {
   const [showRaiseModal, setShowRaiseModal] = useState(false);
   const [resolvingTicket, setResolvingTicket] = useState<Ticket | null>(null);
 
-  const { tickets, isLoading, warnings, createTicket } = useTickets({
+  const queryClient = useQueryClient();
+  const hookResult = useTickets({
     tier: activeTierTab === 'resolved' ? 'resolved' : 'all',
   });
+  const tickets = initialTickets ?? hookResult.tickets;
+  const isLoading = initialTickets ? false : hookResult.isLoading;
+  const error = initialTickets ? null : hookResult.error;
+  const warnings = initialTickets ? [] : hookResult.warnings;
+  const createTicket = hookResult.createTicket;
 
   const handleRaiseTicket = async (ticketData: any) => {
     // Loop 55/120: creation can fail loud (rules bind, offline) — the old
@@ -52,20 +66,29 @@ export function TicketsPage() {
   };
 
   const handleQuickEscalate = async (ticket: Ticket) => {
-    const currentLevel =
-      (ticket as any).escalationLevel ||
-      (ticket as any).assignedToTier ||
-      'L1_STORE';
+    const isClosed = ticket.status === 'resolved' || ticket.status === 'closed';
+    if (isClosed) {
+      toast.error("Cannot escalate a resolved or closed ticket.");
+      return;
+    }
 
-    const nextTier =
-      currentLevel === 'L1_STORE' || currentLevel === 'branch'
-        ? 'brand_support'
-        : 'developer_team';
+    const currentLevel = resolveTicketTier(ticket);
+    if (currentLevel === 'L3_EXECUTIVE') {
+      toast.info("Ticket is already at the highest escalation tier (L3 Executive); cannot escalate further.");
+      return;
+    }
+    if (currentLevel === 'unknown') {
+      toast.error("Cannot escalate ticket with unknown assignment tier.");
+      return;
+    }
 
-    const nextLevel =
-      currentLevel === 'L1_STORE' || currentLevel === 'branch'
-        ? 'L2_REGIONAL'
-        : 'L3_EXECUTIVE';
+    const next = getNextEscalationTarget(currentLevel);
+    if (!next) {
+      toast.info("Ticket cannot be escalated further.");
+      return;
+    }
+
+    const { targetTier, nextLevel } = next;
 
     // Server-side escalation (POST /tickets/escalate): branch-scoped,
     // snapshotted, notified. The old direct Firestore tier flip skipped all
@@ -73,9 +96,10 @@ export function TicketsPage() {
     try {
       await partnerFunctionsApi.escalateTicket({
         ticketId: ticket.id,
-        targetTier: nextTier,
+        targetTier,
         reason: `Manual escalation to ${nextLevel} by ${user?.name || 'Staff'}.`,
       });
+      await queryClient.invalidateQueries({ queryKey: ['tickets'] });
       toast.success(`Escalated to ${nextLevel}.`);
     } catch (err) {
       toast.error("Escalation NOT recorded.", {
@@ -127,74 +151,30 @@ export function TicketsPage() {
         });
         toast.success("Ticket resolved with recorded explanation.");
       }
+      await queryClient.invalidateQueries({ queryKey: ['tickets'] });
       setResolvingTicket(null);
     } catch (err) {
       toast.error("Resolution failed server-side — ticket left open, nothing applied.", {
         description: err instanceof Error ? err.message : String(err),
       });
+      throw err;
     }
   };
 
   const filteredTickets = useMemo(() => {
-    const q = searchQuery.toLowerCase().trim();
-    return tickets.filter((t) => {
-      // 1. Tier Tab Filtering
-      const level =
-        (t as any).escalationLevel ||
-        (t as any).assignedToTier ||
-        (t as any).assignedTo?.tier ||
-        'L1_STORE';
-
-      const isResolved = t.status === 'resolved' || t.status === 'closed';
-
-      if (activeTierTab === 'resolved' && !isResolved) return false;
-      if (activeTierTab !== 'resolved' && activeTierTab !== 'all') {
-        if (isResolved) return false;
-        if (activeTierTab === 'L1_STORE' && level !== 'L1_STORE' && level !== 'branch') return false;
-        if (activeTierTab === 'L2_REGIONAL' && level !== 'L2_REGIONAL' && level !== 'brand_support')
-          return false;
-        if (
-          activeTierTab === 'L3_EXECUTIVE' &&
-          level !== 'L3_EXECUTIVE' &&
-          level !== 'developer_team'
-        )
-          return false;
-      }
-
-      // 2. Category Filter
-      if (categoryFilter !== 'all' && t.category !== categoryFilter) {
-        return false;
-      }
-
-      // 3. Search Query
-      if (q) {
-        const matchesTitle = (t.title || (t as any).subject || '').toLowerCase().includes(q);
-        const matchesDesc = (t.message || (t as any).description || '').toLowerCase().includes(q);
-        const matchesCustomer = (t.customerName || '').toLowerCase().includes(q);
-        const matchesPhone = (t.customerPhone || '').includes(q);
-        const matchesNum = (t.ticketNumber || t.id).toLowerCase().includes(q);
-
-        if (!matchesTitle && !matchesDesc && !matchesCustomer && !matchesPhone && !matchesNum) {
-          return false;
-        }
-      }
-
-      return true;
-    });
+    return filterTicketQueue(tickets, { activeTierTab, categoryFilter, searchQuery });
   }, [tickets, activeTierTab, categoryFilter, searchQuery]);
 
-  const openCount = tickets.filter((t) => t.status === 'open' || t.status === 'in_progress').length;
+  // Active KPIs use the same active predicate as the queue: `escalated` is an
+  // active backend status, terminal rows are excluded from every active count.
+  const openCount = tickets.filter((t) => isActiveTicketStatus(t.status)).length;
   const l2Count = tickets.filter(
-    (t) =>
-      (t.status === 'open' || t.status === 'in_progress') &&
-      ((t as any).escalationLevel === 'L2_REGIONAL' || (t as any).assignedToTier === 'brand_support')
+    (t) => isActiveTicketStatus(t.status) && resolveTicketTier(t) === 'L2_REGIONAL'
   ).length;
   const l3Count = tickets.filter(
-    (t) =>
-      (t.status === 'open' || t.status === 'in_progress') &&
-      ((t as any).escalationLevel === 'L3_EXECUTIVE' || (t as any).assignedToTier === 'developer_team')
+    (t) => isActiveTicketStatus(t.status) && resolveTicketTier(t) === 'L3_EXECUTIVE'
   ).length;
-  const resolvedCount = tickets.filter((t) => t.status === 'resolved' || t.status === 'closed').length;
+  const resolvedCount = tickets.filter((t) => isTerminalTicketStatus(t.status)).length;
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-16 select-none">
@@ -306,6 +286,10 @@ export function TicketsPage() {
       {/* Ticket Queue Table */}
       <TicketQueueTable
         tickets={filteredTickets}
+        isLoading={isLoading}
+        error={error}
+        warnings={warnings}
+        onRetry={() => hookResult.refetch?.()}
         onOpenResolveModal={setResolvingTicket}
         onQuickEscalate={handleQuickEscalate}
         onClearFilters={() => {

@@ -12,7 +12,12 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import type { Ticket, TicketStatus, TicketType } from '@/types';
-import { normalizeTicketDoc } from '@/utils/ticketContract';
+import {
+  normalizeTicketDoc,
+  normalizeSupportTicketDoc,
+  resolveTicketTier,
+  isTerminalTicketStatus,
+} from '@/utils/ticketContract';
 
 interface UseTicketsParams {
   status?: TicketStatus | 'all';
@@ -26,7 +31,7 @@ export function useTickets(params: UseTicketsParams = {}) {
   // Sources that failed this fetch — surfaced in UI, never console-only.
   const warningsRef = useRef<string[]>([]);
 
-  const { data: tickets = [], isLoading, error } = useQuery({
+  const { data: tickets = [], isLoading, error, refetch } = useQuery({
     queryKey: ['tickets', user?.id, user?.role, selectedBranchId, params],
     queryFn: async (): Promise<Ticket[]> => {
       if (!user) throw new Error('Not authenticated');
@@ -119,28 +124,7 @@ export function useTickets(params: UseTicketsParams = {}) {
           );
           const out: Ticket[] = [];
           supportSnap.forEach((d) => {
-            const data = d.data();
-            out.push(
-              normalizeTicketDoc(d.id, {
-                ticketNumber: data.ticketNumber || d.id,
-                title: data.subject || data.title || 'Customer Support Incident',
-                branchId: data.branchId,
-                branchName: data.branchName || data.branchId,
-                category: data.category || 'customer_escalation',
-                priority: data.priority || 'medium',
-                message: data.description || data.message || '',
-                orderId: data.orderId,
-                status: data.status || 'open',
-                raisedById: data.customerId || data.raisedById || 'customer',
-                raisedByName: data.customerName || data.raisedByName || 'Customer',
-                raisedByRole: 'customer',
-                assignedTo: data.assignedTo || { tier: 'branch' },
-                attachments: data.attachments || [],
-                resolution: data.resolution?.notes || data.resolution || '',
-                createdAt: data.createdAt || Timestamp.now(),
-                updatedAt: data.updatedAt || Timestamp.now(),
-              })
-            );
+            out.push(normalizeSupportTicketDoc(d.id, d.data() as Record<string, any>));
           });
           return out;
         } catch (err) {
@@ -186,9 +170,20 @@ export function useTickets(params: UseTicketsParams = {}) {
         let filtered = list;
         if (params.tier && params.tier !== 'all') {
           if (params.tier === 'resolved') {
-            filtered = filtered.filter((t) => t.status === 'resolved' || t.status === 'closed');
+            filtered = filtered.filter((t) => isTerminalTicketStatus(t.status));
           } else {
-            filtered = filtered.filter((t) => (t as any).assignedTo?.tier === params.tier && t.status !== 'resolved' && t.status !== 'closed');
+            // Resolve the tier the same way the queue does — canonical
+            // assignedTo.tier first, legacy assignedToTier/escalationLevel as
+            // fallback. Comparing only assignedTo.tier dropped legacy rows.
+            const targetLevel =
+              params.tier === 'branch'
+                ? 'L1_STORE'
+                : params.tier === 'brand_support'
+                  ? 'L2_REGIONAL'
+                  : 'L3_EXECUTIVE';
+            filtered = filtered.filter(
+              (t) => resolveTicketTier(t) === targetLevel && !isTerminalTicketStatus(t.status),
+            );
           }
         }
         return filtered;
@@ -290,9 +285,17 @@ export function useTickets(params: UseTicketsParams = {}) {
       let filtered = defaultTickets;
       if (params.tier && params.tier !== 'all') {
         if (params.tier === 'resolved') {
-          filtered = filtered.filter((t) => t.status === 'resolved' || t.status === 'closed');
+          filtered = filtered.filter((t) => isTerminalTicketStatus(t.status));
         } else {
-          filtered = filtered.filter((t) => (t as any).assignedTo?.tier === params.tier && t.status !== 'resolved' && t.status !== 'closed');
+          const targetLevel =
+            params.tier === 'branch'
+              ? 'L1_STORE'
+              : params.tier === 'brand_support'
+                ? 'L2_REGIONAL'
+                : 'L3_EXECUTIVE';
+          filtered = filtered.filter(
+            (t) => resolveTicketTier(t) === targetLevel && !isTerminalTicketStatus(t.status),
+          );
         }
       }
 
@@ -360,5 +363,5 @@ export function useTickets(params: UseTicketsParams = {}) {
     },
   });
 
-  return { tickets, isLoading, error, warnings: warningsRef.current, createTicket, updateTicket };
+  return { tickets, isLoading, error, warnings: warningsRef.current, createTicket, updateTicket, refetch };
 }

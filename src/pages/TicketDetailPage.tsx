@@ -6,7 +6,12 @@ import { useTicket } from '@/hooks/useTicket';
 import { useAuthStore } from '@/stores/authStore';
 import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
 import { validatePartialRefundAmount } from '@/utils/refundValidation';
-import { normalizeTier, normalizeTimeline } from '@/utils/ticketContract';
+import {
+  normalizeTimeline,
+  resolveTicketTier,
+  canEscalateToTier,
+  type CanonicalTierLevel,
+} from '@/utils/ticketContract';
 import {
   ArrowLeft,
   ShieldAlert,
@@ -103,7 +108,29 @@ export function TicketDetailPage() {
   }
 
   const isResolved = ticket.status === 'resolved' || ticket.status === 'closed';
-  const assignedTier = normalizeTier((ticket as any).assignedTo?.tier);
+  // Tier truth comes from the shared resolver (canonical first, legacy
+  // fallback, unknown stays unknown). The old `normalizeTier` call defaulted
+  // every unknown/legacy token to the L1 branch queue.
+  const assignedLevel: CanonicalTierLevel | 'unknown' = resolveTicketTier(ticket);
+  const assignedTierToken: 'branch' | 'brand_support' | 'developer_team' | null =
+    assignedLevel === 'L1_STORE'
+      ? 'branch'
+      : assignedLevel === 'L2_REGIONAL'
+        ? 'brand_support'
+        : assignedLevel === 'L3_EXECUTIVE'
+          ? 'developer_team'
+          : null;
+  const assignedTierLabel = assignedTierToken
+    ? assignedTierToken.replace('_', ' ')
+    : 'Unknown tier — assignment not recorded';
+  // Upward-only escalation controls: a same-or-lower tier action is disabled
+  // here rather than sent to the server to be rejected (or worse, applied).
+  const canEscalateToBrand = canEscalateToTier(ticket, 'brand_support');
+  const canEscalateToDeveloper = canEscalateToTier(ticket, 'developer_team');
+  const escalationAvailability: Record<string, boolean> = {
+    escalate_brand: canEscalateToBrand,
+    escalate_dev: canEscalateToDeveloper,
+  };
   const diagnostics = (ticket as any).diagnostics || {};
   const timeline = normalizeTimeline((ticket as any).timeline);
   // Diagnostics (raw error stacks, payload copy) are a developer/brand-owner
@@ -177,6 +204,7 @@ export function TicketDetailPage() {
             ? `Full refund executed server-side${refundId ? ` (refund ${refundId})` : ''}. Ticket resolved.`
             : `Partial refund of ₹${amount} executed server-side${refundId ? ` (refund ${refundId})` : ''}. Ticket resolved.`
         );
+        setResolutionNotes(''); // clear only on success — retries keep the notes
       } catch (err) {
         setActionError(
           err instanceof Error ? err.message : 'Refund failed server-side — ticket left open, no money moved. Retry or escalate.'
@@ -184,7 +212,6 @@ export function TicketDetailPage() {
       } finally {
         setIsResolving(false);
       }
-      setResolutionNotes('');
       return;
     } else if (activeActionTab === 'goodwill') {
       setIsResolving(true);
@@ -214,6 +241,7 @@ export function TicketDetailPage() {
           await refreshTicket();
           setSuccessMessage('Coupon request recorded on the ticket — voucher NOT auto-minted (no issuance endpoint yet). Issue manually via dashboard.');
         }
+        setResolutionNotes(''); // clear only on success — retries keep the notes
       } catch (err) {
         setActionError(
           err instanceof Error ? err.message : 'Goodwill action failed server-side — ticket left open, nothing issued. Retry or escalate.'
@@ -221,7 +249,6 @@ export function TicketDetailPage() {
       } finally {
         setIsResolving(false);
       }
-      setResolutionNotes('');
       return;
     } else {
       // The three non-money actions: one guard so a rejected server call can
@@ -231,6 +258,11 @@ export function TicketDetailPage() {
       setIsResolving(true);
       try {
         if (activeActionTab === 'escalate_brand') {
+          if (!canEscalateToBrand) {
+            throw new Error(
+              'This ticket is already at or above Tier 2 (or its tier is unknown) — escalation was not sent.'
+            );
+          }
           await partnerFunctionsApi.escalateTicket({
             ticketId: id || '',
             targetTier: 'brand_support',
@@ -239,6 +271,11 @@ export function TicketDetailPage() {
           await refreshTicket();
           setSuccessMessage('Escalated to Tier 2 (Brand Support) — the ticket timeline is updated.');
         } else if (activeActionTab === 'escalate_dev') {
+          if (!canEscalateToDeveloper) {
+            throw new Error(
+              'This ticket is already at Tier 3 (or its tier is unknown) — escalation was not sent.'
+            );
+          }
           const result: any = await partnerFunctionsApi.escalateTicket({
             ticketId: id || '',
             targetTier: 'developer_team',
@@ -325,7 +362,7 @@ export function TicketDetailPage() {
               Escalator Level
             </h3>
             <p className="text-sm font-black text-white capitalize">
-              {assignedTier.replace('_', ' ')}
+              {assignedTierLabel}
             </p>
           </div>
         </div>
@@ -334,7 +371,7 @@ export function TicketDetailPage() {
           {/* Tier 1 */}
           <div
             className={`flex-1 md:flex-initial flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors ${
-              assignedTier === 'branch'
+              assignedTierToken === 'branch'
                 ? 'bg-emerald-950 text-emerald-300 border-emerald-600'
                 : 'bg-bg text-zinc-500 border-border'
             }`}
@@ -348,7 +385,7 @@ export function TicketDetailPage() {
           {/* Tier 2 */}
           <div
             className={`flex-1 md:flex-initial flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors ${
-              assignedTier === 'brand_support'
+              assignedTierToken === 'brand_support'
                 ? 'bg-purple-950 text-purple-300 border-purple-600'
                 : 'bg-bg text-zinc-500 border-border'
             }`}
@@ -362,7 +399,7 @@ export function TicketDetailPage() {
           {/* Tier 3 */}
           <div
             className={`flex-1 md:flex-initial flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors ${
-              assignedTier === 'developer_team'
+              assignedTierToken === 'developer_team'
                 ? 'bg-rose-950 text-rose-300 border-rose-600 animate-pulse'
                 : 'bg-bg text-zinc-500 border-border'
             }`}
@@ -449,7 +486,7 @@ export function TicketDetailPage() {
 
         {/* Developer Diagnostics Drawer — role-gated (developer/brand_owner
             only, fail-closed) and only for Tier 3 or when diagnostics present) */}
-        {canViewDiagnostics && (assignedTier === 'developer_team' || Object.keys(diagnostics).length > 0) && (
+        {canViewDiagnostics && (assignedTierToken === 'developer_team' || Object.keys(diagnostics).length > 0) && (
           <div className="bg-[#0A0C0A] border-2 border-rose-800/60 rounded-2xl p-4 space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -536,19 +573,32 @@ export function TicketDetailPage() {
                   { key: 'escalate_dev', label: '💻 Escalate to Dev (Tier 3)', icon: Cpu },
                   { key: 'standard', label: '✅ Standard Resolve', icon: CheckCircle2 },
                 ] as const
-              ).map(({ key, label }) => (
-                <button
-                  key={key}
-                  onClick={() => setActiveActionTab(key)}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                    activeActionTab === key
-                      ? 'bg-accent text-white shadow-sm'
-                      : 'bg-surface text-zinc-400 hover:text-white border border-border'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+              ).map(({ key, label }) => {
+                const isEscalationTab = key === 'escalate_brand' || key === 'escalate_dev';
+                const isDisabled = isEscalationTab && escalationAvailability[key] === false;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => setActiveActionTab(key)}
+                    disabled={isDisabled}
+                    title={
+                      isDisabled
+                        ? 'This ticket is already at or above this tier (or its tier is unknown) — escalation would not move it up.'
+                        : undefined
+                    }
+                    aria-disabled={isDisabled}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+                      isDisabled
+                        ? 'bg-surface text-zinc-600 border border-border cursor-not-allowed opacity-60'
+                        : activeActionTab === key
+                          ? 'bg-accent text-white shadow-sm cursor-pointer'
+                          : 'bg-surface text-zinc-400 hover:text-white border border-border cursor-pointer'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
             </div>
 
             {/* Tab 1: Refund & Settle */}

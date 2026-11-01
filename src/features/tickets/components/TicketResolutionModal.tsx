@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, CheckCircle2, Coins, RefreshCw, MessageSquare, AlertCircle, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Ticket } from '@/types';
@@ -62,6 +62,13 @@ export function TicketResolutionModal({
   const [notes, setNotes] = useState('');
   const [coins, setCoins] = useState<number>(100);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setSubmitError(null);
+    }
+  }, [isOpen]);
 
   if (!isOpen || !ticket) return null;
 
@@ -76,6 +83,7 @@ export function TicketResolutionModal({
     }
 
     setIsSubmitting(true);
+    setSubmitError(null);
     try {
       await onConfirmResolution({
         ticketId: ticket.id,
@@ -86,6 +94,8 @@ export function TicketResolutionModal({
       toast.success(`Ticket #${shortCode} successfully resolved`);
       onClose();
     } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to resolve support ticket';
+      setSubmitError(msg);
       toast.error('Failed to resolve support ticket');
     } finally {
       setIsSubmitting(false);
@@ -190,6 +200,16 @@ export function TicketResolutionModal({
               required
             />
           </div>
+
+          {submitError && (
+            <div
+              role="alert"
+              className="p-3 rounded-2xl bg-rose-950/40 border border-rose-800/60 text-rose-300 text-xs flex items-center gap-2"
+            >
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>{submitError}</span>
+            </div>
+          )}
 
           {/* Actions */}
           <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-800">

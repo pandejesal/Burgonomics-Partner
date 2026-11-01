@@ -96,7 +96,7 @@ export const PermissionChip: React.FC<{ permission: string }> = ({ permission })
 
 // Role Chip
 export const RoleChip: React.FC<{ role: string }> = ({ role }) => {
-  const isDev = role === "Developer";
+  const isDev = role === "developer" || role === "brand_owner";
   const colorClass = isDev
     ? "bg-amber-50 text-accent dark:text-accent-light border-amber-200/50 dark:bg-amber-950/20 dark:text-accent-light"
     : "bg-primary/5 text-primary border-primary/10 dark:bg-primary/10 dark:text-emerald-400";
