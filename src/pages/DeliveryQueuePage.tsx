@@ -41,6 +41,7 @@ export function DeliveryQueuePage() {
     assignInHouseRider,
     cancelPorter,
     rebookPorter,
+    confirmDashboardCancel,
   } = usePorterLogistics();
 
   // Feed honesty (F06-06 regression): an errored orders read must surface a
@@ -292,6 +293,7 @@ export function DeliveryQueuePage() {
                   onPastePorter={(o, porterOrderId, trackingUrl) =>
                     savePorterManual(o.id, porterOrderId, trackingUrl)
                   }
+                  onConfirmDashboardCancel={confirmDashboardCancel}
                 />
               ))}
             </div>

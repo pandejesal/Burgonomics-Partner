@@ -5,6 +5,7 @@ import { useAppStore } from '@/stores/appStore';
 import { useAuthStore } from '@/stores/authStore';
 import { manualBranchDispatch } from '@/services/porterDelivery';
 import {
+  ApiRequestError,
   dispatchProviderLabel as providerLabel,
   partnerFunctionsApi,
   type DispatchBookResult,
@@ -29,6 +30,35 @@ export interface InHouseRiderInfo {
  * rendering "No Delivery Orders In Queue" over a feed it never read.
  */
 export type DeliveryFeedState = 'loading' | 'error' | 'ready';
+
+/**
+ * Copy for a dispatch refusal. A released booking whose remote cancellation is
+ * unproven comes back as 409 DISPATCH_CANCEL_UNCONFIRMED with a
+ * `staffActionRequired` sentence from the server; showing only `err.message`
+ * loses the booking id and the dashboard step, so it is preferred when present
+ * (dispatch.cancelPending.ts:118-155).
+ */
+export function dispatchRefusalCopy(err: unknown): {
+  title: string;
+  description: string;
+  blockedOnUnconfirmedCancel: boolean;
+} {
+  if (err instanceof ApiRequestError && err.code === 'DISPATCH_CANCEL_UNCONFIRMED') {
+    return {
+      title: 'Cancellation not confirmed — no replacement rider booked',
+      description:
+        err.staffActionRequired ||
+        err.message ||
+        'Confirm the existing booking was cancelled in the courier dashboard first.',
+      blockedOnUnconfirmedCancel: true,
+    };
+  }
+  return {
+    title: 'Rebook failed — no new courier dispatched.',
+    description: err instanceof Error ? err.message : 'Could not reach the dispatcher.',
+    blockedOnUnconfirmedCancel: false,
+  };
+}
 
 export function deriveDeliveryFeedState(input: {
   isLoading: boolean;
@@ -415,8 +445,16 @@ export function usePorterLogistics() {
         });
         toast.success(
           `${providerLabel(res.provider)} booking cancelled for order #${orderId.slice(-6).toUpperCase()}`,
-          { description: res.message },
+          { description: res.message }
         );
+        // P1-D: a provider without a cancel API only released the booking
+        // locally. Say so, and point at the confirm step — the queue's own
+        // card is what releases the block.
+        if (res.staffActionRequired) {
+          toast.warning('Confirm the cancellation with the courier', {
+            description: res.staffActionRequired,
+          });
+        }
       } catch (err) {
         toast.error('Failed to cancel courier booking', {
           description: err instanceof Error ? err.message : 'Could not reach the dispatcher.',
@@ -424,6 +462,34 @@ export function usePorterLogistics() {
       }
     },
     [updateOrderStatus, staffName, currentStatusOf],
+  );
+
+  // P1-D: staff confirm the dashboard cancellation, releasing the block on a
+  // replacement dispatch. POST /dispatch/cancel/confirm records who/when (and
+  // the optional dashboard reference) on the order.
+  const confirmDashboardCancel = useCallback(
+    async (order: Order, note?: string) => {
+      try {
+        const res = await partnerFunctionsApi.dispatchConfirmCancel({
+          orderId: order.id,
+          staffName,
+          ...(note ? { note } : {}),
+        });
+        toast.success('Dashboard cancellation confirmed', {
+          description: res.reused
+            ? 'This cancellation was already confirmed — recorded details unchanged.'
+            : 'A replacement rider can be booked now.',
+        });
+      } catch (err) {
+        toast.error('Could not confirm the cancellation', {
+          description:
+            err instanceof Error ? err.message : 'Could not reach the dispatcher.',
+        });
+        // Rethrow so the card's confirm step can stay open on a real failure.
+        throw err;
+      }
+    },
+    [staffName],
   );
 
   // Rebook (delivery_porter.md §4) — POST /dispatch/rebook re-enters the
@@ -441,9 +507,8 @@ export function usePorterLogistics() {
         });
         await applyDispatchResult(order.id, res);
       } catch (err) {
-        toast.error('Rebook failed — no new courier dispatched.', {
-          description: err instanceof Error ? err.message : 'Could not reach the dispatcher.',
-        });
+        const refusal = dispatchRefusalCopy(err);
+        toast.error(refusal.title, { description: refusal.description });
       } finally {
         setRebookingOrderIds((prev) => {
           const next = { ...prev };
@@ -475,6 +540,7 @@ export function usePorterLogistics() {
     assignInHouseRider,
     cancelPorter,
     rebookPorter,
+    confirmDashboardCancel,
   };
 }
 

@@ -19,6 +19,14 @@ import {
   type DispatchFareConfirm,
   type DispatchQuoteResult,
 } from '@/services/partnerFunctionsApi';
+import {
+  isDispatchCancelBlocking,
+  providerDashboardName,
+  providerShortName,
+  readDispatchCancelAlert,
+  readPendingDispatchCancel,
+} from '@/features/delivery/dispatchPendingCancel';
+import { hasAssignedRider } from '@/features/delivery/riderEvidence';
 import { isSafeTelNumber, isSafeTrackingUrl } from '@/utils/urlSafety';
 import { playKDSChime } from '@/utils/kdsAudio';
 import { ConfirmDialog } from '../../../admin/components/Utilities';
@@ -46,6 +54,8 @@ interface PorterDispatchCardProps {
   onDismissFareConfirm?: (order: Order) => void;
   /** DR8: persist the Porter-app booking staff pasted in. */
   onPastePorter?: (order: Order, porterOrderId: string, trackingUrl?: string) => void;
+  /** P1-D: staff confirm a dashboard cancellation, releasing the block. */
+  onConfirmDashboardCancel?: (order: Order, note?: string) => void | Promise<unknown>;
 }
 
 export function getRiderStatusMeta(order: Order): {
@@ -136,6 +146,22 @@ export function getRiderStatusMeta(order: Order): {
   }
 
   if (deliveryStatus === 'driver_allocated' || order.riderName) {
+    // A riderName with no booking and no in-house assignment is a stale name
+    // (a provider webhook, or a released booking) — not a courier who exists.
+    // Claiming a rider for it is how the queue came to say "With assigned
+    // courier" over an order nobody was carrying (item 11).
+    const riderEvidence =
+      hasAssignedRider(order as unknown as Record<string, unknown>) ||
+      deliveryStatus === 'driver_allocated';
+    if (!riderEvidence) {
+      return {
+        statusText: 'No Rider Assigned',
+        className: 'bg-amber-950/80 text-amber-300 border-amber-500/40',
+        isPorter: false,
+        isInHouse: false,
+        isManualReview: false,
+      };
+    }
     // Real provider labels: Borzo/Shadowfax bookings carry dispatchProvider;
     // showing them as Porter fabricated a vendor that never ran this order.
     if (dispatchProvider && dispatchProvider !== 'porter') {
@@ -232,6 +258,7 @@ export function PorterDispatchCard({
   onConfirmFare,
   onDismissFareConfirm,
   onPastePorter,
+  onConfirmDashboardCancel,
 }: PorterDispatchCardProps) {
   // Loop 11: dispatch books a real paid courier — require explicit confirm
   // (every other money path already confirms). Fare shown before commit.
@@ -239,6 +266,10 @@ export function PorterDispatchCard({
   // Loop: cancelling kills a live courier booking (rider may be en route) —
   // require explicit confirm, same as dispatch.
   const [confirmCancel, setConfirmCancel] = React.useState(false);
+  // P1-D: confirming a dashboard cancellation is a statement that the rider is
+  // gone — it needs its own confirm step and an optional dashboard reference.
+  const [confirmDashboardCancel, setConfirmDashboardCancel] = React.useState(false);
+  const [dashboardCancelNote, setDashboardCancelNote] = React.useState('');
   // DR8 manual lane inputs (Porter order id pasted from the Porter app).
   const [pastePorterOrderId, setPastePorterOrderId] = React.useState('');
   const [pasteTrackingUrl, setPasteTrackingUrl] = React.useState('');
@@ -246,9 +277,16 @@ export function PorterDispatchCard({
     const meta = getRiderStatusMeta(order);
     const routeStatus = (order.status || '').toLowerCase();
     // Quotes cost real provider calls: skip them for states that hide all
-    // booking actions anyway (manual review, cancelled-with-rebook, or a
-    // terminal delivered order).
-    if (meta.isManualReview || routeStatus === 'delivered') return;
+    // booking actions anyway (manual review, cancelled-with-rebook, a
+    // terminal delivered order, or a released booking whose cancellation is
+    // still unconfirmed — nothing may be booked in any of those).
+    if (
+      meta.isManualReview ||
+      routeStatus === 'delivered' ||
+      isDispatchCancelBlocking(order)
+    ) {
+      return;
+    }
     onFetchQuote(order);
   }, [order.id]);
 
@@ -274,6 +312,15 @@ export function PorterDispatchCard({
   // need a staff decision, not an automatic carrier rebook.
   const manualReview = riderMeta.isManualReview && !needsRebook;
   const rebookTriggerSource = (order as any).rebookTrigger as string | undefined;
+
+  // P1-D: a released booking whose REMOTE cancellation is unproven still owns
+  // the order. Nothing here may book a replacement (the server refuses with
+  // 409 DISPATCH_CANCEL_UNCONFIRMED anyway) and the card must say a rider may
+  // still be coming. `dispatchCancelAlert` is rendered even when the order is
+  // already cancelled — that is exactly when a live rider needs a human.
+  const pendingCancel = readPendingDispatchCancel(order);
+  const cancelBlocked = isDispatchCancelBlocking(pendingCancel);
+  const cancelAlert = readDispatchCancelAlert(order);
 
   // §4 urgent audio notification — one-shot chime when the alert card appears,
   // guarded so re-renders of the same order never re-fire it.
@@ -374,9 +421,13 @@ export function PorterDispatchCard({
                   ? 'In-house delivery — handover via order lifecycle'
                   : deliveryStatus === 'delivered' || order.status === 'delivered'
                     ? 'Delivery complete'
-                    : isDispatched
+                    : hasAssignedRider(order)
                       ? 'With assigned courier'
-                      : 'Ready for dispatch'}
+                      : // The status says out_for_delivery but NOTHING is booked:
+                        // say so instead of claiming a courier who does not exist.
+                        order.status === 'out_for_delivery'
+                        ? 'Marked dispatched — no rider on record'
+                        : 'Ready for dispatch'}
             </span>
             <span>•</span>
             <span className="font-mono font-bold text-white">₹{order.total || order.subtotal}</span>
@@ -452,9 +503,120 @@ export function PorterDispatchCard({
         </div>
       )}
 
+      {/* P1-D: the released booking's remote cancellation is UNPROVEN. This
+          card is the only place that fact is visible, so it is rendered before
+          everything else and survives the order turning cancelled. */}
+      {cancelBlocked && pendingCancel && (
+        <div className="p-4 rounded-2xl bg-amber-950/40 border border-amber-600/70 space-y-3">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-black text-amber-300 uppercase tracking-wide">
+                Courier not confirmed cancelled — a rider may still be coming
+              </p>
+              <p className="text-xs text-amber-100/85 mt-1 leading-relaxed">
+                Booking {pendingCancel.providerOrderId || '(unknown id)'} with{' '}
+                {providerShortName(pendingCancel.provider)} was released here, but the cancellation
+                is not confirmed on their side
+                {pendingCancel.state === 'manual_required'
+                  ? ' — this provider has no cancel API we can call.'
+                  : pendingCancel.state === 'dead_lettered'
+                    ? ' and automatic retries have stopped.'
+                    : ` (attempt ${pendingCancel.attempts}).`}
+              </p>
+              <p className="text-xs text-amber-100/85 mt-1.5 leading-relaxed">
+                <span className="font-bold text-amber-200">What to do: </span>
+                {pendingCancel.staffActionRequired ||
+                  `Cancel booking ${pendingCancel.providerOrderId || ''} in the ${providerDashboardName(
+                    pendingCancel.provider
+                  )}, then confirm it below.`}
+              </p>
+              {pendingCancel.lastError && (
+                <p className="text-[11px] font-mono text-amber-300/70 mt-1 break-words">
+                  Last attempt: {pendingCancel.lastError}
+                </p>
+              )}
+              <p className="text-[11px] text-amber-200/70 mt-1">
+                No replacement courier can be booked until this is confirmed — booking one now
+                would put two riders on this order.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirmDashboardCancel(true)}
+              className="flex-1 min-w-[12rem] py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-md transition-all active:scale-[0.98] cursor-pointer min-h-[44px]"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Confirm dashboard cancellation</span>
+            </button>
+          </div>
+
+          {confirmDashboardCancel && (
+            <div className="p-3 rounded-xl bg-neutral-950 border border-amber-700/60 space-y-2">
+              <p className="text-[11px] text-amber-100/85 leading-relaxed">
+                Only confirm once {providerShortName(pendingCancel.provider)} shows booking{' '}
+                {pendingCancel.providerOrderId || '(unknown id)'} as cancelled. This releases the
+                block so a replacement rider can be booked.
+              </p>
+              <input
+                type="text"
+                value={dashboardCancelNote}
+                onChange={(e) => setDashboardCancelNote(e.target.value)}
+                placeholder="Dashboard reference (optional)"
+                className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-amber-700/50 text-white placeholder-neutral-500 text-xs focus:outline-none focus:border-amber-500"
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmDashboardCancel(false);
+                    setDashboardCancelNote('');
+                    void Promise.resolve(
+                      onConfirmDashboardCancel?.(order, dashboardCancelNote.trim() || undefined)
+                    ).catch(() => undefined);
+                  }}
+                  className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-black text-xs uppercase tracking-wider min-h-[44px] cursor-pointer"
+                >
+                  Yes, it is cancelled there
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfirmDashboardCancel(false);
+                    setDashboardCancelNote('');
+                  }}
+                  className="py-2.5 px-3.5 rounded-xl bg-neutral-900 border border-neutral-700 text-neutral-300 font-bold text-xs min-h-[44px] cursor-pointer"
+                >
+                  Not yet
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* The server's own alert (dispatchCancelAlert), shown as a badge. Codes:
+          DISPATCH_CANCEL_MANUAL_REQUIRED / _DEAD_LETTERED / _PENDING. */}
+      {cancelAlert && (
+        <div className="flex flex-wrap items-start gap-2 p-3 rounded-2xl bg-rose-950/40 border border-rose-700/60">
+          <span className="px-2 py-0.5 rounded-md bg-rose-600/20 border border-rose-500/50 text-rose-300 font-mono text-[10px] font-black uppercase tracking-wider">
+            {cancelAlert.code}
+          </span>
+          <p className="text-[11px] text-rose-200/85 leading-relaxed flex-1 min-w-[12rem]">
+            {cancelAlert.message ||
+              `Rider cancellation for booking ${cancelAlert.providerOrderId || '(unknown id)'} needs staff action in the ${providerDashboardName(
+                cancelAlert.provider
+              )}.`}
+          </p>
+        </div>
+      )}
+
       {/* §4 No-Driver Alert Card: urgent — the allocated driver cancelled or
           none was found (any provider). */}
-      {needsRebook && (
+      {needsRebook && !cancelBlocked && (
         <div className="p-4 rounded-2xl bg-rose-950/30 border border-rose-700/60 space-y-3">
           <div className="flex items-start gap-2.5">
             <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 animate-pulse" />
@@ -496,7 +658,7 @@ export function PorterDispatchCard({
       )}
 
       {/* DR8 manual lane — Porter booked in the app, paste the ids back */}
-      {manualLane && !isDispatched && !needsRebook && !manualReview && (
+      {manualLane && !isDispatched && !needsRebook && !manualReview && !cancelBlocked && (
         <div className="p-4 rounded-2xl bg-amber-950/30 border border-amber-700/60 space-y-2.5">
           <div className="flex items-start gap-2.5">
             <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
@@ -544,7 +706,7 @@ export function PorterDispatchCard({
 
       {/* DR7 fare-change confirm — opens automatically when the server gated
           the booking; staff must approve the NEW fare before anything books. */}
-      {fareConfirm && !isDispatched && !needsRebook && !manualReview && (
+      {fareConfirm && !isDispatched && !needsRebook && !manualReview && !cancelBlocked && (
         <ConfirmDialog
           isOpen={true}
           onClose={() => onDismissFareConfirm?.(order)}
@@ -591,7 +753,7 @@ export function PorterDispatchCard({
       </div>
 
       {/* Assigned Rider Info (if dispatched) */}
-      {!needsRebook && !manualReview && (order.riderName || riderMeta.isInHouse) && (
+      {!needsRebook && !manualReview && !cancelBlocked && (order.riderName || riderMeta.isInHouse) && (
         <div className="p-3 rounded-2xl bg-neutral-950 border border-neutral-800 space-y-1.5 text-xs">
           <div className="flex items-center justify-between">
             <span className="font-bold text-white flex items-center gap-1.5">
@@ -637,8 +799,9 @@ export function PorterDispatchCard({
       )}
 
       {/* Action Triggers (hidden while the §4 rebook or manual-review alert
-          card is active) */}
-      {!needsRebook && !manualReview && (
+          card is active, and while a released booking's cancellation is
+          unconfirmed — booking anything then is the two-riders defect). */}
+      {!needsRebook && !manualReview && !cancelBlocked && (
       <div className="flex items-center gap-2 pt-1">
         {!isDispatched ? (
           <>
