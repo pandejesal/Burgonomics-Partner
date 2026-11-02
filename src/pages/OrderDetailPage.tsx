@@ -477,6 +477,7 @@ export function OrderDetailPage() {
         orderType={order.orderType}
         onUpdateStatus={handleStatusChange}
         isSubmitting={isUpdatingStatus}
+        order={order}
       />
 
       {/* Main Grid: Order Details & Sidebar */}

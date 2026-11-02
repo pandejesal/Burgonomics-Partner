@@ -9,7 +9,11 @@ import {
   ArrowRight,
   RotateCcw,
 } from 'lucide-react';
-import type { OrderStatus, OrderType } from '@/types';
+import type { OrderStatus, OrderType, Order } from '@/types';
+import {
+  canAdvanceToDispatched,
+  NO_RIDER_DISPATCH_COPY,
+} from '@/features/delivery/riderEvidence';
 
 interface OrderStatusStepperProps {
   currentStatus: OrderStatus | string;
@@ -17,6 +21,12 @@ interface OrderStatusStepperProps {
   onUpdateStatus: (nextStatus: OrderStatus) => Promise<void> | void;
   isSubmitting?: boolean;
   className?: string;
+  /**
+   * The order itself, so the dispatch handover can check for a real rider.
+   * Optional for backwards compatibility, but WITHOUT it a delivery order is
+   * treated as having no rider (fail-closed) — see canAdvanceToDispatched.
+   */
+  order?: Order | Record<string, any> | null;
 }
 
 const getSteps = (orderType?: OrderType): Array<{ key: OrderStatus; label: string; icon: any }> => {
@@ -51,6 +61,7 @@ export function OrderStatusStepper({
   onUpdateStatus,
   isSubmitting = false,
   className = '',
+  order = null,
 }: OrderStatusStepperProps) {
   const steps = getSteps(orderType);
   const normalizedStatus = (currentStatus as string).toLowerCase();
@@ -71,6 +82,14 @@ export function OrderStatusStepper({
 
   const nextStatus = getNextStatus();
   const prevStatus = getPreviousStatus();
+
+  // P1-G (item 11): "Dispatched" claims a rider is carrying the order. A
+  // delivery order may only be moved there when one really exists — otherwise
+  // the customer tracker promises food on the way with nobody coming. The
+  // server refuses this with 409 DISPATCH_RIDER_REQUIRED (backend 15e839c);
+  // this stops the tap before it happens and says what to do instead.
+  const nextIsDispatched = nextStatus === 'out_for_delivery';
+  const riderReady = !nextIsDispatched || canAdvanceToDispatched(order);
 
   return (
     <div className={`p-5 rounded-2xl bg-neutral-900 border border-neutral-800 space-y-4 ${className}`}>
@@ -142,7 +161,7 @@ export function OrderStatusStepper({
             <div />
           )}
 
-          {nextStatus && (
+          {nextStatus && riderReady && (
             <button
               type="button"
               disabled={isSubmitting}
@@ -152,6 +171,15 @@ export function OrderStatusStepper({
               <span>Advance to {steps[effectiveIndex + 1].label}</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
+          )}
+
+          {/* No rider on a delivery order: the handover action is not offered.
+              This is the case that moved a real order to OUT_FOR_DELIVERY with
+              nobody assigned. */}
+          {nextStatus && !riderReady && (
+            <p className="max-w-[22rem] text-[11px] font-semibold text-amber-300/90 leading-relaxed text-right">
+              {NO_RIDER_DISPATCH_COPY}
+            </p>
           )}
         </div>
       )}
