@@ -241,23 +241,55 @@ export class DashboardService {
    */
   protected async fetchPayments(): Promise<PaymentStats[]> {
     try {
+      // Reads CAPTURES from `orders` - the server's capture source of truth.
+      // There is no production `payments` collection (the backend never writes
+      // one), so the old read made every payment KPI a permanent zero.
       const snap = await getDocs(
-        query(collection(db, "payments"), orderBy("createdAt", "desc"), limit(200)),
+        query(collection(db, "orders"), orderBy("createdAt", "desc"), limit(200)),
       );
       const allowed = await this.scopedOrderIds();
       const payments: PaymentStats[] = [];
       snap.forEach((doc) => {
-        const data = doc.data();
-        if (allowed && !allowed.has(data.orderId || "")) return;
+        const data = doc.data() as Record<string, any>;
+        const nestedPayment =
+          data.payment && typeof data.payment === "object" && !Array.isArray(data.payment)
+            ? (data.payment as Record<string, any>)
+            : {};
+        // Both storage shapes a real order doc carries: the canonical nested
+        // `payment` map and the dotted-literal `"payment.x"` keys written by
+        // older merge-set confirms. Nested wins when both exist.
+        const readPaymentField = (field: string): unknown => {
+          const nested = nestedPayment[field];
+          if (nested !== undefined && nested !== null && nested !== "") return nested;
+          return data[`payment.${field}`];
+        };
+        const payment = nestedPayment;
+        const status = String(
+          readPaymentField("status") ?? data.paymentStatus ?? "",
+        ).toLowerCase();
+        const captured = status === "completed" || status === "captured" || status === "paid";
+        // An unpaid online order is not a payment.
+        if (!captured) return;
+        if (allowed && !allowed.has(doc.id)) return;
+        const capturedPaise =
+          Number(readPaymentField("capturedAmountPaise")) ||
+          (Number(data.pricing?.grandTotal) > 0
+            ? Math.round(Number(data.pricing.grandTotal) * 100)
+            : 0);
+        if (!Number.isFinite(capturedPaise) || capturedPaise <= 0) return;
         payments.push({
           id: doc.id,
-          orderId: data.orderId || "",
-          amountPaise: data.amountPaise || (data.amount ? Math.round(data.amount * 100) : 0),
-          currency: data.currency || "INR",
-          gateway: data.gateway || "RAZORPAY",
-          gatewayPaymentId: data.gatewayPaymentId || data.razorpayPaymentId || "",
-          status: data.status || "PENDING",
-          capturedAt: data.capturedAt || data.createdAt || new Date().toISOString(),
+          orderId: doc.id,
+          amountPaise: capturedPaise,
+          currency: "INR",
+          gateway: data.paymentChannel || data.paymentMethod || "RAZORPAY",
+          gatewayPaymentId: (readPaymentField("razorpayPaymentId") as string) || "",
+          status:
+            data.refundStatus === "refunded" ? "REFUNDED" : "CAPTURED",
+          capturedAt:
+            (readPaymentField("verifiedAt") as string) ||
+            data.createdAt ||
+            new Date().toISOString(),
           createdAt: data.createdAt || new Date().toISOString(),
         });
       });

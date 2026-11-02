@@ -169,6 +169,165 @@ export function normalizeTransactionSnapshotDoc(docSnap: {
 }
 
 /**
+ * How the ledger gets its rows, and what it cannot see.
+ *
+ * There is NO `payments` collection in production: the backend never writes one
+ * (`functions/src` has zero `.collection("payments")` call sites). Captures live
+ * on the ORDER document - as the canonical nested `payment` map and, for older
+ * merge-set writes, as the dotted-literal `"payment.x"` keys. Reading `payments`
+ * therefore produced a permanently empty ledger while real money was captured.
+ *
+ * So the ledger is DERIVED from `orders`, and it says so. `bounded` is true
+ * because the read is a capped newest-first page: an empty result means "no
+ * captured payment in the loaded page", never "no money ever moved".
+ */
+export const PAYMENT_LEDGER_SOURCE = "orders" as const;
+export const PAYMENT_LEDGER_READ_LIMIT = 200;
+
+export interface PaymentLedgerCoverage {
+  source: typeof PAYMENT_LEDGER_SOURCE;
+  /** True: this is a capped page, not an exhaustive scan. */
+  bounded: boolean;
+  limit: number;
+  /** Operator-facing sentence; never overclaims completeness. */
+  statement: string;
+}
+
+export function describePaymentLedgerCoverage(
+  limit: number = PAYMENT_LEDGER_READ_LIMIT,
+): PaymentLedgerCoverage {
+  return {
+    source: PAYMENT_LEDGER_SOURCE,
+    bounded: true,
+    limit,
+    statement:
+      "Derived from the " + limit + " most recent orders. Captured payments are read " +
+      "from each order's own payment record, which is the server's capture " +
+      "source of truth. This is a bounded page, not a full historical ledger: " +
+      "an empty list means no captured payment appears in this window.",
+  };
+}
+
+/** Reads a field from either storage shape an order doc legitimately carries. */
+function paymentField(order: Record<string, any>, field: string): unknown {
+  const nested =
+    order.payment && typeof order.payment === "object" && !Array.isArray(order.payment)
+      ? (order.payment as Record<string, unknown>)[field]
+      : undefined;
+  if (nested !== undefined && nested !== null && nested !== "") return nested;
+  const dotted = order["payment." + field];
+  return dotted === undefined ? undefined : dotted;
+}
+
+/**
+ * Captured amount in PAISE.
+ *
+ * `payment.capturedAmountPaise` is already paise (what the confirm transaction
+ * stamps). The priced totals are RUPEES, so they must be converted - passing a
+ * rupee figure to a paise validator under-reported a 260 rupee capture as 260
+ * paise. A priced total is only a fallback for docs written before the capture
+ * stamp existed.
+ */
+function paidAmountPaise(order: Record<string, any>): number | null {
+  const captured = normalizePaymentAmountPaise(paymentField(order, "capturedAmountPaise"));
+  if (captured) return captured;
+
+  const rupeesToPaise = (value: unknown): number | null => {
+    const numeric = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return null;
+    return normalizePaymentAmountPaise(Math.round(numeric * 100));
+  };
+
+  const priced = rupeesToPaise(order.pricing?.grandTotal);
+  if (priced) return priced;
+  return rupeesToPaise(order.totals?.grandTotal);
+}
+
+/**
+ * Derives ONE ledger row from a real `orders` document, or null when the order
+ * is not a captured payment.
+ *
+ * Fail-closed on the money facts: no capture evidence means no row (an unpaid
+ * online order is not a payment), and a doc with capture evidence but no usable
+ * amount is dropped rather than rendered as zero.
+ */
+export function normalizeOrderPaymentDoc(docSnap: {
+  id: string;
+  data: () => unknown;
+}): TransactionDetails | null {
+  try {
+    const order = asPaymentRecord(docSnap.data());
+    const paymentStatus = firstPaymentText(
+      paymentField(order, "status"),
+      order.paymentStatus,
+    ).toLowerCase();
+    const captured =
+      paymentStatus === "completed" || paymentStatus === "captured" || paymentStatus === "paid";
+    if (!captured) return null;
+
+    const amountPaise = paidAmountPaise(order);
+    if (!amountPaise) {
+      console.warn(
+        "[adminPaymentsService] Dropped captured order " + docSnap.id + ": no usable amount",
+      );
+      return null;
+    }
+
+    const gatewayPaymentId = firstPaymentText(
+      paymentField(order, "razorpayPaymentId"),
+      paymentField(order, "transactionId"),
+      order.razorpayPaymentId,
+    );
+
+    // Refund state is written by the payments backend onto the order itself.
+    const refundStatus = firstPaymentText(order.refundStatus).toLowerCase();
+    const refundedTotal = Number(order.refundedTotalPaise) || 0;
+    let status: TransactionDetails["status"] = "CAPTURED";
+    if (refundStatus === "refunded" || (refundedTotal > 0 && refundedTotal >= amountPaise)) {
+      status = "REFUNDED";
+    } else if (refundStatus === "partially_refunded" || refundedTotal > 0) {
+      status = "PARTIALLY_REFUNDED";
+    }
+
+    const store = asPaymentRecord(order.store);
+    const customer = asPaymentRecord(order.customer);
+    const verifiedAtRaw = paymentField(order, "verifiedAt");
+
+    return {
+      id: "pay_ord_" + docSnap.id,
+      orderId: docSnap.id,
+      amountPaise,
+      currency: "INR",
+      gateway: firstPaymentText(order.paymentChannel, order.paymentMethod) || "razorpay",
+      gatewayPaymentId,
+      status,
+      verificationStatus: verifiedAtRaw || gatewayPaymentId ? "VERIFIED" : "UNVERIFIED",
+      createdAt: normalizeDisplayTime(order.createdAt ?? order.placedAt),
+      capturedAt: verifiedAtRaw == null ? null : normalizeDisplayTime(verifiedAtRaw),
+      customer: {
+        name: firstPaymentText(order.customerName, customer.name) || "Unknown customer",
+        email: firstPaymentText(order.customerEmail, customer.email),
+        phone: firstPaymentText(order.customerPhone, customer.phone),
+      },
+      store: {
+        id: firstPaymentText(store.id, order.branchId),
+        name: firstPaymentText(store.name, order.branchName) || "Unknown store",
+      },
+      timeline: [],
+      metadata: {},
+      signature: "",
+      webhookEvents: [],
+      refunds: [],
+      auditLogs: [],
+    };
+  } catch (err) {
+    // One malformed order must never blank the whole ledger.
+    console.error("[adminPaymentsService] Undisposable order " + docSnap.id + ":", err);
+    return null;
+  }
+}
+
+/**
  * Normalizes one refund snapshot document without letting a single corrupt
  * record abort the batch. Returns `null` when the document itself cannot be
  * read/normalized; the caller keeps every other refund.
@@ -192,25 +351,35 @@ export const adminPaymentsService = {
   listenLiveTransactions(
     onUpdate: (transactions: TransactionDetails[]) => void,
     onError: (err: Error) => void,
-    limitCount = 100,
+    limitCount = PAYMENT_LEDGER_READ_LIMIT,
   ) {
-    const q = query(collection(db, "payments"), orderBy("createdAt", "desc"), limit(limitCount));
+    // Reads the CAPTURE SOURCE OF TRUTH (`orders`), not the unwritten `payments`
+    // collection. See describePaymentLedgerCoverage: this is a bounded page.
+    const q = query(collection(db, "orders"), orderBy("createdAt", "desc"), limit(limitCount));
 
     return onSnapshot(
       q,
       (snapshot) => {
         const liveTransactions: TransactionDetails[] = [];
         snapshot.forEach((docSnap) => {
-          // Per-document isolation: one malformed payment row (bad timestamp,
-          // missing nested customer, unreadable payload) must not reject the
-          // whole snapshot and blank the route.
-          const normalized = normalizeTransactionSnapshotDoc(docSnap as any);
+          // Per-document isolation: one malformed order (bad timestamp, missing
+          // nested customer, unreadable payload) must not reject the whole
+          // snapshot and blank the route.
+          const normalized = normalizeOrderPaymentDoc(docSnap as any);
           if (normalized) liveTransactions.push(normalized);
         });
         onUpdate(liveTransactions);
       },
       (error) => onError(error),
     );
+  },
+
+  /**
+   * What this ledger can and cannot see. The page renders this instead of
+   * implying a complete historical ledger.
+   */
+  ledgerCoverage(limitCount: number = PAYMENT_LEDGER_READ_LIMIT): PaymentLedgerCoverage {
+    return describePaymentLedgerCoverage(limitCount);
   },
 
   /**

@@ -96,6 +96,9 @@ export const AdminPaymentsPage: React.FC<AdminPaymentsPageProps> = ({
   const isStoreManager = role === "branch_owner";
   const managerStoreId = "str_001"; // Burgonomics Navrangpura
   const managerStoreName = "Burgonomics Navrangpura";
+  // What this ledger can and cannot see. Rendered verbatim so the board never
+  // implies a complete historical ledger from a bounded page.
+  const ledgerCoverage = adminPaymentsService.ledgerCoverage();
 
   useEffect(() => {
     if (isStoreManager) {
@@ -283,11 +286,13 @@ export const AdminPaymentsPage: React.FC<AdminPaymentsPageProps> = ({
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <PageHeader
           title="Payment Operations Terminal"
-          description={
-            isStoreManager
-              ? `Reads the Firestore \`payments\` collection for ${managerStoreName}. Detail drill-down and refunds are demo fixtures — no gateway behind them.`
-              : "Reads the Firestore `payments` collection (server-written). Capture, verification and refund controls on this board are demo fixtures and move no money."
-          }
+          description={[
+            ledgerCoverage.statement,
+            isStoreManager ? `Scoped to ${managerStoreName}.` : null,
+            "Detail drill-down and refund controls on this board do not settle money.",
+          ]
+            .filter(Boolean)
+            .join(" ")}
           breadcrumbs={[{ label: "Payments Center" }]}
           actions={
             <span className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[9px] font-black uppercase bg-gray-800 text-amber-300 border border-amber-400/40">
@@ -613,7 +618,7 @@ export const AdminPaymentsPage: React.FC<AdminPaymentsPageProps> = ({
       {/* Live Payment Feed */}
       <AdminCard
         title="Ledger Transactions & Webhooks Live Stream"
-        subtitle={`Showing ${filteredTxns.length} payment records in real-time sequence`}
+        subtitle={`Showing ${filteredTxns.length} captured payment records derived from orders (bounded page of ${ledgerCoverage.limit})`}
       >
         {filteredTxns.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-center font-sans">
@@ -628,7 +633,7 @@ export const AdminPaymentsPage: React.FC<AdminPaymentsPageProps> = ({
             <p className="text-[10px] text-gray-400 mt-1 max-w-sm">
               {streamError
                 ? "Live payments data could not be retrieved from Firestore. Check permissions or network connection."
-                : "Try broadening your ledger query or adjusting the store selectors."}
+                : `No captured payment appears in the ${ledgerCoverage.limit} most recent orders loaded by this page. This is a bounded read, not proof that no payment exists - widen the date range or open a specific order.`}
             </p>
           </div>
         ) : (
