@@ -152,9 +152,23 @@ export interface NewStoreInput {
   lng?: string | number;
 }
 
-const parseCoord = (value: string | number | undefined): number => {
-  if (typeof value === "number") return value;
-  return parseFloat(value ?? "");
+/**
+ * Parses an optional form coordinate.
+ *
+ * Returns `null` (an honest "not pinned") for a blank or unparseable input.
+ * The old `parseFloat(value ?? "")` produced `NaN`, which Firestore happily
+ * stores as a double: admin rendered the literal string "NaN" via
+ * `lat.toFixed(4)` while the customer directory dropped the outlet entirely
+ * (it discards non-finite coordinates), so the two surfaces disagreed about
+ * whether the store existed.
+ */
+export const parseCoord = (value: string | number | null | undefined): number | null => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
 };
 
 export function buildNewStore(
@@ -894,16 +908,28 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
     toast.success(`Exported ${filteredStores.length} stores to CSV.`);
   };
 
-  // Spatial Radar Positioning Centering on current filter average
+  // Spatial Radar Positioning Centering on current filter average.
+  // Unpinned stores (null coords) carry no geography: they are excluded from
+  // the average and from the scale, never counted as a (0,0) point.
+  const pinnedStores = useMemo(
+    () =>
+      filteredStores.filter(
+        (s): s is typeof s & { lat: number; lng: number } =>
+          typeof s.lat === "number" && Number.isFinite(s.lat) &&
+          typeof s.lng === "number" && Number.isFinite(s.lng),
+      ),
+    [filteredStores],
+  );
+
   const avgLat = useMemo(() => {
-    const list = filteredStores;
+    const list = pinnedStores;
     return list.length > 0 ? list.reduce((sum, s) => sum + s.lat, 0) / list.length : 23.034362;
-  }, [filteredStores]);
+  }, [pinnedStores]);
 
   const avgLng = useMemo(() => {
-    const list = filteredStores;
+    const list = pinnedStores;
     return list.length > 0 ? list.reduce((sum, s) => sum + s.lng, 0) / list.length : 72.5548094;
-  }, [filteredStores]);
+  }, [pinnedStores]);
 
   const getRadarCoordinates = (storeLat: number, storeLng: number) => {
     const dLat = storeLat - avgLat;
@@ -911,8 +937,8 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
 
     // Boundary normalization
     const maxDiff = Math.max(
-      ...filteredStores.map((s) => Math.abs(s.lat - avgLat)),
-      ...filteredStores.map((s) => Math.abs(s.lng - avgLng)),
+      ...pinnedStores.map((s) => Math.abs(s.lat - avgLat)),
+      ...pinnedStores.map((s) => Math.abs(s.lng - avgLng)),
       0.015,
     );
 
@@ -1479,7 +1505,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                               </defs>
 
                               {/* Plot Stores on Radar Map */}
-                              {filteredStores.map((store) => {
+                              {pinnedStores.map((store) => {
                                 const { x, y } = getRadarCoordinates(store.lat, store.lng);
                                 const isStoreOpen = store.isOpen;
                                 const isStoreBusy = store.isBusy;
@@ -1555,7 +1581,12 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                                     {store.name}
                                   </span>
                                   <span className="block font-mono text-[9px] text-gray-400 font-bold">
-                                    COORDS: {store.lat.toFixed(4)}, {store.lng.toFixed(4)}
+                                    {typeof store.lat === "number" &&
+                                    Number.isFinite(store.lat) &&
+                                    typeof store.lng === "number" &&
+                                    Number.isFinite(store.lng)
+                                      ? `COORDS: ${store.lat.toFixed(4)}, ${store.lng.toFixed(4)}`
+                                      : "COORDS: not pinned"}
                                   </span>
                                 </div>
                                 <span
@@ -1821,7 +1852,7 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                     {/* Quick navigation and external map triggers */}
                     <div className="flex flex-wrap gap-2">
                       <a
-                        href={`https://www.google.com/maps/search/?api=1&query=${activeStore.lat},${activeStore.lng}`}
+                        href={`https://www.google.com/maps/search/?api=1&query=${activeStore.lat ?? ""},${activeStore.lng ?? ""}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex-1 flex items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-white py-2 text-xs font-black hover:bg-gray-50 dark:bg-gray-800 dark:border-gray-700 text-gray-700 dark:text-gray-300"
@@ -1831,7 +1862,12 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                       </a>
                       <button
                         onClick={() =>
-                          handleCopyText(`${activeStore.lat}, ${activeStore.lng}`, "Coordinates")
+                          handleCopyText(
+                            activeStore.lat !== null && activeStore.lng !== null
+                              ? `${activeStore.lat}, ${activeStore.lng}`
+                              : "not pinned",
+                            "Coordinates",
+                          )
                         }
                         className="flex-1 flex items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-white py-2 text-xs font-black hover:bg-gray-50 dark:bg-gray-800 dark:border-gray-700 text-gray-700 dark:text-gray-300"
                       >

@@ -40,7 +40,19 @@ export interface StoreDocument {
 export type WebhookStatus = "active" | "failed" | "disabled" | "unknown";
 export type CircuitBreakerState = "closed" | "open" | "half-open";
 
-export interface RichStore extends Store {
+/**
+ * Admin store directory record.
+ *
+ * Deliberately NOT `extends Store`: the customer `Store` model requires numeric
+ * `lat`/`lng` for real geo math, while this admin view must be able to say
+ * "not pinned yet". Intersecting with `Omit` keeps every other Store field
+ * enforced while widening ONLY the two coordinates. The alternative was
+ * persisting `NaN` (parseFloat of a blank input), which renders as the literal
+ * string "NaN" and makes the customer directory silently drop the outlet.
+ */
+export interface RichStore extends Omit<Store, "lat" | "lng"> {
+  lat: number | null;
+  lng: number | null;
   richHours: WeeklySchedule;
   // null until the operator actually provides contact details — the create
   // path must not invent @burgonomics.com addresses or manager names.
