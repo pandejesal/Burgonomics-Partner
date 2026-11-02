@@ -37,6 +37,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { partnerFunctionsApi, dispatchProviderLabel } from '@/services/partnerFunctionsApi';
 import { buildCancelRefundRequest } from '@/utils/refundRequestIdentity';
 import type { DispatchQuoteResult } from '@/services/partnerFunctionsApi';
+import {
+  PETPOOJA_KOT_UNCONFIRMED_LABEL,
+  describePetpoojaSyncOutcome,
+  petpoojaKotNeedsResolution,
+} from '@/utils/orderContract';
+import { PetpoojaKotResolver } from '@/features/orders/components/PetpoojaKotResolver';
 
 export function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -305,12 +311,30 @@ export function OrderDetailPage() {
   const handlePetpoojaSync = async () => {
     setIsSyncingPetpooja(true);
     try {
+      let result: { success?: boolean } | null = null;
       if (pushToPetpooja && typeof pushToPetpooja.mutateAsync === 'function') {
-        await pushToPetpooja.mutateAsync();
+        result = (await pushToPetpooja.mutateAsync()) as { success?: boolean } | null;
       }
-      toast.success('Successfully synchronized with Petpooja POS');
+      // `{ success: true }` is not print proof: the server also returns true for
+      // a deduped push and for an id-less acceptance parked as
+      // accepted_unconfirmed. Report what actually happened.
+      const outcome = describePetpoojaSyncOutcome(order, result);
+      if (outcome.tone === 'success') {
+        toast.success(outcome.title, { description: outcome.description });
+      } else if (outcome.tone === 'info') {
+        toast.info(outcome.title, { description: outcome.description });
+      } else if (outcome.tone === 'warning') {
+        toast.warning(outcome.title, { description: outcome.description });
+      } else {
+        toast.error(outcome.title, { description: outcome.description });
+      }
     } catch (err) {
-      toast.error('Petpooja sync failed');
+      toast.error('Petpooja sync failed', {
+        description:
+          err instanceof Error && err.message
+            ? err.message
+            : 'Nothing is proven about this ticket — check the Petpooja printer.',
+      });
     } finally {
       setIsSyncingPetpooja(false);
     }
@@ -441,6 +465,15 @@ export function OrderDetailPage() {
             <span>{order.petpoojaOrderId ? 'Re-sync POS' : 'Sync Petpooja'}</span>
           </button>
 
+          {/* Ambiguous KOT: never a plain "pending" badge. A paid order whose
+              ticket may never have printed has to be visible on this screen. */}
+          {petpoojaKotNeedsResolution(order) && (
+            <span className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-950/60 border border-amber-700/60 text-amber-300 font-bold text-[11px]">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span>{PETPOOJA_KOT_UNCONFIRMED_LABEL}</span>
+            </span>
+          )}
+
           {/* Petpooja Test Runner */}
           <button
             type="button"
@@ -470,6 +503,22 @@ export function OrderDetailPage() {
             )}
         </div>
       </div>
+
+      {/* P1-K: an ambiguous KOT can only be settled by a human looking at the
+          outlet's printer. Offered only for those states, and only to roles the
+          server accepts on POST /petpooja/resolveKot. */}
+      {petpoojaKotNeedsResolution(order) && (
+        <PetpoojaKotResolver
+          orderId={order.id}
+          role={user?.role}
+          theme="app"
+          onResolve={(params) => partnerFunctionsApi.resolvePetpoojaKot(params)}
+          onResolved={() => {
+            queryClient.invalidateQueries({ queryKey: ['order', id] });
+            queryClient.invalidateQueries({ queryKey: ['orders'] });
+          }}
+        />
+      )}
 
       {/* Order Status Stepper */}
       <OrderStatusStepper

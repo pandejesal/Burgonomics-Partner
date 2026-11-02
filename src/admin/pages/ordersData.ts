@@ -5,7 +5,7 @@ import {
   CartLine,
 } from "@/features/orders/models";
 
-export interface RichOrder extends Omit<Order, "status"> {
+export interface RichOrder extends Omit<Order, "status" | "petpoojaStatus"> {
   // We'll keep our own flexible status for admin state but match features/orders/models
   customerEmail?: string;
   customerCohort?: string;
@@ -24,7 +24,13 @@ export interface RichOrder extends Omit<Order, "status"> {
     // drawer gates every transition button on it.
     | "Needs Review";
   paymentStatus: "Paid" | "Pending" | "Failed" | "Refunded";
-  petpoojaStatus: "Synced" | "Pending" | "Failed" | "Bypassed";
+  petpoojaStatus: "Synced" | "Pending" | "Failed" | "Bypassed" | "Unconfirmed";
+  /**
+   * True while the KOT print is ambiguous (POS accepted without an id, or the
+   * push could not be proven). Drives the resolve prompt; the server refuses a
+   * plain re-sync in this state, so only POST /petpooja/resolveKot can settle it.
+   */
+  petpoojaKotUnconfirmed?: boolean;
   petpoojaDetails?: {
     kotId?: string;
     posOrderId?: string;

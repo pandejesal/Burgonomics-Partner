@@ -165,6 +165,18 @@ function toPaymentInfo(o: NormalizedOrder, raw: Record<string, any>): OrderPayme
 
 function toRichPetpooja(raw: Record<string, any>): RichOrder["petpoojaStatus"] {
   const v = raw.petpoojaSyncStatus ?? raw.petpoojaStatus;
+  // Ambiguous KOT (P1-K): the push may be at the POS or the POS accepted it
+  // without an id. It must not read as "Pending" — that state means "not
+  // pushed yet", while this one needs a human at the printer.
+  if (
+    v === "accepted_unconfirmed" ||
+    v === "reconciliation_required" ||
+    raw.petpoojaAmbiguousProcessing === true ||
+    raw.petpoojaAcceptedUnrecorded === true ||
+    (raw.petpoojaAcceptedNoId === true && !raw.petpoojaOrderId)
+  ) {
+    return "Unconfirmed";
+  }
   if (v === "synced") return "Synced";
   if (v === "failed") return "Failed";
   if (v === "not_applicable") return "Bypassed";
@@ -357,6 +369,12 @@ function toDeliveryPartner(raw: Record<string, any>): RichOrder["deliveryPartner
  * `as unknown as RichOrder` hid a half-built object that crashed the drawer
  * on `order.totals.grandTotal.toFixed(2)`.
  */
+/**
+ * Exported for the KOT-state contract test: the mapping is the thing under
+ * test, and going through the live service would need Firestore.
+ */
+export const toRichOrderForTest: (id: string, raw: Record<string, any>) => RichOrder = toRichOrder;
+
 function toRichOrder(id: string, raw: Record<string, any>): RichOrder {
   const o = normalizeOrderDoc(id, raw);
   const createdAt = isoTime(raw.createdAt ?? raw.placedAt, new Date().toISOString());
@@ -395,6 +413,11 @@ function toRichOrder(id: string, raw: Record<string, any>): RichOrder {
     orderStatus: toRichStatus(o, raw),
     paymentStatus: RICH_PAYMENT_STATUS[payment.status],
     petpoojaStatus: toRichPetpooja(raw),
+    // Ambiguous KOT marker for the drawer prompt: the raw state is the server's
+    // and is not part of the display model, so carry the decision derived from
+    // the same fields the server's `resolvable` predicate reads.
+    petpoojaKotUnconfirmed:
+      toRichPetpooja(raw) === "Unconfirmed" && !raw.petpoojaResolution && raw.kotPrinted !== true,
     timeline: Array.isArray(raw.timeline)
       ? raw.timeline.map((t: any) => ({
           title: String(t?.title ?? ""),

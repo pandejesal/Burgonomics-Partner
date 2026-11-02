@@ -9,10 +9,11 @@ import {
   Check,
   RotateCcw,
   Sparkles,
+  AlertTriangle,
 } from 'lucide-react';
 import { KOTTimerBadge } from './KOTTimerBadge';
 import { DeliveryFeeUnverifiedWarning } from '@/features/orders/components/DeliveryFeeUnverifiedWarning';
-import { modifierLabelsFrom } from '@/utils/orderContract';
+import { modifierLabelsFrom, petpoojaKotNeedsResolution } from '@/utils/orderContract';
 import type { Order, OrderStatus } from '@/types';
 
 /** Loop 10 (DPDP): wall-screen phones show last-5 only; tap-to-call keeps full number in href. */
@@ -146,6 +147,19 @@ export function KDSOrderCard({
         <div className="mx-3 my-2 p-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-semibold flex items-start gap-1.5">
           <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
           <span>Note: "{order.specialInstructions}"</span>
+        </div>
+      )}
+
+      {/* P1-K: the POS may or may not have printed this ticket. The kitchen is
+          the one place where that matters, so the same state shown on the order
+          pages appears here — never as a silent "pending". */}
+      {petpoojaKotNeedsResolution(order) && (
+        <div
+          className="mx-3 my-2 p-2 rounded-xl bg-orange-500/15 border border-orange-500/40 text-orange-300 text-[11px] font-bold flex items-start gap-1.5"
+          title="The POS did not confirm a printed ticket. A manager confirms the print from the order screen."
+        >
+          <AlertTriangle className="w-3.5 h-3.5 text-orange-400 shrink-0 mt-0.5" />
+          <span>POS unconfirmed: check the printer</span>
         </div>
       )}
 

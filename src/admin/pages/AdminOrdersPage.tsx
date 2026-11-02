@@ -45,6 +45,11 @@ import { adminOrdersService } from "../services/adminOrdersService";
 import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
 import { buildOpsRefundRequest } from "@/utils/refundRequestIdentity";
 import { canTriggerBoardRefund } from "./refundRoles";
+import { PetpoojaKotResolver } from "@/features/orders/components/PetpoojaKotResolver";
+import {
+  PETPOOJA_KOT_UNCONFIRMED_LABEL,
+  describePetpoojaSyncOutcome,
+} from "@/utils/orderContract";
 import { useAdmin } from "@/admin/hooks/useAdmin";
 import { useStores } from "@/admin/dashboard/hooks/useDashboardData";
 import { logger } from "@/core/logging/logger";
@@ -559,8 +564,15 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
               ? "text-emerald-500"
               : row.petpoojaStatus === "Pending"
                 ? "text-amber-500"
-                : "text-red-500"
+                : row.petpoojaStatus === "Unconfirmed"
+                  ? "text-orange-600"
+                  : "text-red-500"
           }`}
+          title={
+            row.petpoojaStatus === "Unconfirmed"
+              ? "POS unconfirmed: check the printer — the ticket may or may not have printed"
+              : undefined
+          }
         >
           <Sliders size={12} />
           {row.petpoojaStatus}
@@ -1308,11 +1320,22 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                         className={`inline-flex items-center gap-1 text-[10px] font-black uppercase ${
                           selectedOrder.petpoojaStatus === "Synced"
                             ? "text-emerald-500"
-                            : "text-amber-500"
+                            : selectedOrder.petpoojaStatus === "Unconfirmed"
+                              ? "text-orange-600"
+                              : "text-amber-500"
                         }`}
+                        title={
+                          selectedOrder.petpoojaStatus === "Unconfirmed"
+                            ? PETPOOJA_KOT_UNCONFIRMED_LABEL
+                            : undefined
+                        }
                       >
                         <Sliders size={12} />
-                        <span>{selectedOrder.petpoojaStatus}</span>
+                        <span>
+                          {selectedOrder.petpoojaStatus === "Unconfirmed"
+                            ? PETPOOJA_KOT_UNCONFIRMED_LABEL
+                            : selectedOrder.petpoojaStatus}
+                        </span>
                       </span>
                     </div>
 
@@ -1324,7 +1347,10 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                       <div className="flex justify-between">
                         <span>KOT Number:</span>
                         <span className="text-gray-700 dark:text-gray-300">
-                          {selectedOrder.petpoojaDetails?.kotId || "Pending acceptance"}
+                          {selectedOrder.petpoojaDetails?.kotId ||
+                            (selectedOrder.petpoojaKotUnconfirmed
+                              ? "Unconfirmed — check the printer"
+                              : "Pending acceptance")}
                         </span>
                       </div>
                       <div className="flex justify-between">
@@ -1334,6 +1360,37 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                         </span>
                       </div>
                     </div>
+
+                    {/* P1-K: the KOT print is ambiguous, so a plain re-Push is
+                        deduped by the server and cannot fix it. Only a human
+                        looking at the printer can settle it. */}
+                    {selectedOrder.petpoojaKotUnconfirmed && (
+                      <PetpoojaKotResolver
+                        orderId={selectedOrder.id}
+                        role={selectedRole}
+                        theme="admin"
+                        onResolve={(params) => partnerFunctionsApi.resolvePetpoojaKot(params)}
+                        onResolved={() => {
+                          setOrders((prev) =>
+                            prev.map((o) =>
+                              o.id === selectedOrder.id
+                                ? {
+                                    ...o,
+                                    petpoojaKotUnconfirmed: false,
+                                    petpoojaStatus:
+                                      o.petpoojaStatus === "Unconfirmed" ? "Pending" : o.petpoojaStatus,
+                                  }
+                                : o
+                            )
+                          );
+                          setSelectedOrder((prev) =>
+                            prev
+                              ? { ...prev, petpoojaKotUnconfirmed: false }
+                              : prev
+                          );
+                        }}
+                      />
+                    )}
 
                     <div className="flex gap-2 border-t border-gray-100 dark:border-gray-800/40 pt-3">
                       <button
@@ -1632,7 +1689,36 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
             } else if (confirmAction.type === "petpooja") {
               try {
                 const res = await partnerFunctionsApi.pushOrderToPetpooja(confirmAction.orderId);
-                if (res?.success) {
+                // `{ success: true }` is not print proof — the server returns it
+                // for a deduped push and for an id-less acceptance it parks as
+                // accepted_unconfirmed. Never report "Synced" for the latter.
+                const subject =
+                  orders.find((o) => o.id === confirmAction.orderId) ??
+                  (selectedOrder?.id === confirmAction.orderId ? selectedOrder : null);
+                const outcome = describePetpoojaSyncOutcome(
+                  {
+                    petpoojaStatus: subject?.petpoojaKotUnconfirmed ? "accepted_unconfirmed" : undefined,
+                    ...(subject?.petpoojaKotUnconfirmed ? { petpoojaAcceptedUnrecorded: true } : {}),
+                  },
+                  res
+                );
+                if (!res?.success) {
+                  toast.error(outcome.title);
+                  throw new Error(outcome.title);
+                }
+                if (outcome.tone === "warning") {
+                  toast.warning(outcome.title, { description: outcome.description });
+                  // Keep the row honest: this order still needs a human.
+                  setOrders((prev) =>
+                    prev.map((o) =>
+                      o.id === confirmAction.orderId
+                        ? { ...o, petpoojaKotUnconfirmed: true, petpoojaStatus: "Unconfirmed" }
+                        : o
+                    )
+                  );
+                } else if (outcome.tone === "info") {
+                  toast.info(outcome.title, { description: outcome.description });
+                } else {
                   setOrders((prev) =>
                     prev.map((o) =>
                       o.id === confirmAction.orderId ? { ...o, petpoojaStatus: "Synced" } : o,
@@ -1643,10 +1729,7 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                       prev ? { ...prev, petpoojaStatus: "Synced" } : null,
                     );
                   }
-                  toast.success("KOT pushed to Petpooja (server confirmed).");
-                } else {
-                  toast.error("Petpooja push NOT confirmed by the server.");
-                  throw new Error("Petpooja push NOT confirmed by the server.");
+                  toast.success(outcome.title, { description: outcome.description });
                 }
               } catch (err) {
                 toast.error("Petpooja push failed — nothing was sent.", {
