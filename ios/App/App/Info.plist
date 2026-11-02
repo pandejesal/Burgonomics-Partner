@@ -82,11 +82,11 @@
 	<!-- No NSCameraUsageDescription / NSPhotoLibraryUsageDescription: no camera
 	     or photo code ships (no @capacitor/camera, no picker). Declaring them
 	     invites App Store privacy questions. Re-add with the scanner feature. -->
-	<!-- No NSLocationWhenInUseUsageDescription: @capacitor/geolocation has no
-	     src call sites in this app, and the Android merged permissions are
-	     stripped in the manifest. Requesting location without a feature is a
-	     store-policy rejection risk; re-add both the key and a real call site
-	     before shipping courier tracking. -->
+	<!-- No NSLocationWhenInUseUsageDescription: the geolocation SDK and its
+	     Capacitor plugin config were removed (no dependency, no SPM entry, no
+	     src call sites, Android merged permissions stripped). Requesting
+	     location without a feature is a store-policy rejection risk; re-add
+	     both the key and a real call site before shipping courier tracking. -->
 	<!-- Push/entitlements: UIBackgroundModes remote-notification is declared
 	     above for FCM kitchen-order pushes. aps-environment lives in the Xcode
 	     App.entitlements (added at `npx cap add ios` / Xcode open time — the
