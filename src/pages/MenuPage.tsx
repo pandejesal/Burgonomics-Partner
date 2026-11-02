@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useSyncHealth } from '@/admin/dashboard/hooks/useDashboardData';
 import { petpoojaBadgeMeta, type PetpoojaBadgeStatus } from '@/components/ui/PetpoojaStatusBadge';
+import { canSyncPetpoojaMenu, MENU_SYNC_DENIED_COPY } from '@/services/petpoojaMenuSyncRoles';
 import type { MenuItem } from '@/types';
 
 type MenuFeedback = { message: string; severity: 'success' | 'warning' | 'error' };
@@ -66,6 +67,12 @@ export function MenuPage() {
     user?.role === 'brand_owner' ||
     user?.role === 'developer' ||
     user?.role === 'branch_owner';
+
+  // POST /petpooja/syncMenu accepts brand_owner/developer/regional_manager/
+  // branch_owner only (functions/src/index.ts:573-576). Offering "Sync POS" to
+  // the kitchen staff who run this page only produced a 403 that looked like a
+  // POS fault; the control is gated instead and the server rule is unchanged.
+  const canSyncPos = canSyncPetpoojaMenu(user?.role);
 
   const showToast = (message: string, severity: MenuFeedback['severity'] = 'success') => {
     setFeedback({ message, severity });
@@ -212,29 +219,38 @@ export function MenuPage() {
             </button>
           )}
 
-          <button
-            onClick={handleManualSync}
-            disabled={syncPetpooja.isPending}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-xs transition-all border cursor-pointer ${
-              syncSuccess
-                ? 'bg-[#0E4825] text-[#4ADE80] border-[#4ADE80]'
-                : 'bg-[#0E4825] hover:bg-[#155e32] text-white border-[#4ADE80]/30 disabled:opacity-50'
-            }`}
-          >
-            {syncSuccess ? (
-              <>
-                <CheckCircle2 className="w-4 h-4 text-[#4ADE80]" />
-                <span>Catalog Synced!</span>
-              </>
-            ) : (
-              <>
-                <RefreshCw
-                  className={`w-3.5 h-3.5 text-[#4ADE80] ${syncPetpooja.isPending ? 'animate-spin' : ''}`}
-                />
-                <span>{syncPetpooja.isPending ? 'Syncing...' : 'Sync POS'}</span>
-              </>
-            )}
-          </button>
+          {canSyncPos ? (
+            <button
+              onClick={handleManualSync}
+              disabled={syncPetpooja.isPending}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-xs transition-all border cursor-pointer ${
+                syncSuccess
+                  ? 'bg-[#0E4825] text-[#4ADE80] border-[#4ADE80]'
+                  : 'bg-[#0E4825] hover:bg-[#155e32] text-white border-[#4ADE80]/30 disabled:opacity-50'
+              }`}
+            >
+              {syncSuccess ? (
+                <>
+                  <CheckCircle2 className="w-4 h-4 text-[#4ADE80]" />
+                  <span>Catalog Synced!</span>
+                </>
+              ) : (
+                <>
+                  <RefreshCw
+                    className={`w-3.5 h-3.5 text-[#4ADE80] ${syncPetpooja.isPending ? 'animate-spin' : ''}`}
+                  />
+                  <span>{syncPetpooja.isPending ? 'Syncing...' : 'Sync POS'}</span>
+                </>
+              )}
+            </button>
+          ) : (
+            <span
+              className="px-3 py-2 rounded-xl bg-[#0A0A0A] border border-[#1E3A24] text-[11px] font-semibold text-zinc-400 max-w-[15rem]"
+              title={MENU_SYNC_DENIED_COPY}
+            >
+              {MENU_SYNC_DENIED_COPY}
+            </span>
+          )}
         </div>
       </div>
 

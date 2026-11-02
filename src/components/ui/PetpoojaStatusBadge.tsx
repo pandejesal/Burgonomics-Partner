@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { syncPetpoojaMenuForBranch } from '@/services/petpoojaSync';
+import { useAuthStore } from '@/stores/authStore';
+import { canSyncPetpoojaMenu, MENU_SYNC_DENIED_COPY } from '@/services/petpoojaMenuSyncRoles';
 
 interface PetpoojaStatusBadgeProps {
   branchId: string;
@@ -34,6 +36,12 @@ export const PetpoojaStatusBadge: React.FC<PetpoojaStatusBadgeProps> = ({
   branchId,
   onSyncComplete,
 }) => {
+  const { user } = useAuthStore();
+  // The server refuses POST /petpooja/syncMenu for anything outside
+  // brand_owner/developer/regional_manager/branch_owner, so offering the
+  // refresh icon to (say) branch_staff only produced a 403 that looked like a
+  // POS outage. The gate is mirrored client-side; the server rule is unchanged.
+  const maySync = canSyncPetpoojaMenu(user?.role);
   const [syncing, setSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string>('Not checked');
   const [status, setStatus] = useState<PetpoojaBadgeStatus>('unknown');
@@ -84,14 +92,25 @@ export const PetpoojaStatusBadge: React.FC<PetpoojaStatusBadgeProps> = ({
 
       <span className="text-zinc-500 hidden xl:inline text-[11px]">({lastSyncTime})</span>
 
-      <button
-        onClick={handleManualSync}
-        disabled={syncing}
-        title="Sync menu & items from Petpooja POS"
-        className="ml-1 p-1 hover:bg-[#1C3D21] rounded-full text-zinc-300 hover:text-white transition-colors disabled:opacity-50"
-      >
-        <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin text-accent-light' : ''}`} />
-      </button>
+      {maySync ? (
+        <button
+          onClick={handleManualSync}
+          disabled={syncing}
+          title="Sync menu & items from Petpooja POS"
+          className="ml-1 p-1 hover:bg-[#1C3D21] rounded-full text-zinc-300 hover:text-white transition-colors disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin text-accent-light' : ''}`} />
+        </button>
+      ) : (
+        // No dead button and no 403: the role simply may not sync, and the
+        // badge says who can.
+        <span
+          className="ml-1 text-zinc-500 text-[10px] font-medium hidden sm:inline"
+          title={MENU_SYNC_DENIED_COPY}
+        >
+          Manager action
+        </span>
+      )}
     </div>
   );
 };

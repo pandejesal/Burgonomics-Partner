@@ -9,6 +9,8 @@ import {
   type StoreOperationalState,
   type SyncReport,
 } from "@/core/integrations/petpooja";
+import { useAuthStore } from "@/stores/authStore";
+import { canSyncPetpoojaMenu, MENU_SYNC_DENIED_COPY } from "@/services/petpoojaMenuSyncRoles";
 import {
   RefreshCw,
   Sliders,
@@ -94,6 +96,11 @@ export function PetpoojaStoresPage() {
   // an empty fleet forever.
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoadingStores, setIsLoadingStores] = useState(true);
+  // POST /petpooja/syncMenu refuses every role outside
+  // brand_owner/developer/regional_manager/branch_owner. The sync controls are
+  // disabled for the rest instead of dialling a guaranteed 403.
+  const { user } = useAuthStore();
+  const maySync = canSyncPetpoojaMenu(user?.role);
 
   // Manual Operations state management
   const [isOpRunning, setIsOpRunning] = useState(false);
@@ -497,6 +504,8 @@ export function PetpoojaStoresPage() {
                     size="sm"
                     className="justify-start gap-2"
                     isLoading={isOpRunning}
+                    disabled={!maySync}
+                    title={!maySync ? MENU_SYNC_DENIED_COPY : undefined}
                     onClick={() =>
                       handleTriggerOperation(
                         "full sync",
@@ -528,6 +537,8 @@ export function PetpoojaStoresPage() {
                     size="sm"
                     className="justify-start gap-2"
                     isLoading={isOpRunning}
+                    disabled={!maySync}
+                    title={!maySync ? MENU_SYNC_DENIED_COPY : undefined}
                     onClick={() =>
                       handleTriggerOperation(
                         "incremental sync",
