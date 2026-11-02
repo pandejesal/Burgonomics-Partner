@@ -317,14 +317,16 @@ export class HttpPetpoojaGateway implements PetpoojaGateway {
     }
     const payload = mapOrderToPetpoojaSaveOrder(customOrder || { id: orderId });
     try {
-      const res = await this.post<{ success?: boolean; petpoojaOrderId?: string; kotNumber?: string }>(
+      // The server answers `{ success: boolean }` and nothing else
+      // (functions/src/index.ts:715-729). It has no KOT number or Petpooja
+      // order id to return, so the client must not read — or invent — one.
+      const res = await this.post<{ success?: boolean }>(
         "/petpooja/pushOrder",
         { orderId, order: payload },
         `push:${payload.restID}`,
       );
       return {
         acknowledged: res.success !== false,
-        kotNumber: res.kotNumber || res.petpoojaOrderId,
         payload,
       };
     } catch (err) {

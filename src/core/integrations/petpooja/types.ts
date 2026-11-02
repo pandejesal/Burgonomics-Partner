@@ -181,9 +181,15 @@ export interface PetpoojaMenuSyncResult {
   addonGroupsCount: number;
 }
 
+/**
+ * POST /petpooja/pushOrder answers `{ success }` only
+ * (functions/src/index.ts:715-729) — the server keeps the provider's KOT /
+ * order id. There is deliberately NO kotNumber field: the UI must not display
+ * an id the client never received, and a stray `kotNumber?: string` invited
+ * exactly that.
+ */
 export interface PetpoojaOrderPushResult {
   acknowledged: boolean;
-  kotNumber?: string;
   payload: PetpoojaSaveOrderPayload;
 }
 

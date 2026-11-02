@@ -51,16 +51,18 @@ describe('petpooja gateway wiring', () => {
     expect(createPetpoojaGateway().implementation).toBe('live');
   });
 
-  it('live pushOrder acknowledges via the proxy contract', async () => {
+  it('live pushOrder acknowledges the real { success } response', async () => {
     const gw = new HttpPetpoojaGateway({
       functionsBaseUrl: 'https://proxy.test/api',
-      fetchImpl: okFetch({ success: true, kotNumber: 'KOT-123' }),
+      // Exactly what functions/src/index.ts returns for /petpooja/pushOrder.
+      fetchImpl: okFetch({ success: true }),
       outboxKey: 'test.outbox.ok',
     });
     expect(gw.implementation).toBe('live');
     const res = await gw.pushOrder('ord_1', { id: 'ord_1', items: [] } as any);
     expect(res.acknowledged).toBe(true);
-    expect(res.kotNumber).toBe('KOT-123');
+    // No KOT number exists on the wire, so none is reported.
+    expect('kotNumber' in res).toBe(false);
     // no secrets leave the browser
     expect(res.payload.app_key).toBe('');
     expect(res.payload.app_secret).toBe('');
@@ -80,7 +82,7 @@ describe('petpooja gateway wiring', () => {
     expect(queues.waitingJobsCount).toBe(1);
 
     // proxy recovers → replay drains the outbox
-    (gw as unknown as { fetchImpl: typeof fetch }).fetchImpl = okFetch({ success: true, kotNumber: 'KOT-9' });
+    (gw as unknown as { fetchImpl: typeof fetch }).fetchImpl = okFetch({ success: true });
     const replay = await gw.replayWebhook('any');
     expect(replay.acknowledged).toBe(true);
     expect((await gw.getQueues()).waitingJobsCount).toBe(0);
