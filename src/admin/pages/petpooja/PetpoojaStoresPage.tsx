@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { motion } from "motion/react";
 import { AdminCard } from "@/admin/components/Cards";
 import { AdminButton, DangerButton } from "@/admin/components/Buttons";
@@ -23,6 +23,7 @@ import {
   Wifi,
   KeyRound,
   FileCode,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -88,6 +89,11 @@ export function PetpoojaStoresPage() {
   const [storeStatusErrors, setStoreStatusErrors] = useState<Record<string, string>>({});
   // Null until a real sync operation runs; honest empty state.
   const [syncReport, setSyncReport] = useState<SyncReport | null>(null);
+  // A failed directory read is an ERROR, not "no outlets connected": the old
+  // code caught every failure into setStores([]), so a broken read looked like
+  // an empty fleet forever.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isLoadingStores, setIsLoadingStores] = useState(true);
 
   // Manual Operations state management
   const [isOpRunning, setIsOpRunning] = useState(false);
@@ -98,7 +104,9 @@ export function PetpoojaStoresPage() {
     action: () => Promise<void>;
   } | null>(null);
 
-  useEffect(() => {
+  const loadStores = useCallback(() => {
+    setIsLoadingStores(true);
+    setLoadError(null);
     // P0-2: the gateway Proxy throws synchronously when the flag is off —
     // defer the property access into the promise chain so the effect can
     // never escape React and hit the app-level error boundary.
@@ -107,7 +115,7 @@ export function PetpoojaStoresPage() {
       .then(async (list) => {
         setStores(list);
         if (list.length > 0) {
-          setSelectedStoreId(list[0].id);
+          setSelectedStoreId((current) => current || list[0].id);
           // Pre-fetch operational states — M16: settle each read independently
           // so one failing store cannot discard the others or reject unhandled.
           const { states, errors } = await loadStoreStatuses(
@@ -118,8 +126,16 @@ export function PetpoojaStoresPage() {
           setStoreStatusErrors(errors);
         }
       })
-      .catch(() => setStores([]));
+      .catch((err: unknown) => {
+        setStores([]);
+        setLoadError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => setIsLoadingStores(false));
   }, []);
+
+  useEffect(() => {
+    loadStores();
+  }, [loadStores]);
 
   const selectedStore = stores.find((s) => s.id === selectedStoreId) || stores[0] || null;
 
@@ -183,6 +199,28 @@ export function PetpoojaStoresPage() {
           </span>
         </div>
       </div>
+
+      {/* A failed directory read is shown as an error with a retry — never as
+          an empty "no outlets" state (api-contract-audit item 5). */}
+      {loadError && (
+        <div className="rounded-2xl border border-red-200 dark:border-red-900/40 bg-red-50/40 dark:bg-red-950/10 p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+          <div className="flex items-start gap-2.5 min-w-0 flex-1">
+            <AlertTriangle className="w-5 h-5 text-red-500 shrink-0" />
+            <div className="min-w-0">
+              <p className="text-xs font-black text-red-700 dark:text-red-300 uppercase tracking-wide">
+                Store directory could not be loaded
+              </p>
+              <p className="text-[11px] font-semibold text-red-600/90 dark:text-red-300/80 mt-0.5 break-words">
+                {loadError}
+              </p>
+            </div>
+          </div>
+          <AdminButton variant="outline" size="sm" onClick={loadStores} isLoading={isLoadingStores}>
+            <RefreshCw size={12} />
+            <span>Retry</span>
+          </AdminButton>
+        </div>
+      )}
 
       {/* Main Grid View */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -666,6 +704,15 @@ export function PetpoojaStoresPage() {
               </div>
             </div>
           </AdminCard>
+          ) : loadError ? (
+            <div className="p-4 rounded-2xl bg-red-50/40 dark:bg-red-950/10 border border-red-200 dark:border-red-900/40 text-xs text-red-600 dark:text-red-300 font-semibold">
+              Store list unavailable — the control room needs a successful directory read that
+              failed above. Retry the load; nothing here is known to be disconnected.
+            </div>
+          ) : isLoadingStores ? (
+            <div className="p-4 rounded-2xl bg-gray-50 dark:bg-gray-900 border border-dashed border-gray-200 dark:border-gray-800/50 text-xs text-gray-500">
+              Loading the store directory…
+            </div>
           ) : (
             <div className="p-4 rounded-2xl bg-gray-50 dark:bg-gray-900 border border-dashed border-gray-200 dark:border-gray-800/50 text-xs text-gray-500">
               No Petpooja stores connected yet — connect a store to manage sync, cache, and circuit breakers.

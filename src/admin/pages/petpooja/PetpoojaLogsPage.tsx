@@ -29,6 +29,9 @@ export function PetpoojaLogsPage() {
   useEffect(() => {
     // P0-2: defer the Proxy access — a sync throw here would escape React
     // into the app-level boundary and white-screen the router.
+    // The store list is only a FILTER here; the log table itself is the
+    // authority. A failed directory read leaves the filter at "all" (no fake
+    // rows, no invented names) and never blanks the logs.
     void Promise.resolve()
       .then(() => petpoojaGateway.getStores())
       .then(setStores)
