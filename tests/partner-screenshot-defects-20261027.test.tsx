@@ -264,24 +264,39 @@ describe('Admin payments — raw snapshot rows are normalized or dropped', () =>
     expect(snapshotCallback).toBeTypeOf('function');
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
+    // Since 6b164b3 this listener reads the CAPTURE SOURCE OF TRUTH (`orders`),
+    // because no server code writes a `payments` collection. The docs below are
+    // therefore ORDER documents: capture lives on the nested `payment` map with
+    // `status: "completed"` plus `capturedAmountPaise` in paise, which is
+    // exactly what webhookHandler.ts:620 / razorpay.service.ts:2792 write.
     snapshotCallback!({
       forEach: (iterate: (doc: any) => void) => {
         iterate({
-          id: 'pay_explosive',
+          id: 'ord_explosive',
           data: () => {
-            throw new Error('corrupt payment payload');
+            throw new Error('corrupt order payload');
           },
         });
+        // Captured but with an unusable amount: dropped, never rendered as ₹0.
         iterate({
-          id: 'pay_bad',
-          data: () => ({ amountPaise: 'not-paise', status: 'CAPTURED' }),
+          id: 'ord_bad',
+          data: () => ({ payment: { status: 'completed' }, totals: { grandTotal: 'not-money' } }),
+        });
+        // An unpaid order is not a payment, even though it parses fine.
+        iterate({
+          id: 'ord_unpaid',
+          data: () => ({ payment: { status: 'pending' }, totals: { grandTotal: 500 } }),
         });
         iterate({
-          id: 'pay_ok',
+          id: 'ord_ok',
           data: () => ({
             orderId: 'BUR-9001',
-            amountPaise: 5000,
-            status: 'CAPTURED',
+            customerName: 'Test Customer',
+            payment: {
+              status: 'completed',
+              razorpayPaymentId: 'pay_ok_1',
+              capturedAmountPaise: 5000,
+            },
             createdAt: '2026-10-27 10:00:00',
           }),
         });
@@ -291,7 +306,10 @@ describe('Admin payments — raw snapshot rows are normalized or dropped', () =>
 
     expect(received).toHaveLength(1);
     expect(received[0]).toHaveLength(1);
-    expect((received[0][0] as { id: string }).id).toBe('pay_ok');
+    // Ledger rows are identified by order (`orderId`) and prefixed in `id`, so
+    // the row cannot be mistaken for a `payments`-collection document id.
+    expect((received[0][0] as { orderId: string }).orderId).toBe('ord_ok');
+    expect((received[0][0] as { id: string }).id).toBe('pay_ord_ord_ok');
   });
 });
 

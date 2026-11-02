@@ -51,9 +51,25 @@ const paymentsMocks = vi.hoisted(() => ({
   listenLiveRefunds: vi.fn(),
 }));
 
-vi.mock('@/admin/services/adminPaymentsService', () => ({
-  adminPaymentsService: paymentsMocks,
-}));
+// The two live listeners touch Firestore, so they stay stubbed. Everything
+// else comes from the REAL module: `ledgerCoverage()` is pure (source, limit,
+// statement) and AdminPaymentsPage renders it in the header, so a hand-written
+// stub would let the page's copy drift from the service that owns it. This
+// mock was missing ledgerCoverage entirely after 6b164b3 derived the ledger
+// from `orders`.
+vi.mock('@/admin/services/adminPaymentsService', async () => {
+  const actual = await vi.importActual<
+    typeof import('../src/admin/services/adminPaymentsService')
+  >('../src/admin/services/adminPaymentsService');
+  return {
+    ...actual,
+    adminPaymentsService: {
+      ...actual.adminPaymentsService,
+      listenLiveTransactions: paymentsMocks.listenLiveTransactions,
+      listenLiveRefunds: paymentsMocks.listenLiveRefunds,
+    },
+  };
+});
 
 const analyticsHookMocks = vi.hoisted(() => ({
   useDashboardSnapshot: vi.fn(),
