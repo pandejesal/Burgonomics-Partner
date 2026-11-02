@@ -113,6 +113,45 @@ function defaultFunctionsBase(): string {
   return `https://asia-south1-${projectId}.cloudfunctions.net/api`;
 }
 
+/**
+ * Maps one `stores/{id}` document into the gateway's row shape.
+ *
+ * Only fields the document actually carries are used: a store with no
+ * petpoojaRestId is NOT linked to a POS outlet and says so with an empty
+ * string (the page renders "N/A"), never with a fabricated id. Coords are
+ * optional in the directory, so they fall back to 0 — the page shows the
+ * value the doc has and never invents a location for search/sort.
+ */
+export function toGatewayStore(id: string, data: Record<string, any>): GatewayStore {
+  const num = (value: unknown): number => {
+    const n = typeof value === "string" ? Number(value) : value;
+    return typeof n === "number" && Number.isFinite(n) ? n : 0;
+  };
+  return {
+    id,
+    name: typeof data.name === "string" && data.name ? data.name : id,
+    address:
+      (typeof data.addressLine1 === "string" && data.addressLine1) ||
+      (typeof data.address === "string" && data.address) ||
+      "",
+    city: typeof data.city === "string" ? data.city : "",
+    area: typeof data.area === "string" ? data.area : "",
+    lat: num(data.lat ?? data.latitude),
+    lng: num(data.lng ?? data.longitude),
+    ...(typeof data.phone === "string" && data.phone ? { phone: data.phone } : {}),
+    ...(typeof data.imageUrl === "string" || data.imageUrl === null
+      ? { imageUrl: data.imageUrl ?? null }
+      : {}),
+    isOpen: data.isOpen === true,
+    isBusy: data.isBusy === true,
+    petpoojaRestId:
+      (typeof data.petpoojaRestId === "string" && data.petpoojaRestId) ||
+      (typeof data.petpoojaStoreId === "string" && data.petpoojaStoreId) ||
+      "",
+  };
+}
+
+
 export class HttpPetpoojaGateway implements PetpoojaGateway {
   readonly implementation = "live" as const;
 
@@ -378,13 +417,13 @@ export class HttpPetpoojaGateway implements PetpoojaGateway {
   // -- reads ---------------------------------------------------------------
 
   async getStores(): Promise<GatewayStore[]> {
-    // Optional server route; empty (not error) when unimplemented.
-    try {
-      const res = await this.cached("stores", () => this.post<any[]>("/petpooja/stores", {}));
-      return Array.isArray(res) ? (res as GatewayStore[]) : [];
-    } catch {
-      return [];
-    }
+    // The outlet directory lives in Firestore `stores` (public read;
+    // firestore.rules:550-553) — POST /petpooja/stores was never a server
+    // route, so the old call 404'd into an always-blank table.
+    // A read failure REJECTS: a permission/network error is not "no outlets",
+    // and the page must render an error instead of an empty fleet.
+    const snap = await getDocs(query(collection(db, "stores"), limit(200)));
+    return snap.docs.map((d) => toGatewayStore(d.id, d.data() as Record<string, any>));
   }
 
   async getStoreStatus(storeId: string): Promise<StoreOperationalState> {
