@@ -153,12 +153,75 @@ export interface DispatchCancelResult {
   provider?: DispatchProviderId | null;
   providerCancel?: string;
   message?: string;
+  /** Durable record of the local release (dispatch.cancelPending.ts). */
+  pendingCancel?: PendingDispatchCancelSummary;
+  /** Present for providers we cannot cancel ourselves. */
+  staffActionRequired?: string;
+}
+
+/**
+ * The serialisable copy the server puts on the order and in its 409 bodies
+ * (`pendingCancelSummary`, dispatch.cancelPending.ts:105-116). Timestamps stay
+ * off the wire summary — only the fields the UI acts on are here.
+ */
+export interface PendingDispatchCancelSummary {
+  provider: DispatchProviderId | null;
+  providerOrderId: string | null;
+  reason: string;
+  state: 'pending' | 'manual_required' | 'dead_lettered' | 'confirmed';
+  requestedBy: string | null;
+  attempts: number;
+  lastError: string | null;
+  staffActionRequired: string | null;
+}
+
+/** POST /dispatch/cancel/confirm 200 body (dispatch.router.ts:2242-2249). */
+export interface DispatchCancelConfirmResult {
+  success: boolean;
+  orderId: string;
+  provider: DispatchProviderId | null;
+  providerOrderId: string | null;
+  pendingCancel: PendingDispatchCancelSummary;
+  /** True when the record was already confirmed (no rewrite of who/when). */
+  reused: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const PORTER_TIMEOUT_MS = 30_000;
 const RETRY_BACKOFF_MS = 500;
 const RETRYABLE_STATUSES = new Set([502, 503, 504]);
+
+/**
+ * A typed server refusal. `sendDispatchError` (functions/src/index.ts:902-917)
+ * carries machine-readable `code`, and for an unconfirmed courier cancellation
+ * also `staffActionRequired` and the `pendingCancel` record — the Partner UI
+ * must be able to show the server's own instruction instead of a bare message.
+ * Other routes simply have no extras, so every caller that only reads
+ * `.message` keeps working.
+ */
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  readonly staffActionRequired?: string;
+  readonly pendingCancel?: PendingDispatchCancelSummary;
+  readonly attempts?: unknown;
+  readonly providers?: unknown;
+
+  constructor(status: number, body: Record<string, any>, fallback: string) {
+    super(typeof body.error === 'string' && body.error ? body.error : fallback);
+    this.name = 'ApiRequestError';
+    this.status = status;
+    if (typeof body.code === 'string' && body.code) this.code = body.code;
+    if (typeof body.staffActionRequired === 'string' && body.staffActionRequired) {
+      this.staffActionRequired = body.staffActionRequired;
+    }
+    if (body.pendingCancel && typeof body.pendingCancel === 'object') {
+      this.pendingCancel = body.pendingCancel as PendingDispatchCancelSummary;
+    }
+    if (body.attempts !== undefined) this.attempts = body.attempts;
+    if (body.providers !== undefined) this.providers = body.providers;
+  }
+}
 
 function generateIdempotencyKey(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -242,15 +305,22 @@ async function apiRequest<T>(
       if (!res.ok) {
         // ── non-retryable server error (4xx etc.) ──
         if (!RETRYABLE_STATUSES.has(res.status)) {
-          let errorMsg = `Server error ${res.status}`;
+          const errorMsg = `Server error ${res.status}`;
+          let errBody: Record<string, any> = {};
           try {
-            const errData = await res.json();
-            errorMsg = errData.error || errData.message || errorMsg;
+            const parsed: unknown = await res.json();
+            if (parsed && typeof parsed === 'object') errBody = parsed as Record<string, any>;
           } catch {
-            const text = await res.text();
-            if (text) errorMsg = text;
+            try {
+              const text = await res.text();
+              if (text) errBody = { error: text };
+            } catch {
+              // body unreadable — keep the status fallback
+            }
           }
-          throw new Error(errorMsg);
+          // A typed refusal keeps its code + dispatch extras (see
+          // ApiRequestError); a plain message still reads the same.
+          throw new ApiRequestError(res.status, errBody, errorMsg);
         }
         // retryable status — fall through to retry loop, but keep the
         // server's message so the FINAL throw explains the real verdict
@@ -469,6 +539,33 @@ export const partnerFunctionsApi = {
     return await apiRequest('/dispatch/cancel', params, {
       timeoutMs: PORTER_TIMEOUT_MS,
       retries: 1,
+    });
+  },
+
+  /**
+   * Staff confirmation that a released booking was cancelled in the provider's
+   * own dashboard — the ONLY exit from the DISPATCH_CANCEL_UNCONFIRMED block
+   * for providers we cannot cancel ourselves (P1-D).
+   *
+   * POST /dispatch/cancel/confirm, body { orderId, staffName?, note? }
+   * (dispatchCancelConfirmSchema, validation.ts:254-262). 200 ->
+   * { success, orderId, provider, providerOrderId, pendingCancel, reused };
+   * `reused: true` means it was already confirmed, so a second tap rewrites
+   * no history. 409 DISPATCH_CANCEL_NOT_PENDING when nothing is unconfirmed.
+   *
+   * Deliberately NOT retried: this is a write with an audit who/when, and the
+   * server is already idempotent — a retry adds nothing but a second round trip
+   * for a tap the operator can repeat.
+   */
+  async dispatchConfirmCancel(params: {
+    orderId: string;
+    staffName?: string;
+    /** Free-text dashboard reference the staff member kept. */
+    note?: string;
+  }): Promise<DispatchCancelConfirmResult> {
+    return await apiRequest('/dispatch/cancel/confirm', params, {
+      timeoutMs: PORTER_TIMEOUT_MS,
+      retries: 0,
     });
   },
 
