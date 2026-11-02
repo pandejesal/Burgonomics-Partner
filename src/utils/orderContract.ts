@@ -152,6 +152,22 @@ function str(v: unknown, fallback = ''): string {
 }
 
 /**
+ * First non-blank string among the candidates, else ''.
+ *
+ * `??` is wrong for contact fields: a present-but-empty string is "unknown",
+ * not a value. The backend fills `customerPhone` at booking (a54c206), so
+ * before a booking the key exists and is blank — with `??` that blank won and
+ * the deliveryAddress.contactPhone fallback was never read, which is how the
+ * rider-call card came to render `tel:` for an empty number (item 12).
+ */
+function firstNonBlank(...candidates: unknown[]): string {
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
+  return '';
+}
+
+/**
  * The gateway capture id for an order doc. Both screens that can refund
  * (order detail and the Control Room board) resolve it here, so the same
  * document can never send one id from one screen and a different (or empty)
@@ -348,7 +364,12 @@ export function normalizeOrderDoc(id: string, data: Record<string, any>): Order 
     id,
     customerId: str(data.customerId ?? data.userId),
     customerName: str(data.customerName ?? address.contactName, 'Customer'),
-    customerPhone: str(data.customerPhone ?? address.contactPhone),
+    customerPhone: firstNonBlank(
+      data.customerPhone,
+      address.contactPhone,
+      rawDelivery?.contactPhone,
+      rawDelivery?.phone
+    ),
     branchId,
     branchName: data.branchName ?? store.name,
     city: data.city ?? store.city ?? address.city,

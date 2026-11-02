@@ -730,7 +730,14 @@ export function PorterDispatchCard({
               <span>{order.customerPhone}</span>
             </a>
           ) : (
-            <span className="text-[11px] font-bold text-neutral-500">{order.customerPhone}</span>
+            // No reachable number yet (the backend writes customerPhone at
+            // booking): say so rather than rendering a dead tel: link.
+            <span
+              className="text-[11px] font-bold text-neutral-500"
+              title="No customer number is on this order yet — it is recorded when a courier is booked."
+            >
+              {order.customerPhone?.trim() ? order.customerPhone : 'No customer number yet'}
+            </span>
           )}
         </div>
 
