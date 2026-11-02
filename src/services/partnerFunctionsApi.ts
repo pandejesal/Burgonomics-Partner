@@ -146,8 +146,22 @@ export interface DispatchManualBookingResult {
   source?: string;
 }
 
-/** POST /dispatch/cancel 200 body. */
-export interface DispatchCancelResult {
+/** The two truths a staff member can assert about an ambiguous KOT print. */
+export type PetpoojaKotResolution = 'printed' | 'retry';
+
+/**
+ * POST /petpooja/resolveKot 200 body (orderPush.ts:1234-1241).
+ * `pushed` is set only for the caller that sent the one fresh push; `reused`
+ * means this press changed nothing because the resolution was already handled.
+ */
+export interface ResolvePetpoojaKotResult {
+  resolved: PetpoojaKotResolution;
+  orderId: string;
+  pushed?: boolean;
+  reused?: boolean;
+}
+
+/** POST /dispatch/cancel 200 body. */export interface DispatchCancelResult {
   success?: boolean;
   orderId?: string;
   provider?: DispatchProviderId | null;
@@ -377,6 +391,32 @@ export const partnerFunctionsApi = {
    */
   async pushOrderToPetpooja(orderId: string): Promise<{ success: boolean }> {
     return await apiRequest<{ success: boolean }>('/petpooja/pushOrder', { orderId });
+  },
+
+  /**
+   * Staff reconciliation of an ambiguous KOT (P1-K).
+   *
+   * POST /petpooja/resolveKot, body { orderId, resolution } — schema
+   * resolveKotAmbiguitySchema (functions/src/core/validation.ts:147-156),
+   * requireRole brand_owner/developer/branch_owner/branch_staff.
+   *
+   * `printed` records that the kitchen HAS the ticket (keeps the acceptance
+   * dedupe). `retry` records the staff statement that it did NOT print, clears
+   * the dedupe and sends exactly one fresh push.
+   *
+   * Response (orderPush.ts:1234-1241): { resolved, orderId, pushed?, reused? }.
+   * `pushed` is true only for the caller that actually sent the push; `reused`
+   * means a double press / in-flight caller was answered without a second KOT.
+   * A refusal (already registered, conflicting resolution, not parked) is 409.
+   *
+   * Deliberately NOT retried: this write can become a printed duplicate, so a
+   * transient status must surface to staff rather than be replayed silently.
+   */
+  async resolvePetpoojaKot(params: {
+    orderId: string;
+    resolution: PetpoojaKotResolution;
+  }): Promise<ResolvePetpoojaKotResult> {
+    return await apiRequest('/petpooja/resolveKot', params, { retries: 0 });
   },
 
   /**

@@ -149,7 +149,20 @@ export interface Order {
   razorpayPaymentId?: string;
   petpoojaOrderId?: string;
   petpoojaStatus?: 'synced' | 'failed' | 'pending' | 'pending_retry' | 'not_applicable';
-  petpoojaSyncStatus?: 'synced' | 'failed' | 'pending' | 'not_applicable';
+  petpoojaSyncStatus?:
+    | 'synced'
+    | 'failed'
+    | 'pending'
+    | 'pending_retry'
+    | 'not_applicable'
+    // Ambiguous KOT: the push may be at the POS, or the POS accepted it without
+    // an id. Never "pending" — staff must confirm the print (P1-K).
+    | 'accepted_unconfirmed';
+  /**
+   * The staff answer recorded by POST /petpooja/resolveKot:
+   * `printed` (the kitchen has the ticket) or `retry` (it did not print).
+   */
+  petpoojaResolution?: 'printed' | 'retry';
   porterOrderId?: string;
   deliveryStatus?:
     | 'dispatched'

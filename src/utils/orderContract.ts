@@ -168,6 +168,97 @@ function firstNonBlank(...candidates: unknown[]): string {
 }
 
 /**
+ * Copy for the ambiguous-KOT states. Deliberately distinct from "Pending": the
+ * push MAY have reached the POS (or the POS accepted it without an id), so the
+ * kitchen ticket may or may not exist. Only a human looking at the outlet can
+ * say — see POST /petpooja/resolveKot.
+ */
+export const PETPOOJA_KOT_UNCONFIRMED_LABEL = 'POS unconfirmed: check the printer';
+
+const AMBIGUOUS_KOT_STATUSES = new Set(['accepted_unconfirmed', 'reconciliation_required']);
+
+export interface PetpoojaSyncOutcome {
+  tone: 'success' | 'info' | 'warning' | 'error';
+  title: string;
+  description: string;
+}
+
+/**
+ * What to tell staff after POST /petpooja/pushOrder.
+ *
+ * `{ success: true }` is NOT proof the ticket printed: the server returns true
+ * for an already-deduped push and for an id-less acceptance that it parks as
+ * `accepted_unconfirmed` (orderPush.ts:1500-1506, 1872-1900). Reporting
+ * "Successfully synchronized" there hid the fact that the kitchen may have no
+ * ticket at all — the ambiguous state can only be settled by a human looking at
+ * the printer, through POST /petpooja/resolveKot.
+ */
+export function describePetpoojaSyncOutcome(
+  order: Order | Record<string, any> | null | undefined,
+  result: { success?: boolean } | null | undefined
+): PetpoojaSyncOutcome {
+  if (!result?.success) {
+    return {
+      tone: 'error',
+      title: 'Petpooja push NOT confirmed by the server',
+      description:
+        'Nothing is proven about this ticket — check the Petpooja printer, and use the print prompt if it is missing.',
+    };
+  }
+  if (petpoojaKotNeedsResolution(order)) {
+    return {
+      tone: 'warning',
+      title: 'POS accepted, print unconfirmed',
+      description:
+        'The POS took the payload but did not confirm a printed ticket. Check the Petpooja printer and record what you see — a plain re-sync is deduped and cannot fix this.',
+    };
+  }
+  const o = order as Record<string, any> | null | undefined;
+  if (typeof o?.petpoojaOrderId === 'string' && o.petpoojaOrderId.trim()) {
+    return {
+      tone: 'info',
+      title: 'Already pushed — no duplicate ticket sent',
+      description: `This order already carries POS order ${o.petpoojaOrderId}; the server deduped the push on purpose.`,
+    };
+  }
+  return {
+    tone: 'success',
+    title: 'KOT pushed to Petpooja (server confirmed)',
+    description: 'The POS registered this order. Check the printer for the ticket.',
+  };
+}
+
+
+/**
+ * Is this order in an ambiguous KOT state a staff member may resolve?
+ *
+ * Mirrors the server's `resolvable` predicate
+ * (functions/src/modules/petpooja/orderPush.ts:1256-1264) so the UI offers the
+ * prompt exactly when POST /petpooja/resolveKot would accept it.
+ */
+export function petpoojaKotNeedsResolution(
+  order: Order | Record<string, any> | null | undefined
+): boolean {
+  const o = order as Record<string, any> | null | undefined;
+  if (!o) return false;
+  // A registered POS order id means the ticket IS at the outlet — the server
+  // refuses `retry` for it, so there is nothing to reconcile.
+  if (typeof o.petpoojaOrderId === 'string' && o.petpoojaOrderId.trim()) return false;
+  // A human already answered.
+  if (o.petpoojaResolution === 'printed' || o.petpoojaResolution === 'retry') return false;
+  // Real print evidence: the ticket printed (any source), nothing to ask.
+  if (o.kotPrinted === true) return false;
+
+  return (
+    AMBIGUOUS_KOT_STATUSES.has(o.petpoojaStatus) ||
+    AMBIGUOUS_KOT_STATUSES.has(o.petpoojaSyncStatus) ||
+    o.petpoojaAmbiguousProcessing === true ||
+    o.petpoojaAcceptedUnrecorded === true ||
+    (o.petpoojaAcceptedNoId === true && !o.petpoojaOrderId)
+  );
+}
+
+/**
  * The gateway capture id for an order doc. Both screens that can refund
  * (order detail and the Control Room board) resolve it here, so the same
  * document can never send one id from one screen and a different (or empty)
@@ -298,14 +389,23 @@ export function normalizeOrderDoc(id: string, data: Record<string, any>): Order 
     data.petpoojaSyncStatus ?? data.petpoojaStatus,
     ''
   ).toLowerCase();
+  // An ambiguous KOT is NOT "pending": the push may already be at the POS. It
+  // must be distinguishable so staff can resolve the print (P1-K).
   const petpoojaSyncStatus =
-    petpoojaRaw === 'synced'
-      ? 'synced'
-      : petpoojaRaw === 'failed'
-        ? 'failed'
-        : petpoojaRaw === 'not_applicable'
-          ? 'not_applicable'
-          : 'pending';
+    AMBIGUOUS_KOT_STATUSES.has(petpoojaRaw) ||
+    data.petpoojaAmbiguousProcessing === true ||
+    data.petpoojaAcceptedUnrecorded === true ||
+    (data.petpoojaAcceptedNoId === true && !data.petpoojaOrderId)
+      ? 'accepted_unconfirmed'
+      : petpoojaRaw === 'synced'
+        ? 'synced'
+        : petpoojaRaw === 'failed'
+          ? 'failed'
+          : petpoojaRaw === 'not_applicable'
+            ? 'not_applicable'
+            : petpoojaRaw === 'pending_retry'
+              ? 'pending_retry'
+              : 'pending';
 
   const createdAt = (data.createdAt ?? data.placedAt ?? new Date().toISOString()) as Timestamp;
   const updatedAt = (data.updatedAt ?? data.createdAt ?? data.placedAt ?? new Date().toISOString()) as Timestamp;
@@ -421,6 +521,9 @@ export function normalizeOrderDoc(id: string, data: Record<string, any>): Order 
     razorpayPaymentId: resolveGatewayPaymentId(data),
     petpoojaOrderId: data.petpoojaOrderId ?? petpoojaDetails.posOrderId,
     petpoojaSyncStatus: petpoojaSyncStatus as Order['petpoojaSyncStatus'],
+    ...(data.petpoojaResolution === 'printed' || data.petpoojaResolution === 'retry'
+      ? { petpoojaResolution: data.petpoojaResolution as Order['petpoojaResolution'] }
+      : {}),
     porterOrderId: data.porterOrderId,
     deliveryStatus: data.deliveryStatus,
     riderName: data.riderName,
