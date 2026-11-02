@@ -14,16 +14,6 @@ import {
   Clock,
   Settings,
   Shield,
-  Bot,
-  Send,
-  Sparkles,
-  AlertOctagon,
-  RefreshCw,
-  X,
-  ChevronRight,
-  Maximize2,
-  Trash2,
-  Play,
 } from "lucide-react";
 import { appConfig } from "@/core/config/env";
 
@@ -33,15 +23,6 @@ interface SystemOperationsLayoutProps {
 
 export const SystemOperationsLayout: React.FC<SystemOperationsLayoutProps> = ({ children }) => {
   const location = useLocation();
-  const [isAiOpen, setIsAiOpen] = useState(false);
-  const [aiMessage, setAiMessage] = useState("");
-  const [aiChat, setAiChat] = useState<{ role: "user" | "assistant"; text: string }[]>([
-    {
-      role: "assistant",
-      text: "Welcome to BURGONOMICS Mission Control System Diagnostics. I query the developer diagnostics endpoint to help with debugging, performance auditing, and systems management. How can I assist you today?",
-    },
-  ]);
-  const [isAiLoading, setIsAiLoading] = useState(false);
 
   // Auto-refresh control (10 seconds as requested)
   const [refreshCountdown, setRefreshCountdown] = useState(10);
@@ -57,42 +38,6 @@ export const SystemOperationsLayout: React.FC<SystemOperationsLayoutProps> = ({ 
     }, 1000);
     return () => clearInterval(timer);
   }, []);
-
-  const handleSendAiMessage = async () => {
-    if (!aiMessage.trim()) return;
-    const userText = aiMessage;
-    setAiChat((prev) => [...prev, { role: "user", text: userText }]);
-    setAiMessage("");
-    setIsAiLoading(true);
-
-    try {
-      // Call the server-side developer diagnostics endpoint
-      const response = await fetch("/api/developer/assistant", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: userText, currentPath: location.pathname }),
-      });
-      const data = await response.json();
-      if (data.success) {
-        setAiChat((prev) => [...prev, { role: "assistant", text: data.response }]);
-      } else {
-        setAiChat((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            text: `System Diagnostics: ${data.error?.message || "Failed to process query."}`,
-          },
-        ]);
-      }
-    } catch (err) {
-      setAiChat((prev) => [
-        ...prev,
-        { role: "assistant", text: "Network connection error while reaching the diagnostics service." },
-      ]);
-    } finally {
-      setIsAiLoading(false);
-    }
-  };
 
   const allSystemTabs = [
     { label: "Dashboard", to: "/admin/system", icon: LayoutDashboard },
@@ -154,17 +99,6 @@ export const SystemOperationsLayout: React.FC<SystemOperationsLayoutProps> = ({ 
             <span className="text-gray-300 font-bold">SYNC IN {refreshCountdown}s</span>
           </div>
 
-          <button
-            onClick={() => setIsAiOpen(!isAiOpen)}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer ${
-              isAiOpen
-                ? "bg-accent text-white shadow-[0_0_15px_rgba(255,102,0,0.4)]"
-                : "bg-primary/20 hover:bg-primary/40 text-emerald-400 border border-emerald-900/40"
-            }`}
-          >
-            <Terminal size={14} className={isAiOpen ? "animate-bounce" : ""} />
-            <span>Diagnostics</span>
-          </button>
         </div>
       </div>
 
@@ -231,83 +165,6 @@ export const SystemOperationsLayout: React.FC<SystemOperationsLayoutProps> = ({ 
           </div>
         </div>
 
-        {/* Collapsible Slide-out Diagnostics Panel */}
-        <div
-          className={`absolute top-0 right-0 h-full w-[360px] max-w-full border-l border-gray-800 bg-[#080d09] shadow-2xl flex flex-col z-30 transition-transform duration-300 ${
-            isAiOpen ? "translate-x-0" : "translate-x-full"
-          }`}
-        >
-          {/* Panel Header */}
-          <div className="p-4 border-b border-gray-800 bg-[#0c140e] flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <Terminal size={18} className="text-emerald-400 animate-pulse" />
-              <div>
-                <span className="block text-xs font-bold text-white uppercase tracking-wider font-mono">
-                  MISSION CONTROL DIAGNOSTICS
-                </span>
-                <span className="block text-[9px] text-accent dark:text-accent-light font-black uppercase tracking-widest">
-                  Live System Telemetry
-                </span>
-              </div>
-            </div>
-            <button
-              onClick={() => setIsAiOpen(false)}
-              className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition-colors cursor-pointer"
-            >
-              <X size={16} />
-            </button>
-          </div>
-
-          {/* Chat History */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 font-mono text-xs leading-relaxed custom-scrollbar bg-[#060a07]">
-            {aiChat.map((chat, idx) => (
-              <div
-                key={idx}
-                className={`flex flex-col ${chat.role === "user" ? "items-end" : "items-start"}`}
-              >
-                <div className="flex items-center gap-1.5 text-[10px] text-gray-500 mb-1">
-                  <span>{chat.role === "user" ? "OPERATOR" : "SYSTEM_CORE"}</span>
-                </div>
-                <div
-                  className={`p-3 rounded-2xl max-w-[90%] border ${
-                    chat.role === "user"
-                      ? "bg-accent/10 border-accent/30 text-white"
-                      : "bg-primary/10 border-primary/30 text-emerald-300"
-                  }`}
-                >
-                  {chat.text}
-                </div>
-              </div>
-            ))}
-            {isAiLoading && (
-              <div className="flex items-center gap-2 text-[10px] text-emerald-400 uppercase tracking-widest animate-pulse font-bold p-2 font-mono">
-                <Sparkles size={12} className="animate-spin" />
-                <span>Analyzing telemetry state...</span>
-              </div>
-            )}
-          </div>
-
-          {/* AI Input Block */}
-          <div className="p-4 border-t border-gray-800 bg-[#0c140e]">
-            <div className="flex items-center gap-2 bg-[#060a07] border border-gray-800 rounded-xl p-1.5 focus-within:border-emerald-600 transition-all">
-              <input
-                type="text"
-                placeholder="Ask about queues, DB issues, Redis..."
-                value={aiMessage}
-                onChange={(e) => setAiMessage(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSendAiMessage()}
-                className="flex-1 bg-transparent border-0 outline-none focus:ring-0 px-2 text-xs text-white placeholder-gray-600 font-mono"
-              />
-              <button
-                onClick={handleSendAiMessage}
-                disabled={isAiLoading || !aiMessage.trim()}
-                className="h-8 w-8 rounded-lg bg-primary hover:bg-[#156d39] text-white flex items-center justify-center transition-colors disabled:opacity-40 disabled:hover:bg-primary cursor-pointer shrink-0"
-              >
-                <Send size={12} />
-              </button>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );
