@@ -14,6 +14,7 @@ import {
 } from 'firebase/firestore';
 import type { UserRole } from '@/types';
 import { hashPinSimple } from '@/core/auth/pinHelpers';
+import { buildStaffInvitePayload } from '@/features/users/staffInvitePayload';
 
 /** Firestore rules intentionally deny most staff reads (users/{uid} is
  * owner-or-brand). A denied read is an HONEST empty — any other failure
@@ -343,17 +344,15 @@ export function useUsers() {
           "Staff set their own POS PIN at first sign-in — remove it and retry."
         );
       }
+      // The server schema requires E.164 (functions/src/modules/auth/
+      // staffInvite.ts:14-18). Normalizing here means every caller — the
+      // modal today, anything later — sends a body the server accepts, and an
+      // invalid number fails loudly HERE instead of as a schema 400.
+      const payload = buildStaffInvitePayload(userData);
       const { partnerFunctionsApi } = await import(
         "@/services/partnerFunctionsApi"
       );
-      const res = await partnerFunctionsApi.inviteStaff({
-        name: userData.name,
-        email: userData.email,
-        phone: userData.phone || undefined,
-        role: userData.role,
-        branchIds: userData.branchIds,
-        cityIds: userData.cityIds,
-      });
+      const res = await partnerFunctionsApi.inviteStaff(payload);
       return res.uid;
     },
     onSuccess: () => {

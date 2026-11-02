@@ -10,6 +10,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { useBranches } from '@/hooks/useBranches';
+import { normalizeStaffPhone } from '@/features/users/phoneNormalization';
 import type { UserRole } from '@/types';
 
 interface CreateStaffModalProps {
@@ -64,7 +65,19 @@ export function CreateStaffModal({
       return;
     }
 
-    await onInvite(formData);
+    // The server requires E.164 (functions/src/modules/auth/staffInvite.ts).
+    // Catch a bad number here so the operator sees what to fix, instead of a
+    // 400 from a schema they cannot see. A blank phone stays optional.
+    const normalized = normalizeStaffPhone(formData.phone);
+    if (formData.phone.trim() && !normalized.ok) {
+      setValidationError(normalized.message);
+      return;
+    }
+
+    await onInvite({
+      ...formData,
+      phone: normalized.ok ? normalized.phone : '',
+    });
     onClose();
   };
 
@@ -155,11 +168,17 @@ export function CreateStaffModal({
               </label>
               <input
                 type="tel"
-                placeholder="+91 98765 43210"
+                placeholder="98765 43210"
                 value={formData.phone}
                 onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                aria-describedby="staff-phone-hint"
                 className="w-full px-3.5 py-2.5 text-xs bg-[#0A0A0A] border border-[#1E3A24] rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-[#4ADE80]"
               />
+              {/* The server wants E.164; the field takes a plain Indian mobile
+                  and the submit normalizes it to +91. */}
+              <p id="staff-phone-hint" className="mt-1 text-[10px] text-zinc-500">
+                Indian mobile — sent as +91. Optional.
+              </p>
             </div>
           </div>
 
