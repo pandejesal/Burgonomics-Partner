@@ -26,6 +26,28 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
+/**
+ * Unresolved discrepancy count from RAW `payment_discrepancies` documents.
+ *
+ * The page used to test `d.status === "UNRESOLVED"`, a display token that only
+ * `mapServerDiscrepancy` (AdminReconciliationPage) produces. Every server writer
+ * stores `status: "needs_review"` and the resolver stores `"resolved"`, so the
+ * retry-queue KPI was permanently 0 - including during a double-capture storm -
+ * and "clear queue" answered "already empty" with rows waiting.
+ *
+ * A row with NO status is counted as unresolved: an unreadable row must stay
+ * visible to an operator, never silently vanish from the health signal.
+ * `"UNRESOLVED"` is still accepted so a future mapper-produced row cannot
+ * double-regress.
+ */
+export function countUnresolvedDiscrepancies(rows: ReadonlyArray<{ status?: unknown }>): number {
+  return rows.filter((row) => {
+    const status = typeof row?.status === "string" ? row.status.trim().toUpperCase() : "";
+    if (!status) return true;
+    return status === "NEEDS_REVIEW" || status === "UNRESOLVED";
+  }).length;
+}
+
 export const AdminPaymentHealthPage: React.FC = () => {
   const { role } = useAdmin();
 
@@ -47,7 +69,7 @@ export const AdminPaymentHealthPage: React.FC = () => {
     const unsubscribe = adminPaymentsService.listenLiveDiscrepancies(
       (data) => {
         setDiscrepancies(data);
-        setRetryQueueCount(data.filter((d) => d.status === "UNRESOLVED").length);
+        setRetryQueueCount(countUnresolvedDiscrepancies(data));
       },
       (err) => console.error("Discrepancy listener error", err),
     );
