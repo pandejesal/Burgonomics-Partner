@@ -1,5 +1,12 @@
+import { Capacitor } from '@capacitor/core';
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import {
+  browserLocalPersistence,
+  browserSessionPersistence,
+  getAuth,
+  indexedDBLocalPersistence,
+  initializeAuth,
+} from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getMessaging, type Messaging } from 'firebase/messaging';
 
@@ -13,7 +20,16 @@ const firebaseConfig = {
 };
 
 export const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+// getAuth() installs the browser popup/redirect resolver, and Auth's start-up
+// then waits on an authDomain iframe that never answers inside the iOS
+// WKWebView (capacitor://): onAuthStateChanged never fired and the app sat on
+// its spinner (run 41583409655). Email sign-in needs no resolver, so native
+// shells drop it and keep getAuth()'s persistence order, preserving sessions.
+export const auth = Capacitor.isNativePlatform()
+  ? initializeAuth(app, {
+      persistence: [indexedDBLocalPersistence, browserLocalPersistence, browserSessionPersistence],
+    })
+  : getAuth(app);
 export const db = getFirestore(app);
 
 // Storage discipline (same as core): Firebase Auth owns token persistence —
