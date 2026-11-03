@@ -17,17 +17,21 @@ export function Header() {
 
   return (
     <header
-      className="bg-bg border-b border-[#1E3A24] flex items-center justify-between px-3 sm:px-4 lg:px-6 sticky top-0 z-30 shadow-md"
+      className="bg-bg border-b border-[#1E3A24] flex flex-col gap-2 px-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3 sm:px-4 lg:px-6 sticky top-0 z-30 shadow-md"
       style={{
         minHeight: 'calc(4rem + var(--safe-area-inset-top, env(safe-area-inset-top, 0px)))',
         paddingTop: 'var(--safe-area-inset-top, env(safe-area-inset-top, 0px))',
       }}
     >
-      {/* Left: Mobile menu + Outlet Switcher + Welcome */}
-      <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-4">
-        {/* The Delivery mascot must stay visible even when the mobile drawer is closed. */}
-        <Link to="/dashboard" aria-label="Burgonomics Partner dashboard" className="shrink-0">
-          <Logo size={30} showText={false} className="shrink-0" />
+      {/* Brand row: mascot + MonstroSolid wordmark stays readable on mobile
+          (it used to be mascot-only), and may wrap instead of being clipped. */}
+      <div className="flex min-w-0 flex-wrap items-center gap-1 sm:gap-2">
+        <Link
+          to="/dashboard"
+          aria-label="Burgonomics Partner dashboard"
+          className="flex min-w-0 min-h-11 flex-1 items-center"
+        >
+          <Logo size={30} showText />
         </Link>
         <button
           type="button"
@@ -40,7 +44,10 @@ export function Header() {
         >
           <Menu className="w-5 h-5" />
         </button>
+      </div>
 
+      {/* Outlet + actions row: wraps under the brand row on small widths. */}
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:gap-3">
         {/* Global Outlet / City Switcher */}
         <BranchSwitcher />
 
@@ -50,10 +57,8 @@ export function Header() {
             {user.role.replace('_', ' ')}
           </span>
         )}
-      </div>
 
-      {/* Right: KDS Quick Link + Petpooja POS Badge + Notification Bell + Logout */}
-      <div className="flex shrink-0 items-center gap-1 sm:gap-3">
+        {/* KDS Quick Link */}
         <Link
           to="/kds"
           className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-surface-hover hover:bg-[#284f30] text-accent-light hover:text-[#ff7a26] border border-[#2e5e39] text-xs font-black shadow-sm transition-colors cursor-pointer"

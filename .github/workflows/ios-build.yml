@@ -3,6 +3,11 @@ on:
   push:
     branches: ['review/**']
   workflow_dispatch:
+    inputs:
+      real_staging:
+        description: Use real staging Firebase/API configuration for the client demo (no live payments)
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -30,12 +35,65 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Prepare simulator-only compile fixture
+        if: github.event_name != 'workflow_dispatch' || inputs.real_staging != true
         run: node scripts/prepare-simulator-config.mjs
         env:
           CI_SIMULATOR_ONLY: 'true'
+      - name: Prepare real staging simulator configuration
+        if: github.event_name == 'workflow_dispatch' && inputs.real_staging == true
+        run: node scripts/prepare-demo-simulator.mjs
+        env:
+          CI_SIMULATOR_ONLY: 'true'
+          MOBILE_STAGING_ENV: ${{ secrets.MOBILE_STAGING_ENV }}
+          STAGING_GOOGLE_SERVICE_INFO_PLIST_BASE64: ${{ secrets.STAGING_GOOGLE_SERVICE_INFO_PLIST_BASE64 }}
       - run: npm run build:mobile -- --mode staging
       - run: npx cap sync ios
       - run: node scripts/configure-ios-firebase.mjs
       - run: xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release -destination "generic/platform=iOS Simulator" -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO build
         working-directory: .
-
+      - name: Launch simulator app (manual runs only)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          mkdir -p smoke
+          UDID=$(python3 - <<'PY'
+          import json, subprocess
+          runtimes = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'devices', 'available', '-j']))['devices']
+          for runtime in sorted(runtimes, reverse=True):
+              if 'iOS' not in runtime:
+                  continue
+              for device in runtimes[runtime]:
+                  if 'iPhone' in device['name']:
+                      print(device['udid'])
+                      raise SystemExit(0)
+          raise SystemExit('No available iPhone simulator')
+          PY
+          )
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" build/DerivedData/Build/Products/Release-iphonesimulator/App.app
+          xcrun simctl launch "$UDID" com.burgonomics.partner > smoke/launch.txt
+          sleep 30
+          xcrun simctl io "$UDID" screenshot smoke/after-30s.png
+          sleep 15
+          xcrun simctl io "$UDID" screenshot smoke/after-45s.png
+          xcrun simctl spawn "$UDID" launchctl list | grep -F 'com.burgonomics.partner' > smoke/process.txt
+          printf 'real_staging=%s\npush=not-tested\nsigning=none\n' "$REAL_STAGING" > smoke/scope.txt
+        env:
+          REAL_STAGING: ${{ inputs.real_staging }}
+      - name: Collect native launch logs
+        if: always() && github.event_name == 'workflow_dispatch'
+        run: |
+          mkdir -p smoke
+          if [ -n "${UDID:-}" ]; then
+            xcrun simctl spawn "$UDID" log show --last 4m --style compact --predicate 'process == "App"' 2>/dev/null | tail -n 500 | sed -E 's/A[A-Za-z0-9_-]{38}/[REDACTED_API_KEY]/g; s/rzp_(test|live)_[A-Za-z0-9_]+/[REDACTED_PAYMENT_KEY]/g' > smoke/app-log.txt || true
+          fi
+      - name: Upload launch evidence
+        if: always() && github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-sim-smoke
+          path: smoke
+          if-no-files-found: error
+          retention-days: 14
