@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { KOTTimerBadge } from './KOTTimerBadge';
 import { DeliveryFeeUnverifiedWarning } from '@/features/orders/components/DeliveryFeeUnverifiedWarning';
+import { orderRef } from '@/features/orders/utils/orderRef';
 import { modifierLabelsFrom, petpoojaKotNeedsResolution } from '@/utils/orderContract';
 import type { Order, OrderStatus } from '@/types';
 
@@ -42,9 +43,7 @@ export function KDSOrderCard({
   className = '',
 }: KDSOrderCardProps) {
   const shortOrderNumber =
-    (order as any).shortCode ||
-    (order as any).orderNumber ||
-    (order.id ? order.id.slice(0, 6).toUpperCase() : 'ORDER');
+    orderRef(order);
 
   const orderType = order.orderType || 'delivery';
   const isDelivery = orderType === 'delivery';
@@ -91,10 +90,14 @@ export function KDSOrderCard({
           : 'border-blue-500/50 shadow-blue-950/20'
       } ${className}`}
     >
-      {/* Top Header Strip */}
-      <div className="p-3.5 bg-neutral-900/90 border-b border-neutral-800 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="font-mono text-base sm:text-lg font-black text-white tracking-wider truncate">
+      {/* Top Header Strip.
+          Finding 12: the reference, a fulfilment pill and the SLA timer all
+          competed in one non-wrapping row, so at a 1024px three-column KDS the
+          ticket clipped to "#OR…" — the kitchen could not identify the order.
+          The strip now wraps, and the reference itself never truncates. */}
+      <div className="p-3.5 bg-neutral-900/90 border-b border-neutral-800 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
+          <span className="font-mono text-base sm:text-lg font-black text-white tracking-wider shrink-0 whitespace-nowrap">
             #{shortOrderNumber}
           </span>
 

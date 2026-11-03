@@ -6,6 +6,8 @@
  * in Firebase.
  */
 
+import { orderRef } from '@/features/orders/utils/orderRef';
+
 /** How many arrived order ids the banner retains after one snapshot. */
 export const KDS_NEW_ORDER_ID_CAP = 10;
 
@@ -16,9 +18,13 @@ export interface KdsNewOrderAlertState {
   total: number;
 }
 
-/** Same ticket label the KDS card shows (first 6 chars, uppercased). */
+/**
+ * Same ticket label the KDS card shows. Delegates to the shared helper: the old
+ * `slice(0, 6)` produced `ORD_17` for every order because every id starts with
+ * it, so the live region announced the same ticket name for different orders.
+ */
 export function formatKdsOrderLabel(orderId: string): string {
-  return orderId.slice(0, 6).toUpperCase();
+  return orderRef({ id: orderId });
 }
 
 /**

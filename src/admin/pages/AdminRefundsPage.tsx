@@ -359,13 +359,23 @@ export const AdminRefundsPage: React.FC<AdminRefundsPageProps> = ({
       {/* Tab select & Search Filters */}
       <AdminCard className="p-5">
         <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-          {/* Tabs */}
-          <div className="flex gap-1.5 p-1 bg-gray-50 dark:bg-gray-900/50 rounded-2xl w-full sm:w-auto overflow-x-auto">
+          {/* Tabs. Live finding: at 1024px the strip held ~552px of labels in a
+              ~397px column, so REJECTED rendered as "REJ" and WITHDRAWN sat
+              entirely off-strip with no scroll affordance — a reviewer could
+              not reach two of the six filters. Tabs now wrap instead of
+              clipping, and each label keeps its full width. */}
+          <div
+            role="tablist"
+            aria-label="Refund status filters"
+            className="flex flex-wrap gap-1.5 p-1 bg-gray-50 dark:bg-gray-900/50 rounded-2xl w-full sm:w-auto"
+          >
             {(["ALL", "PENDING", "COMPLETED", "FAILED", "REJECTED", "WITHDRAWN"] as const).map((tab) => (
               <button
                 key={tab}
+                role="tab"
+                aria-selected={activeTab === tab}
                 onClick={() => setActiveTab(tab)}
-                className={`flex-1 sm:flex-initial px-4 py-2 rounded-xl text-xs font-bold transition-all uppercase font-mono ${
+                className={`shrink-0 whitespace-nowrap px-4 py-2 rounded-xl text-xs font-bold transition-all uppercase font-mono ${
                   activeTab === tab
                     ? "bg-primary text-white shadow-sm"
                     : "text-gray-400 hover:text-gray-900 dark:hover:text-white"
@@ -376,16 +386,19 @@ export const AdminRefundsPage: React.FC<AdminRefundsPageProps> = ({
             ))}
           </div>
 
-          {/* Search bar */}
-          <div className="relative w-full sm:w-80">
+          {/* Search bar. The old placeholder was long enough to clip mid-word at
+              1024px; the field also had no accessible name beyond a placeholder
+              that was partly hidden. */}
+          <div className="relative w-full sm:w-80 min-w-0">
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search refunds directory by customer, order ID..."
+              aria-label="Search refunds by customer or order ID"
+              placeholder="Search customer or order ID"
               className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-800/80 rounded-xl py-2 px-4 pl-10 text-xs font-semibold focus:outline-none"
             />
-            <Info size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Info size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true" />
           </div>
         </div>
 

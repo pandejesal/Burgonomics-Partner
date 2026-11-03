@@ -11,7 +11,12 @@ export const SuccessBadge: React.FC<{ label: string }> = ({ label }) => {
   );
 };
 
-// Status Badge
+// Status Badge.
+// Contrast (WCAG 1.4.3, 12px text needs 4.5:1): the light-mode labels used the
+// 500/600-step brand hexes on 50-step chips and measured PENDING 2.07:1,
+// COMPLETED 3.13:1, FAILED 4.41:1. The 700/800 steps on the same chips measure
+// 6.84:1, 5.21:1 and 5.91:1. Dark mode keeps the 400 steps on 950 chips, which
+// already pass.
 export const StatusBadge: React.FC<{
   status: "active" | "inactive" | "pending" | "failed" | string;
   label?: string;
@@ -27,7 +32,7 @@ export const StatusBadge: React.FC<{
     normalized === "live"
   ) {
     classes =
-      "bg-emerald-50 text-[#16A34A] border-emerald-200/50 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/30";
+      "bg-emerald-50 text-emerald-700 border-emerald-200/50 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/30";
   } else if (
     normalized === "inactive" ||
     normalized === "disabled" ||
@@ -35,10 +40,10 @@ export const StatusBadge: React.FC<{
     normalized === "danger"
   ) {
     classes =
-      "bg-red-50 text-[#DC2626] border-red-200/50 dark:bg-red-950/20 dark:text-red-400 dark:border-red-900/30";
+      "bg-red-50 text-red-700 border-red-200/50 dark:bg-red-950/20 dark:text-red-400 dark:border-red-900/30";
   } else if (normalized === "pending" || normalized === "warning" || normalized === "queued") {
     classes =
-      "bg-amber-50 text-[#F59E0B] border-amber-200/50 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/30";
+      "bg-amber-50 text-amber-800 border-amber-200/50 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/30";
   }
 
   return (

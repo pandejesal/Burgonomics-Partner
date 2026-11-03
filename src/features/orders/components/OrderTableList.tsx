@@ -11,6 +11,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { OrderStatusBadge } from './OrderStatusBadge';
+import { orderRef } from '../utils/orderRef';
 import { orderPaymentChannel } from '@/utils/analyticsMath';
 import type { Order, OrderStatus } from '@/types';
 
@@ -73,27 +74,42 @@ export function OrderTableList({
   };
 
   return (
-    <div className={`overflow-x-auto rounded-2xl border border-neutral-800 bg-neutral-950/80 shadow-md ${className}`}>
-      <table className="w-full text-left text-xs text-neutral-300 border-collapse">
+    <div
+      // A wide table inside a narrow column hides STATUS and ACTIONS from a
+      // kitchen operator at 1024px with no affordance that more exists. The
+      // region is now keyboard-scrollable and labelled (WCAG 2.1.1: a
+      // scrollable region must be focusable), identity and actions are pinned
+      // with sticky columns, and the hint below says the table scrolls.
+      className={`relative overflow-x-auto rounded-2xl border border-neutral-800 bg-neutral-950/80 shadow-md ${className}`}
+      role="region"
+      aria-label="Live orders table, scrollable horizontally"
+      tabIndex={0}
+      data-testid="orders-table-scroll-region"
+    >
+      <table className="w-full min-w-[860px] text-left text-xs text-neutral-300 border-collapse">
         <thead className="bg-neutral-900/90 text-neutral-400 font-bold uppercase tracking-wider text-[10px] border-b border-neutral-800">
           <tr>
-            <th className="py-3 px-4">Order # & Time</th>
-            <th className="py-3 px-4">Customer</th>
-            <th className="py-3 px-4">Channel</th>
-            <th className="py-3 px-4">Items Summary</th>
-            <th className="py-3 px-4">Total</th>
-            <th className="py-3 px-4">Payment</th>
-            <th className="py-3 px-4">Status</th>
-            <th className="py-3 px-4 text-right">Actions</th>
+            <th scope="col" className="py-3 px-4 sticky left-0 z-20 bg-neutral-900">
+              Order # &amp; Time
+            </th>
+            <th scope="col" className="py-3 px-4">Customer</th>
+            <th scope="col" className="py-3 px-4">Channel</th>
+            <th scope="col" className="py-3 px-4">Items Summary</th>
+            <th scope="col" className="py-3 px-4">Total</th>
+            <th scope="col" className="py-3 px-4">Payment</th>
+            <th scope="col" className="py-3 px-4">Status</th>
+            <th scope="col" className="py-3 px-4 text-right sticky right-0 z-20 bg-neutral-900">
+              Actions
+            </th>
           </tr>
         </thead>
 
         <tbody className="divide-y divide-neutral-850">
           {orders.map((order) => {
-            const shortCode =
-              (order as any).shortCode ||
-              (order as any).orderNumber ||
-              order.id.slice(0, 6).toUpperCase();
+            // Every order id starts `ord_17…`, so truncating from the LEFT made
+            // every row render the same reference. orderRef() prefers shortCode
+            // and falls back to the identifying tail.
+            const shortCode = orderRef(order);
 
             const isDelivery = order.orderType === 'delivery';
             const isTakeaway = order.orderType === 'takeaway';
@@ -111,8 +127,9 @@ export function OrderTableList({
                 key={order.id}
                 className="hover:bg-neutral-900/60 transition-colors group cursor-pointer"
               >
-                {/* Order Number & Placed Time */}
-                <td className="py-3 px-4 font-mono">
+                {/* Order Number & Placed Time. Sticky so the identity stays
+                    visible while the operator scrolls to STATUS/ACTIONS. */}
+                <td className="py-3 px-4 font-mono sticky left-0 z-10 bg-neutral-950/95">
                   <span className="font-black text-white text-sm block">#{shortCode}</span>
                   <span className="text-[11px] text-neutral-500">{formatTime(order.createdAt)}</span>
                 </td>
@@ -215,8 +232,9 @@ export function OrderTableList({
                   <OrderStatusBadge status={order.status} />
                 </td>
 
-                {/* 1-Tap Row Actions */}
-                <td className="py-3 px-4 text-right">
+                {/* 1-Tap Row Actions. Sticky so the action stays reachable
+                    even when the table is scrolled to the left. */}
+                <td className="py-3 px-4 text-right sticky right-0 z-10 bg-neutral-950/95">
                   <div className="flex items-center justify-end gap-1.5">
                     {/* Print KOT */}
                     <button
@@ -266,6 +284,13 @@ export function OrderTableList({
           })}
         </tbody>
       </table>
+      {/* A kitchen operator at 1024px could not tell the table scrolled, so
+          STATUS and ACTIONS were effectively invisible. The hint is inside the
+          scroll container's parent so it never scrolls away. */}
+      <p className="border-t border-neutral-800 px-4 py-2 text-[11px] text-neutral-500">
+        Scroll the table sideways for Status and Actions. Actions stay pinned on
+        the right.
+      </p>
     </div>
   );
 }

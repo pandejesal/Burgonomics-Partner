@@ -49,7 +49,10 @@ export function ActiveOrdersPulse({
 
       <Link
         to="/kds"
-        className="px-4 py-2.5 rounded-2xl bg-[#FF6600] hover:bg-[#e05a00] text-white font-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-md transition-all active:scale-95 cursor-pointer shrink-0 max-w-full"
+        // Design-system token, not the decorative legacy orange: white on
+        // #FF6600 measured 2.94:1. accent/accent-foreground is the documented
+        // AA pair (see the contrast note in index.css).
+        className="px-4 py-2.5 rounded-2xl bg-accent hover:bg-accent-hover text-accent-foreground font-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-md transition-all active:scale-95 cursor-pointer shrink-0 max-w-full"
       >
         <Utensils className="w-4 h-4 shrink-0" />
         <span className="min-w-0 break-words">Open KDS Station</span>

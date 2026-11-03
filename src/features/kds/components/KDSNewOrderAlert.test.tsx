@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+﻿import { describe, it, expect } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
   KDSNewOrderAlert,
@@ -18,13 +18,13 @@ import {
 describe('formatNewOrderAnnouncement', () => {
   it('names the order for a single arrival', () => {
     expect(formatNewOrderAnnouncement(['ab12cd99'])).toBe(
-      'New order AB12CD arrived on the makeline.'
+      'New order 12CD99 arrived on the makeline.'
     );
   });
 
   it('counts and lists multiple arrivals', () => {
     expect(formatNewOrderAnnouncement(['ab12cd99', 'ef34gh77'])).toBe(
-      '2 new orders arrived on the makeline: AB12CD, EF34GH.'
+      '2 new orders arrived on the makeline: 12CD99, 34GH77.'
     );
   });
 
@@ -45,7 +45,7 @@ describe('KDSNewOrderAlert', () => {
     const html = renderToStaticMarkup(
       <KDSNewOrderAlert orderIds={['ab12cd99']} onDismiss={() => {}} />
     );
-    expect(html).toContain('New order AB12CD arrived on the makeline.');
+    expect(html).toContain('New order 12CD99 arrived on the makeline.');
     expect(html).toContain('New order received');
     expect(html).toContain('aria-label="Dismiss new order alert"');
   });

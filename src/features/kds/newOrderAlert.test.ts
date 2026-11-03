@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   KDS_NEW_ORDER_ID_CAP,
   capNewOrderIds,
+  formatKdsOrderLabel,
   formatNewOrderAnnouncement,
 } from '@/features/kds/newOrderAlert';
 
@@ -29,15 +30,28 @@ describe('capNewOrderIds', () => {
 describe('formatNewOrderAnnouncement with overflow', () => {
   it('names a single arrival', () => {
     expect(formatNewOrderAnnouncement(['ab12cd99'])).toBe(
-      'New order AB12CD arrived on the makeline.'
+      'New order 12CD99 arrived on the makeline.'
     );
   });
 
   it('reports the capped tail plus the overflow count', () => {
     expect(formatNewOrderAnnouncement(ids(KDS_NEW_ORDER_ID_CAP), 25)).toBe(
       `25 new orders arrived on the makeline: ${ids(KDS_NEW_ORDER_ID_CAP)
-        .map((id) => id.slice(0, 6).toUpperCase())
+        .map((id) => formatKdsOrderLabel(id))
         .join(', ')} (15 more).`
     );
+  });
+
+  /**
+   * Live UI finding 12: the KDS ticket clipped to `#OR…` because the label was
+   * the first 6 characters of an id that always begins `ord_17`.
+   */
+  it('never labels two real orders identically', () => {
+    const real = ['ord_1793721600000_l29btj', 'ord_1793721600000_OlxLGP', 'ord_1793721600000_PHwicU'];
+    const labels = real.map(formatKdsOrderLabel);
+
+    expect(new Set(labels).size).toBe(real.length);
+    for (const label of labels) expect(label).not.toMatch(/^ORD_1/i);
+    expect(labels).toEqual(['L29BTJ', 'OLXLGP', 'PHWICU']);
   });
 });
