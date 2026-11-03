@@ -13,6 +13,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
 import { orderPaymentChannel } from '@/utils/analyticsMath';
+import { orderRef } from '@/features/orders/utils/orderRef';
 import type { PaymentFilter } from '@/features/orders/components/OrderFiltersBar';
 import {
   ChefHat,
@@ -213,7 +214,9 @@ export function OrdersPage() {
           isOpen={isCreateModalOpen}
           onClose={() => setIsCreateModalOpen(false)}
           onOrderCreated={(order) => {
-            toast.success(`Order #${order.id.slice(0, 6).toUpperCase()} created & KOT dispatched!`);
+            // Same reference the table and KDS show: the old left-truncation
+            // produced "ORD_PO" for every walk-in order.
+            toast.success(`Order #${orderRef(order)} created & KOT dispatched!`);
           }}
         />
       )}
