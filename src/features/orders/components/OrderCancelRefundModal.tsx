@@ -36,8 +36,11 @@ export function OrderCancelRefundModal({
   const canReleaseRefundDirectly = canReleaseRefund(user?.role);
   const [selectedReason, setSelectedReason] = useState('CUSTOMER_REQUEST');
   const [customNotes, setCustomNotes] = useState('');
+  const hasRefundableGatewayPayment =
+    order.paymentStatus === 'completed' &&
+    (order.paymentChannel === 'razorpay' || !!order.razorpayPaymentId?.trim());
   const [shouldRefund, setShouldRefund] = useState(
-    order.paymentStatus === 'completed' && canReleaseRefundDirectly
+    hasRefundableGatewayPayment && canReleaseRefundDirectly
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -166,7 +169,7 @@ export function OrderCancelRefundModal({
             </div>
 
             {/* Refund Options */}
-            {order.paymentStatus === 'completed' && canReleaseRefundDirectly && (
+            {hasRefundableGatewayPayment && canReleaseRefundDirectly && (
               <div className="p-3 rounded-2xl bg-neutral-950 border border-neutral-800 space-y-2">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -176,16 +179,24 @@ export function OrderCancelRefundModal({
                     className="rounded border-neutral-700 text-rose-500 focus:ring-0"
                   />
                   <span className="font-bold text-white text-xs">
-                    Issue 100% Instant Refund (₹{order.total})
+                    Initiate full refund (₹{order.total})
                   </span>
                 </label>
                 <p className="text-[11px] text-neutral-400 pl-5">
-                  Releases the Razorpay refund server-side (POST /payments/refund) and reverses
-                  the capture back to the original payment source.
+                  Submits a full refund request for server-side processing (POST /payments/refund)
+                  back to the original payment source. Settlement depends on gateway and bank clearance times.
                 </p>
               </div>
             )}
-            {order.paymentStatus === 'completed' && !canReleaseRefundDirectly && (
+            {order.paymentStatus === 'completed' && !hasRefundableGatewayPayment && (
+              <div className="p-3 rounded-2xl bg-neutral-950 border border-neutral-800">
+                <p className="text-[11px] text-neutral-400">
+                  This order has no captured online payment to reverse — cancelling it does not
+                  send a refund. Settle any cash or pay-at-store amount directly with the customer.
+                </p>
+              </div>
+            )}
+            {hasRefundableGatewayPayment && !canReleaseRefundDirectly && (
               <div className="p-3 rounded-2xl bg-neutral-950 border border-neutral-800">
                 <p className="text-[11px] text-neutral-400">
                   This screen cancels the order only — no refund is requested. A brand admin must

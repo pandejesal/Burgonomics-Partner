@@ -29,7 +29,14 @@ import { RefundDetails, PaymentTransaction, RefundStatus } from "./paymentsData"
 import { adminPaymentsService } from "../services/adminPaymentsService";
 import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
 import { releaseRefundThroughApi } from "../services/refundRelease";
-import { filterRefunds, getRefundRowActions, countQuarantinedRefunds } from "./refundsView";
+import {
+  filterRefunds,
+  getRefundRowActions,
+  countQuarantinedRefunds,
+  calculateRefundMetrics,
+  getWithdrawReasonExplanation,
+  type RefundTab,
+} from "./refundsView";
 import { checkRefundReleaseReadiness } from "../services/adminRefundContract";
 import { useAdmin } from "../hooks/useAdmin";
 import { canReleaseRefund, canRejectRefund, canRetryRefund } from "./refundRoles";
@@ -70,7 +77,7 @@ export const AdminRefundsPage: React.FC<AdminRefundsPageProps> = ({
 
   // UI state
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeTab, setActiveTab] = useState<"ALL" | "PENDING" | "COMPLETED" | "FAILED" | "REJECTED">("ALL");
+  const [activeTab, setActiveTab] = useState<RefundTab>("ALL");
 
   // Modal states
   const [approvingRefund, setApprovingRefund] = useState<RefundDetails | null>(null);
@@ -103,43 +110,9 @@ export const AdminRefundsPage: React.FC<AdminRefundsPageProps> = ({
     return filterRefunds(refunds, { activeTab, searchQuery });
   }, [refunds, searchQuery, activeTab]);
 
-  // Aggregate Metrics based on filtered list
+  // Aggregate Metrics based on filtered list (excludes UNKNOWN and WITHDRAWN amounts)
   const metrics = useMemo(() => {
-    const list = filteredRefunds;
-
-    const totalCount = list.length;
-    const totalVolume = list.reduce((sum, r) => sum + (r.amountPaise ?? 0), 0) / 100;
-
-    const pendingList = list.filter((r) => r.status === "PENDING");
-    const pendingCount = pendingList.length;
-    const pendingVolume = pendingList.reduce((sum, r) => sum + (r.amountPaise ?? 0), 0) / 100;
-
-    const completedList = list.filter((r) => r.status === "COMPLETED");
-    const completedCount = completedList.length;
-    const completedVolume = completedList.reduce((sum, r) => sum + (r.amountPaise ?? 0), 0) / 100;
-
-    const failedList = list.filter((r) => r.status === "FAILED");
-    const failedCount = failedList.length;
-    const failedVolume = failedList.reduce((sum, r) => sum + (r.amountPaise ?? 0), 0) / 100;
-
-    const rejectedList = list.filter((r) => r.status === "REJECTED");
-    const rejectedCount = rejectedList.length;
-    const rejectedVolume = rejectedList.reduce((sum, r) => sum + (r.amountPaise ?? 0), 0) / 100;
-
-    return {
-      totalCount,
-      totalVolume,
-      pendingCount,
-      pendingVolume,
-      completedCount,
-      completedVolume,
-      failedCount,
-      failedVolume,
-      rejectedCount,
-      rejectedVolume,
-      // Quarantined rows are counted but never folded into any money column.
-      unknownCount: countQuarantinedRefunds(list),
-    };
+    return calculateRefundMetrics(filteredRefunds);
   }, [filteredRefunds]);
 
   // Handlers
@@ -359,13 +332,13 @@ export const AdminRefundsPage: React.FC<AdminRefundsPageProps> = ({
         <AdminCard className="relative overflow-hidden border-l-4 border-l-[#0E4825]">
           <div className="absolute top-0 right-0 w-24 h-24 bg-primary/5 rounded-full blur-2xl" />
           <span className="block text-[9px] font-black text-primary uppercase tracking-widest font-mono">
-            COMPLETED SETTLEMENTS
+            GATEWAY ACCEPTED
           </span>
           <span className="block text-2xl font-black font-mono tracking-tight text-gray-900 mt-1 dark:text-white">
             {streamError ? "—" : `₹${metrics.completedVolume.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`}
           </span>
           <span className="block text-[10px] text-gray-400 font-mono mt-1">
-            {streamError ? "Unavailable" : `${metrics.completedCount} processed back to original sources`}
+            {streamError ? "Unavailable" : `${metrics.completedCount} accepted by the gateway — bank credit takes 5–7 working days`}
           </span>
         </AdminCard>
 
@@ -388,7 +361,7 @@ export const AdminRefundsPage: React.FC<AdminRefundsPageProps> = ({
         <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
           {/* Tabs */}
           <div className="flex gap-1.5 p-1 bg-gray-50 dark:bg-gray-900/50 rounded-2xl w-full sm:w-auto overflow-x-auto">
-            {(["ALL", "PENDING", "COMPLETED", "FAILED", "REJECTED"] as const).map((tab) => (
+            {(["ALL", "PENDING", "COMPLETED", "FAILED", "REJECTED", "WITHDRAWN"] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -398,7 +371,7 @@ export const AdminRefundsPage: React.FC<AdminRefundsPageProps> = ({
                     : "text-gray-400 hover:text-gray-900 dark:hover:text-white"
                 }`}
               >
-                {tab === "ALL" ? "All Payouts" : tab}
+                {tab === "ALL" ? "All Payouts" : tab === "WITHDRAWN" ? "Withdrawn" : tab}
               </button>
             ))}
           </div>
@@ -445,10 +418,11 @@ export const AdminRefundsPage: React.FC<AdminRefundsPageProps> = ({
               // PENDING and FAILED both obey the same readiness gate.
               const actions = getRefundRowActions(r);
 
-              let statusStyle: "active" | "pending" | "failed" | "warning" = "pending";
+              let statusStyle: "active" | "pending" | "failed" | "warning" | "neutral" = "pending";
               if (r.status === "COMPLETED") statusStyle = "active";
               else if (r.status === "FAILED") statusStyle = "failed";
               else if (r.status === "REJECTED" || r.status === "UNKNOWN") statusStyle = "warning";
+              else if (r.status === "WITHDRAWN") statusStyle = "neutral";
 
               const isPending = r.status === "PENDING";
               const isFailed = r.status === "FAILED";
@@ -469,7 +443,7 @@ export const AdminRefundsPage: React.FC<AdminRefundsPageProps> = ({
                       </span>
                     </div>
 
-                    <StatusBadge status={statusStyle} label={r.status} />
+                    <StatusBadge status={statusStyle} label={r.status === "WITHDRAWN" ? "Withdrawn" : r.status} />
                   </div>
 
                   {/* Customer, store, amount block */}
@@ -533,6 +507,21 @@ export const AdminRefundsPage: React.FC<AdminRefundsPageProps> = ({
                         <span className="text-[9px] block mt-0.5 leading-normal">
                           The stored status is missing or unrecognized. No release, retry, or
                           rejection is available until the backend record is reviewed.
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Withdrawn status — inactive review, no money action */}
+                  {r.status === "WITHDRAWN" && (
+                    <div className="p-3 bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-800 rounded-xl flex gap-2 text-gray-600 dark:text-gray-400">
+                      <Info size={14} className="shrink-0 mt-0.5 text-gray-400" />
+                      <div>
+                        <span className="font-bold block text-[10px] text-gray-700 dark:text-gray-300">
+                          Inactive review — review withdrawn
+                        </span>
+                        <span className="text-[9px] block mt-0.5 leading-normal">
+                          {getWithdrawReasonExplanation(r.withdrawReason, r.supersededBy)}
                         </span>
                       </div>
                     </div>
@@ -652,7 +641,7 @@ export const AdminRefundsPage: React.FC<AdminRefundsPageProps> = ({
           onClose={() => setApprovingRefund(null)}
           onConfirm={handleApproveRelease}
           title="Authorize Refund Clearance Payout?"
-          description={`Are you sure you want to approve the refund payout of ${approvingRefund.amountPaise != null ? `₹${(approvingRefund.amountPaise / 100).toFixed(2)}` : "unspecified amount"} for ${approvingRefund.customerName}? Payout will be processed back via Razorpay API instantly.`}
+          description={`Are you sure you want to approve the refund payout of ${approvingRefund.amountPaise != null ? `₹${(approvingRefund.amountPaise / 100).toFixed(2)}` : "unspecified amount"} for ${approvingRefund.customerName}? This submits the refund to Razorpay; bank credit usually takes 5–7 working days and is not instant.`}
           confirmLabel={isReleasing ? "Releasing…" : "Approve & Release"}
         />
       )}

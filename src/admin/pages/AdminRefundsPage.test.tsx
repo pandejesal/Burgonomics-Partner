@@ -424,3 +424,87 @@ describe("AdminRefundsPage - ledger search and live stream resilience", () => {
     expect(received[0][0].amountPaise).toBe(42000);
   });
 });
+
+describe("AdminRefundsPage - WITHDRAWN inactive review contract & metrics safety", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const buildWithdrawnRefund = (withdrawReason?: string, supersededBy?: string): RefundDetails =>
+    normalizeRefundDoc("refund_cancel_BUR-8201", {
+      orderId: "BUR-8201",
+      razorpayPaymentId: "pay_OK8eF3js92l1",
+      amountPaise: 42000,
+      status: "WITHDRAWN",
+      withdrawReason,
+      supersededBy,
+    } as any);
+
+  it("renders neutral 'Withdrawn' status badge and 'Inactive review' callout without action buttons", () => {
+    const refund = buildWithdrawnRefund("fully_refunded");
+    const actions = getRefundRowActions(refund);
+
+    expect(refund.status).toBe("WITHDRAWN");
+    expect(actions.isQuarantined).toBe(false);
+    expect(actions.canApprove).toBe(false);
+    expect(actions.canReject).toBe(false);
+    expect(actions.canRetry).toBe(false);
+
+    const html = renderPage([refund]);
+    expect(html).toContain("Withdrawn");
+    expect(html).toContain("Inactive review");
+    expect(html).not.toContain("Approve Payout");
+    expect(html).not.toContain("Retry Release");
+    expect(html).not.toMatch(/>\s*Reject\s*</);
+  });
+
+  it.each([
+    ["fully_refunded", undefined, "already fully refunded"],
+    ["superseded_by_decision", "rfnd_human_99", "superseded by an operator decision on request rfnd_human_99"],
+    ["superseded_by_decision", undefined, "superseded by an existing operator decision"],
+    ["superseded_by_existing_request", "rfnd_pos_88", "superseded by an active refund request (rfnd_pos_88)"],
+    ["superseded_by_existing_request", undefined, "superseded by an existing active refund request"],
+    ["refund_history_ambiguous", undefined, "Refund history for this order contains multiple or conflicting records"],
+    ["unknown_reason", undefined, "This review has been withdrawn and is inactive; no further payout action is available."],
+  ])("renders bounded explanation for reason %s with no claim of gateway/bank completion", (reason, supersededBy, expectedSnippet) => {
+    const refund = buildWithdrawnRefund(reason, supersededBy);
+    const html = renderPage([refund]);
+
+    expect(html).toContain(expectedSnippet);
+    // Must make NO claim that bank or gateway issued the refund
+    expect(html).not.toContain("Razorpay processed refund");
+    expect(html).not.toContain("bank completed");
+  });
+
+  it("excludes BOTH UNKNOWN and WITHDRAWN amounts from money metrics while preserving total claims count", () => {
+    const pending = normalizeRefundDoc("rfnd_pending_1", {
+      orderId: "BUR-101",
+      razorpayPaymentId: "pay_1",
+      amountPaise: 42000, // ₹420.00
+      status: "PENDING",
+    } as any);
+    const completed = normalizeRefundDoc("rfnd_completed_1", {
+      orderId: "BUR-102",
+      razorpayPaymentId: "pay_2",
+      amountPaise: 15000, // ₹150.00
+      status: "COMPLETED",
+    } as any);
+    const unknown = normalizeRefundDoc("rfnd_unknown_1", {
+      orderId: "BUR-103",
+      amountPaise: 50000, // ₹500.00 - MUST BE EXCLUDED from money metrics
+      status: "PROCESSING",
+    } as any);
+    const withdrawn = buildWithdrawnRefund("fully_refunded"); // 42000 paise (₹420.00) - MUST BE EXCLUDED
+
+    const html = renderPage([pending, completed, unknown, withdrawn]);
+
+    // Total claims count preserved (4 claims)
+    expect(html).toContain("4 overall claims filed");
+    // Total money volume: ₹570.00 (₹420 pending + ₹150 completed), NOT ₹1490
+    expect(html).toContain("₹570.00");
+    // Pending money volume: ₹420.00, 1 pending
+    expect(html).toContain("1 pending authorization");
+    // Completed money volume: ₹150.00, 1 processed/accepted by gateway
+    expect(html).toContain("1 accepted by the gateway");
+  });
+});

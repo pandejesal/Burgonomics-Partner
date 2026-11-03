@@ -1,5 +1,14 @@
 import { buildAdminRefundKey } from "@/utils/refundRequestIdentity";
-import type { RefundDetails, RefundStatus } from "../pages/paymentsData";
+import type { RefundDetails, RefundStatus, RefundWithdrawReason } from "../pages/paymentsData";
+
+export const KNOWN_WITHDRAW_REASONS = [
+  "fully_refunded",
+  "superseded_by_decision",
+  "superseded_by_existing_request",
+  "refund_history_ambiguous",
+] as const;
+
+export type { RefundWithdrawReason };
 
 export interface RawRefundDoc {
   id?: string;
@@ -13,6 +22,8 @@ export interface RawRefundDoc {
   reason?: string | null;
   detail?: string | null;
   status?: string | null;
+  withdrawReason?: unknown;
+  supersededBy?: string | null;
   disposition?: {
     decision?: string | null;
     reason?: string | null;
@@ -149,6 +160,7 @@ export function normalizeRefundStatus(rawStatus: unknown, rawDisposition?: unkno
 
   if (typeof rawStatus === "string") {
     const s = rawStatus.trim().toUpperCase();
+    if (s === "WITHDRAWN") return "WITHDRAWN";
     if (s === "REJECTED") return "REJECTED";
     if (s === "COMPLETED") return "COMPLETED";
     if (s === "FAILED") return "FAILED";
@@ -265,6 +277,20 @@ export function normalizeRefundDoc(id: string, raw: RawRefundDoc): RefundDetails
   const createdAt = normalizeDisplayTime(raw.createdAt);
   const completedAt = raw.completedAt ? normalizeDisplayTime(raw.completedAt) : null;
 
+  const withdrawReason =
+    status === "WITHDRAWN" &&
+    typeof raw.withdrawReason === "string" &&
+    (KNOWN_WITHDRAW_REASONS as readonly string[]).includes(raw.withdrawReason)
+      ? (raw.withdrawReason as RefundWithdrawReason)
+      : null;
+
+  const supersededBy =
+    status === "WITHDRAWN" &&
+    typeof raw.supersededBy === "string" &&
+    raw.supersededBy.trim().length > 0
+      ? raw.supersededBy.trim()
+      : null;
+
   return {
     id: safeId,
     paymentId,
@@ -282,6 +308,8 @@ export function normalizeRefundDoc(id: string, raw: RawRefundDoc): RefundDetails
     razorpayPaymentId: paymentId || undefined,
     branchId: typeof raw.branchId === "string" ? raw.branchId : null,
     detail: typeof raw.detail === "string" ? raw.detail : null,
+    withdrawReason,
+    supersededBy,
   };
 }
 
@@ -324,6 +352,8 @@ export function checkRefundReleaseReadiness(r: RefundDetails): RefundReleaseRead
       disabledReason:
         r.status === "UNKNOWN"
           ? "Refund status is unrecognized — quarantined for review. No money action is available."
+          : r.status === "WITHDRAWN"
+          ? "Refund review was withdrawn — inactive review, no further payout action is available."
           : `Refund is already ${r.status} — no further payout action is available.`,
     };
   }

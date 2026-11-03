@@ -67,7 +67,19 @@ export interface TransactionDetails {
   }>;
 }
 
-export type RefundStatus = "PENDING" | "COMPLETED" | "FAILED" | "REJECTED" | "UNKNOWN";
+export type RefundWithdrawReason =
+  | "fully_refunded"
+  | "superseded_by_decision"
+  | "superseded_by_existing_request"
+  | "refund_history_ambiguous";
+
+export type RefundStatus =
+  | "PENDING"
+  | "COMPLETED"
+  | "FAILED"
+  | "REJECTED"
+  | "UNKNOWN"
+  | "WITHDRAWN";
 
 export interface RefundDetails {
   id: string;
@@ -87,6 +99,8 @@ export interface RefundDetails {
   razorpayPaymentId?: string;
   branchId?: string | null;
   detail?: string | null;
+  withdrawReason?: RefundWithdrawReason | null;
+  supersededBy?: string | null;
 }
 
 export interface DiscrepancyDetails {

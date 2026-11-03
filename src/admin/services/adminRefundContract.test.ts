@@ -224,6 +224,67 @@ describe("adminRefundContract - Authoritative POS Cancel & Data Normalization", 
     });
   });
 
+  describe("withdrawn machine-owned reviews are distinct and nonactionable", () => {
+    const baseDoc = {
+      orderId: "BUR-8201",
+      razorpayPaymentId: "pay_OK8eF3js92l1",
+      amountPaise: 42000,
+      status: "WITHDRAWN",
+    };
+
+    it("recognizes WITHDRAWN without promoting it to pending, completed, or rejected", () => {
+      expect(normalizeRefundStatus("WITHDRAWN")).toBe("WITHDRAWN");
+      expect(normalizeRefundStatus(" withdrawn ")).toBe("WITHDRAWN");
+      expect(normalizeRefundStatus("WITHDRAWN", { decision: "rejected" })).toBe("WITHDRAWN");
+    });
+
+    it.each([
+      "fully_refunded",
+      "superseded_by_decision",
+      "superseded_by_existing_request",
+      "refund_history_ambiguous",
+    ])("preserves the bounded reason %s and the actual references without authorizing payout", (withdrawReason) => {
+      const normalized = normalizeRefundDoc("refund_cancel_BUR-8201", { ...baseDoc, withdrawReason });
+
+      expect(normalized).toMatchObject({
+        id: "refund_cancel_BUR-8201",
+        orderId: "BUR-8201",
+        paymentId: "pay_OK8eF3js92l1",
+        amountPaise: 42000,
+        status: "WITHDRAWN",
+        withdrawReason,
+        completedAt: null,
+        gatewayStatus: "",
+      });
+      const readiness = checkRefundReleaseReadiness(normalized);
+      expect(readiness.canRelease).toBe(false);
+      expect(readiness.disabledReason).toContain("inactive review");
+      expect(readiness.refundRequestId).toBeUndefined();
+      expect(readiness.amountRupees).toBeUndefined();
+    });
+
+    it.each([undefined, null, "", "new_internal_reason", "FULLY_REFUNDED", "__proto__", "<img src=x onerror=alert(1)>", 42, {}])(
+      "drops an unknown or malformed withdrawal reason (%j) instead of exposing internal text",
+      (withdrawReason) => {
+        const normalized = normalizeRefundDoc("refund_inactive", { ...baseDoc, withdrawReason });
+
+        expect(normalized).toMatchObject({ status: "WITHDRAWN", withdrawReason: null });
+        expect(checkRefundReleaseReadiness(normalized).canRelease).toBe(false);
+      },
+    );
+
+    it("does not turn an unknown status into a recognized status because withdrawal metadata is present", () => {
+      const normalized = normalizeRefundDoc("refund_unrecognized", {
+        ...baseDoc,
+        status: "WITHDRAWNN",
+        withdrawReason: "fully_refunded",
+      });
+
+      expect(normalized).toMatchObject({ status: "UNKNOWN", withdrawReason: null });
+      expect(checkRefundReleaseReadiness(normalized).canRelease).toBe(false);
+    });
+  });
+
   describe("Firestore document id is preserved verbatim", () => {
     const baseDoc = {
       orderId: "BUR-8201",
