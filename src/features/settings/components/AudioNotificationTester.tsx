@@ -91,26 +91,26 @@ export function AudioNotificationTester() {
 
   return (
     <div className="p-6 rounded-3xl bg-[#0E4825]/10 border border-emerald-500/30 space-y-6 text-white">
-      <div className="flex items-center justify-between border-b border-neutral-800 pb-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-2xl bg-[#0E4825] border border-emerald-500/40 text-emerald-300">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:justify-between border-b border-neutral-800 pb-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="p-2.5 rounded-2xl bg-[#0E4825] border border-emerald-500/40 text-emerald-300 shrink-0">
             <Volume2 className="w-5 h-5" />
           </div>
-          <div>
-            <h2 className="text-base font-black tracking-tight text-white flex items-center gap-2">
+          <div className="min-w-0">
+            <h2 className="text-base font-black tracking-tight text-white flex flex-wrap items-center gap-2 min-w-0 break-words">
               <span>Acoustic Chime & Browser Notification Test</span>
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/40 text-emerald-400 font-mono font-bold">
                 High Priority Alert
               </span>
             </h2>
-            <p className="text-xs text-neutral-400">
+            <p className="text-xs text-neutral-400 min-w-0 break-words">
               Preview the kitchen chime, set the local mute, and manage browser notification permission
             </p>
           </div>
         </div>
 
         {/* Permission Status Badges */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 max-w-full">
           <span
             className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${
               isAudioUnlocked

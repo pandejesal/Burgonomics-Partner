@@ -148,3 +148,22 @@ describe('B1: the chime toast/badge never claim a tone that did not play', () =>
     expect(errorMessage()).toMatch(/could not be unlocked/i);
   });
 });
+
+describe('mobile header wraps without overflow', () => {
+  it('keeps the title, description, header, and badges responsive', () => {
+    const html = renderToStaticMarkup(<AudioNotificationTester />);
+
+    expect(html).toContain('Acoustic Chime &amp; Browser Notification Test');
+    expect(html).toContain('Preview the kitchen chime, set the local mute, and manage browser notification permission');
+    expect(html).toContain('High Priority Alert');
+    expect(html).toContain('Audio:');
+    expect(html).toContain('Notifications:');
+
+    // The measured mobile offenders must be able to wrap/shrink/stack.
+    expect(html).toMatch(/flex-col[^"]*sm:flex-row/);
+    expect(html).toMatch(/flex-wrap[^"]*max-w-full/);
+    expect(html).toMatch(/min-w-0/);
+    expect(html).toMatch(/break-words/);
+    expect(html).not.toMatch(/overflow-hidden/);
+  });
+});
