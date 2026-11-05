@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import { useAppStore } from '@/stores/appStore';
@@ -43,9 +43,52 @@ import {
 } from 'lucide-react';
 import type { Order, OrderType, OrderStatus } from '@/types';
 
+const useSafeLayoutEffect =
+  typeof window !== 'undefined' && typeof window.document !== 'undefined'
+    ? React.useLayoutEffect
+    : useEffect;
+
 export function KDSPage() {
   const { user } = useAuthStore();
   const { selectedBranchId, setSelectedBranchId } = useAppStore();
+
+  const headerRef = useRef<HTMLElement | null>(null);
+  const [isHeaderSticky, setIsHeaderSticky] = useState(false);
+
+  useSafeLayoutEffect(() => {
+    if (typeof ResizeObserver === 'undefined') {
+      setIsHeaderSticky(false);
+      return;
+    }
+    const el = headerRef.current;
+    if (!el) return;
+
+    const measure = () => {
+      const height = el.getBoundingClientRect().height || el.offsetHeight || 0;
+      const vh = typeof window !== 'undefined' ? window.innerHeight || 0 : 0;
+      const shouldPin = height > 0 && vh > 0 && height < vh / 2;
+      setIsHeaderSticky((prev) => (prev !== shouldPin ? shouldPin : prev));
+    };
+
+    measure();
+
+    const ro = new ResizeObserver(() => {
+      measure();
+    });
+    try {
+      ro.observe(el, { box: 'border-box' });
+    } catch {
+      ro.observe(el);
+    }
+
+    const onResize = () => measure();
+    window.addEventListener('resize', onResize);
+
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', onResize);
+    };
+  }, []);
 
   const {
     isOnline,
@@ -412,7 +455,10 @@ export function KDSPage() {
           12px rhythm instead of sitting under the status bar (verified at
           360 CSS px: header top0/paddingTop12 in DEVICE_CHECKS.md). */}
       <header
-        className="px-4 py-3 bg-[#0A0A0A] border-b border-neutral-800 flex flex-wrap items-center justify-between gap-3 sticky top-0 z-40"
+        ref={headerRef}
+        className={`px-4 py-3 bg-[#0A0A0A] border-b border-neutral-800 flex flex-wrap items-center justify-between gap-3 ${
+          isHeaderSticky ? 'sticky top-0 z-40' : 'relative z-40'
+        }`}
         style={{ paddingTop: 'calc(var(--safe-area-inset-top, env(safe-area-inset-top, 0px)) + 0.75rem)' }}
       >
         <div className="flex flex-wrap items-center gap-2 sm:gap-3 min-w-0">

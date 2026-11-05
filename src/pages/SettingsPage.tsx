@@ -61,14 +61,14 @@ export function SettingsPage() {
 
       {/* 4. Operator Profile & Auth Role Card */}
       <div className="p-6 rounded-3xl bg-neutral-900 border border-neutral-800 space-y-4 text-white">
-        <div className="flex items-center justify-between border-b border-neutral-800 pb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-[#0E4825] border border-emerald-500/40 flex items-center justify-center text-emerald-300 font-black text-lg">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:justify-between border-b border-neutral-800 pb-4">
+          <div className="flex flex-wrap sm:flex-nowrap items-start sm:items-center gap-3 min-w-0">
+            <div className="w-11 h-11 rounded-2xl bg-[#0E4825] border border-emerald-500/40 flex items-center justify-center text-emerald-300 font-black text-lg shrink-0">
               {user?.name?.slice(0, 1).toUpperCase() || 'B'}
             </div>
-            <div>
-              <h3 className="font-black text-base text-white">{user?.name || 'Store Operator'}</h3>
-              <p className="text-xs text-emerald-400 font-bold">
+            <div className="min-w-0">
+              <h3 className="font-black text-base text-white break-words min-w-0">{user?.name || 'Store Operator'}</h3>
+              <p className="text-xs text-emerald-400 font-bold break-words">
                 {roleLabels[user?.role || 'branch_staff'] || user?.role}
               </p>
             </div>
@@ -77,7 +77,7 @@ export function SettingsPage() {
           <button
             type="button"
             onClick={() => signOut()}
-            className="px-3.5 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900 border border-rose-800/60 text-rose-300 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+            className="px-3.5 py-2 rounded-xl bg-rose-950/60 hover:bg-rose-900 border border-rose-800/60 text-rose-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer shrink-0 self-start sm:self-auto"
           >
             <LogOut className="w-3.5 h-3.5" />
             <span>Sign Out</span>
@@ -112,10 +112,10 @@ export function SettingsPage() {
       <LegalLinks />
 
       {/* 5. System Diagnostics & Info */}
-      <div className="p-4 rounded-2xl bg-neutral-950 border border-neutral-850 flex items-center justify-between text-xs text-neutral-400">
-        <div className="flex items-center gap-2">
-          <Smartphone className="w-4 h-4 text-[#FF6600]" />
-          <span>Burgonomics Partner POS • v2.4.0</span>
+      <div className="p-4 rounded-2xl bg-neutral-950 border border-neutral-850 flex flex-wrap items-center justify-between gap-3 text-xs text-neutral-400">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
+          <Smartphone className="w-4 h-4 text-[#FF6600] shrink-0" />
+          <span className="break-words min-w-0">Burgonomics Partner POS • v2.4.0</span>
         </div>
 
         {canViewDiagnostics && <button

@@ -89,19 +89,19 @@ export function ThermalPrinterSettings() {
 
   return (
     <div className="p-6 rounded-3xl bg-[#0E4825]/10 border border-emerald-500/30 space-y-6 text-white">
-      <div className="flex items-center justify-between border-b border-neutral-800 pb-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-2xl bg-[#0E4825] border border-emerald-500/40 text-emerald-300">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:justify-between border-b border-neutral-800 pb-4">
+        <div className="flex flex-wrap sm:flex-nowrap items-start sm:items-center gap-3 min-w-0">
+          <div className="p-2.5 rounded-2xl bg-[#0E4825] border border-emerald-500/40 text-emerald-300 shrink-0">
             <Printer className="w-5 h-5" />
           </div>
-          <div>
-            <h2 className="text-base font-black tracking-tight text-white flex items-center gap-2">
+          <div className="min-w-0">
+            <h2 className="text-base font-black tracking-tight text-white flex flex-wrap items-center gap-2 min-w-0 break-words">
               <span>Thermal KOT Printer Configuration</span>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/40 text-emerald-400 font-mono font-bold">
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/40 text-emerald-400 font-mono font-bold shrink-0">
                 ESC/POS Ready
               </span>
             </h2>
-            <p className="text-xs text-neutral-400">
+            <p className="text-xs text-neutral-400 min-w-0 break-words">
               Configure 80mm/58mm thermal receipts, auto-print triggers, and interface connections
             </p>
           </div>
@@ -111,7 +111,7 @@ export function ThermalPrinterSettings() {
           type="button"
           disabled={isTestingPrint}
           onClick={handleTestPrint}
-          className="px-4 py-2 rounded-xl bg-[#FF6600] hover:bg-[#e05a00] text-white font-black text-xs uppercase tracking-wider shadow-md transition-all active:scale-95 cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+          className="px-4 py-2 rounded-xl bg-[#FF6600] hover:bg-[#e05a00] text-white font-black text-xs uppercase tracking-wider shadow-md transition-all active:scale-95 cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5 shrink-0 self-start sm:self-auto"
         >
           <Printer className="w-3.5 h-3.5" />
           <span>{isTestingPrint ? 'Printing Slip...' : 'Test Print KOT'}</span>
@@ -124,7 +124,7 @@ export function ThermalPrinterSettings() {
           <label className="block text-xs font-bold uppercase text-neutral-400">
             Paper Roll Width
           </label>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <button
               type="button"
               onClick={() => setConfig((prev) => ({ ...prev, paperSize: '80mm' }))}
@@ -209,30 +209,30 @@ export function ThermalPrinterSettings() {
 
       {/* Auto-print & Copy toggles */}
       <div className="pt-2 border-t border-neutral-800/80 grid grid-cols-1 md:grid-cols-2 gap-4">
-        <label className="flex items-start gap-3 p-3 rounded-2xl bg-neutral-900/60 border border-neutral-800 cursor-pointer">
+        <label className="flex items-start gap-3 p-3 rounded-2xl bg-neutral-900/60 border border-neutral-800 cursor-pointer min-w-0">
           <input
             type="checkbox"
             checked={config.autoPrintKOT}
             onChange={(e) => setConfig((prev) => ({ ...prev, autoPrintKOT: e.target.checked }))}
-            className="mt-0.5 rounded border-neutral-700 text-[#0E4825] focus:ring-0 cursor-pointer"
+            className="mt-0.5 rounded border-neutral-700 text-[#0E4825] focus:ring-0 cursor-pointer shrink-0"
           />
-          <div>
-            <span className="font-bold text-white text-xs block">
+          <div className="min-w-0">
+            <span className="font-bold text-white text-xs block break-words">
               Auto-Print KOT on Incoming Online Orders
             </span>
-            <span className="text-[11px] text-neutral-400">
+            <span className="text-[11px] text-neutral-400 break-words">
               Instantly prints kitchen slip when order lands on Makeline stream
             </span>
           </div>
         </label>
 
-        <div className="flex items-center justify-between p-3 rounded-2xl bg-neutral-900/60 border border-neutral-800">
-          <div>
-            <span className="font-bold text-white text-xs block">Print Copies per Order</span>
-            <span className="text-[11px] text-neutral-400">1x Kitchen only, 2x Kitchen + Customer</span>
+        <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-2xl bg-neutral-900/60 border border-neutral-800 min-w-0">
+          <div className="min-w-0">
+            <span className="font-bold text-white text-xs block break-words">Print Copies per Order</span>
+            <span className="text-[11px] text-neutral-400 break-words">1x Kitchen only, 2x Kitchen + Customer</span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             {[1, 2].map((num) => (
               <button
                 key={num}

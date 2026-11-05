@@ -92,14 +92,14 @@ export function AudioNotificationTester() {
   return (
     <div className="p-6 rounded-3xl bg-[#0E4825]/10 border border-emerald-500/30 space-y-6 text-white">
       <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:justify-between border-b border-neutral-800 pb-4">
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="flex flex-wrap sm:flex-nowrap items-start sm:items-center gap-3 min-w-0">
           <div className="p-2.5 rounded-2xl bg-[#0E4825] border border-emerald-500/40 text-emerald-300 shrink-0">
             <Volume2 className="w-5 h-5" />
           </div>
           <div className="min-w-0">
             <h2 className="text-base font-black tracking-tight text-white flex flex-wrap items-center gap-2 min-w-0 break-words">
               <span>Acoustic Chime & Browser Notification Test</span>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/40 text-emerald-400 font-mono font-bold">
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/40 text-emerald-400 font-mono font-bold shrink-0">
                 High Priority Alert
               </span>
             </h2>
@@ -143,11 +143,11 @@ export function AudioNotificationTester() {
             <span className="font-mono font-bold text-xs text-[#4ADE80]">{isMuted ? 'Muted' : `${volume}%`}</span>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0 max-w-full">
             <button
               type="button"
               onClick={() => handleToggleMute(!isMuted)}
-              className="p-2 rounded-xl bg-neutral-900 border border-neutral-700 text-neutral-300 hover:text-white cursor-pointer"
+              className="p-2 rounded-xl bg-neutral-900 border border-neutral-700 text-neutral-300 hover:text-white cursor-pointer shrink-0"
               title={isMuted ? 'Unmute' : 'Mute'}
             >
               {isMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
@@ -160,7 +160,7 @@ export function AudioNotificationTester() {
               value={isMuted ? 0 : volume}
               disabled={isMuted}
               onChange={(e) => setVolume(Number(e.target.value))}
-              className="flex-1 accent-[#FF6600] h-2 bg-neutral-800 rounded-lg cursor-pointer"
+              className="flex-1 min-w-0 w-full accent-[#FF6600] h-2 bg-neutral-800 rounded-lg cursor-pointer"
             />
           </div>
 
@@ -169,18 +169,18 @@ export function AudioNotificationTester() {
             system volume (use your device volume).
           </p>
 
-          <div className="flex items-center justify-between pt-1">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pt-1 max-w-full min-w-0">
             <button
               type="button"
               disabled={isPlayingTest}
               onClick={handleTestChime}
-              className="px-3.5 py-2 rounded-xl bg-[#0E4825] hover:bg-[#135d30] text-emerald-300 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+              className="px-3.5 py-2 rounded-xl bg-[#0E4825] hover:bg-[#135d30] text-emerald-300 font-bold text-xs flex items-center justify-center sm:justify-start gap-1.5 transition-colors cursor-pointer disabled:opacity-50 shrink-0 self-start sm:self-auto max-w-full min-w-0"
             >
               <Play className="w-3.5 h-3.5" />
               <span>{isPlayingTest ? 'Playing Chime...' : 'Test Kitchen Chime'}</span>
             </button>
 
-            <p className="text-[11px] font-semibold text-neutral-300 text-right">
+            <p className="text-[11px] font-semibold text-neutral-300 text-left sm:text-right break-words min-w-0 max-w-full">
               {`Pending-order alarm repeats every ${KDS_ALARM_REPEAT_MS / 1000}s until acknowledged.`}
             </p>
           </div>

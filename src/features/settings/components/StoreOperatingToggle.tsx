@@ -102,16 +102,16 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
 
   return (
     <div className="p-6 rounded-3xl bg-[#0E4825]/10 border border-emerald-500/30 space-y-6 text-white">
-      <div className="flex items-center justify-between border-b border-neutral-800 pb-4">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-2xl bg-[#0E4825] border border-emerald-500/40 text-emerald-300">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:justify-between border-b border-neutral-800 pb-4">
+        <div className="flex flex-wrap sm:flex-nowrap items-start sm:items-center gap-3 min-w-0">
+          <div className="p-2.5 rounded-2xl bg-[#0E4825] border border-emerald-500/40 text-emerald-300 shrink-0">
             <Store className="w-5 h-5" />
           </div>
-          <div>
-            <h2 className="text-base font-black tracking-tight text-white flex items-center gap-2">
+          <div className="min-w-0">
+            <h2 className="text-base font-black tracking-tight text-white flex flex-wrap items-center gap-2 min-w-0 break-words">
               <span>Store Operating Status & Surge Controls</span>
               <span
-                className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold border ${
+                className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold border shrink-0 ${
                   !branch
                     ? 'bg-zinc-900 border-zinc-600 text-zinc-300'
                     : status === 'open'
@@ -124,14 +124,14 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
                 {branch ? status.toUpperCase() : 'NO OUTLET'}
               </span>
             </h2>
-            <p className="text-xs text-neutral-400">
+            <p className="text-xs text-neutral-400 min-w-0 break-words">
               Live online ordering toggle, kitchen prep time buffer, and emergency rush pause
             </p>
           </div>
         </div>
 
         {emergencyReason && (
-          <span className="text-xs px-3 py-1 rounded-xl bg-amber-950/80 border border-amber-800/60 text-amber-300 font-bold">
+          <span className="text-xs px-3 py-1 rounded-xl bg-amber-950/80 border border-amber-800/60 text-amber-300 font-bold shrink-0 self-start sm:self-auto">
             Active: {emergencyReason}
           </span>
         )}
@@ -195,34 +195,34 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
           <label className="block text-xs font-bold uppercase text-neutral-400">
             Emergency Store Pause Controls
           </label>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <button
               type="button"
               onClick={() => handleUpdateStatus('busy', '30 Mins Rush Break', 40)}
-              className="px-3 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-200 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="px-3 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-200 font-bold text-xs flex items-center justify-center sm:justify-start gap-1.5 transition-colors cursor-pointer min-w-0"
             >
-              <Flame className="w-3.5 h-3.5 text-orange-400" />
-              <span>30m Rush Break</span>
+              <Flame className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+              <span className="break-words min-w-0">30m Rush Break</span>
             </button>
 
             <button
               type="button"
               onClick={() => handleUpdateStatus('closed', '1 Hour Rain Pause', 0)}
-              className="px-3 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-200 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="px-3 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-200 font-bold text-xs flex items-center justify-center sm:justify-start gap-1.5 transition-colors cursor-pointer min-w-0"
             >
-              <CloudRain className="w-3.5 h-3.5 text-cyan-400" />
-              <span>1h Rain Pause</span>
+              <CloudRain className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <span className="break-words min-w-0">1h Rain Pause</span>
             </button>
           </div>
         </div>
 
         {/* Prep Time Slider */}
         <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <label htmlFor="prepTimeSlider" className="text-xs font-bold uppercase text-neutral-400">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label htmlFor="prepTimeSlider" className="text-xs font-bold uppercase text-neutral-400 min-w-0">
               Kitchen Preparation Time Buffer
             </label>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 min-w-0 max-w-full">
               {prepDirty && (
                 <span className="text-[10px] font-bold uppercase text-amber-400">Unsaved</span>
               )}
@@ -231,7 +231,7 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
                 type="button"
                 onClick={savePrepTime}
                 disabled={!prepDirty || updateBranchSettings.isPending}
-                className="px-3 py-1.5 rounded-lg bg-[#0E4825] text-white text-[11px] font-black disabled:opacity-50 cursor-pointer"
+                className="px-3 py-1.5 rounded-lg bg-[#0E4825] text-white text-[11px] font-black disabled:opacity-50 cursor-pointer min-w-0 max-w-full break-words"
               >
                 {updateBranchSettings.isPending ? 'Saving…' : 'Save prep time'}
               </button>
@@ -247,7 +247,7 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
             value={prepTime}
             onChange={(e) => setPrepTime(Number(e.target.value))}
             disabled={!branch?.id}
-            className="w-full accent-[#FF6600] h-2 bg-neutral-800 rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full accent-[#FF6600] h-2 bg-neutral-800 rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed min-w-0"
           />
           {!branch?.id && (
             <p className="text-[10px] text-amber-400">

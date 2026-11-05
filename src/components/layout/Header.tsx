@@ -72,7 +72,7 @@ export function Header() {
         {badgeBranchId ? (
           <PetpoojaStatusBadge branchId={badgeBranchId} />
         ) : (
-          <span className="flex shrink-0 items-center bg-surface/80 border border-border px-2 sm:px-2.5 py-1.5 rounded-full text-xs text-zinc-400">
+          <span className="flex min-w-0 items-center bg-surface/80 border border-border px-2 sm:px-2.5 py-1.5 rounded-full text-xs text-zinc-400 break-words">
             Petpooja POS: select an outlet
           </span>
         )}

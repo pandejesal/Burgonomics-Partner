@@ -129,8 +129,8 @@ export function OrdersPage() {
     <div className="space-y-6 pb-12">
       {/* Top Operations Header */}
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-white tracking-wide flex items-center gap-2.5">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold text-white tracking-wide flex flex-wrap items-center gap-2.5 min-w-0 max-w-full">
             <span>Live Orders & Petpooja Billing</span>
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#0E4825] border border-emerald-500/40 text-emerald-300 font-bold">
               Auto-refreshes every 30s
