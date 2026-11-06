@@ -42,6 +42,22 @@ const STATUS_CHIPS: Array<{ key: OrderStatus | 'all'; label: string }> = [
   { key: 'cancelled', label: 'Cancelled' },
 ];
 
+function revealFocusedFilter(event: React.FocusEvent<HTMLDivElement>) {
+  const strip = event.currentTarget;
+  const control = event.target;
+  if (!(control instanceof HTMLElement) || control === strip || strip.clientWidth <= 8) return;
+  const viewport = strip.getBoundingClientRect();
+  const target = control.getBoundingClientRect();
+  const left = viewport.left + strip.clientLeft + 4;
+  const right = viewport.left + strip.clientLeft + strip.clientWidth - 4;
+  // Native focus can leave only a sliver of a chip inside this local scroller.
+  // Reveal it without activating a filter or changing the document's scroll.
+  const delta = target.width > right - left || target.left < left
+    ? target.left - left
+    : Math.max(0, target.right - right);
+  if (delta) strip.scrollLeft += delta;
+}
+
 export function OrderFiltersBar({
   channelFilter,
   onChannelChange,
@@ -117,7 +133,7 @@ export function OrderFiltersBar({
       {/* Row 2: Channel Filter Tabs & Status Chips */}
       <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 border-t border-neutral-800/80 pt-3">
         {/* Fulfillment Channel Tabs */}
-        <div className="flex items-center gap-1 p-1 rounded-xl bg-neutral-950 border border-neutral-800 overflow-x-auto max-w-full">
+        <div className="flex items-center gap-1 p-1 rounded-xl bg-neutral-950 border border-neutral-800 overflow-x-auto max-w-full" onFocusCapture={revealFocusedFilter}>
           <button
             type="button"
             onClick={() => onChannelChange('all')}
@@ -173,6 +189,7 @@ export function OrderFiltersBar({
         {/* Payment stream chips: Razorpay / Cash & counter / Unpaid */}
         <div
           className="flex items-center gap-1.5 overflow-x-auto max-w-full pb-1 lg:pb-0"
+          onFocusCapture={revealFocusedFilter}
           role="group"
           aria-label="Filter by payment stream"
         >
@@ -204,7 +221,7 @@ export function OrderFiltersBar({
         </div>
 
         {/* Status Chips */}
-        <div className="flex items-center gap-1.5 overflow-x-auto max-w-full pb-1 lg:pb-0">
+        <div className="flex items-center gap-1.5 overflow-x-auto max-w-full pb-1 lg:pb-0" onFocusCapture={revealFocusedFilter}>
           {STATUS_CHIPS.map((chip) => {
             const isActive = statusFilter === chip.key;
             return (

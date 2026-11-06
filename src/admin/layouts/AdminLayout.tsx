@@ -65,6 +65,12 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({ children }) => {
       perm: "admin.orders.view",
     },
     {
+      label: "Refunds",
+      icon: CreditCard,
+      to: "/admin/refunds",
+      perm: "admin.developer",
+    },
+    {
       label: "Petpooja POS Bridge",
       icon: RefreshCw,
       to: "/admin/petpooja",

@@ -7,16 +7,22 @@ import { BranchSwitcher } from './BranchSwitcher';
 import { NAV_TOGGLE_ID, SIDEBAR_ID } from './Sidebar';
 import { PetpoojaStatusBadge } from '@/components/ui/PetpoojaStatusBadge';
 import { Logo } from '@/components/ui/Logo';
+import { useRootHeightVar } from '@/hooks/useRootHeightVar';
 
 export function Header() {
   const { toggleSidebar, selectedBranchId, sidebarOpen } = useAppStore();
   const { signOut, user } = useAuthStore();
+  // `sticky top-0`, and taller than one row on phones / at 200% text.
+  // Publishing the measured height is what lets root scroll-padding keep a
+  // focused control from landing under it.
+  const chromeRef = useRootHeightVar('--top-chrome-height');
 
   const badgeBranchId =
     selectedBranchId && selectedBranchId !== 'all' ? selectedBranchId : user?.branchIds?.[0];
 
   return (
     <header
+      ref={chromeRef}
       className="bg-bg border-b border-[#1E3A24] flex flex-col gap-2 px-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3 sm:px-4 lg:px-6 sticky top-0 z-30 shadow-md"
       style={{
         minHeight: 'calc(4rem + var(--safe-area-inset-top, env(safe-area-inset-top, 0px)))',

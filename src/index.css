@@ -2,6 +2,18 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/*
+ * WCAG 2.2 SC 2.4.11 (Focus Not Obscured): the sticky Header overlays the top
+ * of the document scroller. Without top scroll padding the browser only scrolls
+ * a Tab-focused control as far as the viewport edge, leaving it underneath the
+ * bar — measured on `/orders` in the hosted 56-row matrix. The height is
+ * published by the Header itself because it wraps to more than one row on
+ * phones and grows further at 200% text, so a constant would be wrong.
+ */
+html {
+  scroll-padding-top: calc(var(--top-chrome-height, 0px) + 8px);
+}
+
 @font-face {
   font-family: "Inter";
   src: url("/fonts/InterVariable.woff2") format("woff2");
