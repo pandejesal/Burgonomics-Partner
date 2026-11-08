@@ -5,7 +5,7 @@ const path = require('node:path');
 // No YAML dependency in this app: check executable step blocks, not comments.
 // YAML syntax itself is also checked by Actions and the local Python validation.
 const source = fs.readFileSync(path.join(__dirname, '../.github/workflows/ios-build.yml'), 'utf8');
-const step = name => source.split(`      - name: ${name}\n`)[1]?.split('\n      - ')[0] || '';
+const step = (name, text = source) => text.replace(/\r\n/g, '\n').split(`      - name: ${name}\n`)[1]?.split('\n      - ')[0] || '';
 test('partner real staging is explicit and excludes compile fixture', () => {
   assert.match(source, /real_staging:[\s\S]*?type: boolean\s+default: false/);
   const fixture = step('Prepare simulator-only compile fixture');
@@ -27,4 +27,19 @@ test('partner smoke cannot pass on compilation alone', () => {
   assert.match(launch, /launchctl list/);
   assert.match(launch, /scope\.txt/);
   assert.match(step('Upload launch evidence'), /if: always\(\)[\s\S]*actions\/upload-artifact/);
+});
+
+for (const [label, newline] of [['LF', '\n'], ['CRLF', '\r\n']]) {
+  test(`named workflow steps are bounded correctly with ${label} line endings`, () => {
+    const fixture = ['      - name: Guard fixture', '        run: enforce-guard',
+      '      - name: Next fixture', '        run: other-command'].join(newline);
+    const block = step('Guard fixture', fixture);
+    assert.match(block, /run: enforce-guard/);
+    assert.doesNotMatch(block, /Next fixture|other-command/);
+  });
+}
+
+test('missing workflow steps stay empty so the real guard assertions fail', () => {
+  assert.equal(step('Absent fixture', '      - name: Other fixture\r\n        run: other-command'), '');
+  assert.throws(() => assert.match(step('Absent fixture', ''), /workflow_dispatch/));
 });

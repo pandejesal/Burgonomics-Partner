@@ -7,7 +7,6 @@ import { Spinner } from '@/components/ui/Spinner';
 interface DeliveryOtpModalProps {
   orderId: string;
   customerName?: string;
-  allowDemoSkip: boolean;
   onVerified: (orderId: string) => void;
   onClose: () => void;
 }
@@ -15,7 +14,6 @@ interface DeliveryOtpModalProps {
 export function DeliveryOtpModal({
   orderId,
   customerName,
-  allowDemoSkip,
   onVerified,
   onClose,
 }: DeliveryOtpModalProps) {
@@ -107,15 +105,13 @@ export function DeliveryOtpModal({
           </button>
         </div>
 
-        {allowDemoSkip && (
-          <button
-            type="button"
-            onClick={() => onVerified(orderId)}
-            className="mt-3 w-full py-2 text-[11px] text-text-secondary underline hover:text-text-primary cursor-pointer"
-          >
-            Demo build only: skip OTP
-          </button>
-        )}
+        {/*
+          No OTP bypass exists here, in any build. A DEV-only "skip" control
+          previously called onVerified() directly, which made a test/dev build
+          report a completed delivery that never happened: no code, no server
+          verification, no order write. Verification is only ever reported from
+          a resolved verifyDeliveryOtp() call above.
+        */}
       </div>
     </div>
   );

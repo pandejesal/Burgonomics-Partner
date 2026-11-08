@@ -1,5 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { useRBAC } from '@/core/auth/useRBAC';
 import {
   Plus,
   UtensilsCrossed,
@@ -11,6 +12,7 @@ import {
 } from 'lucide-react';
 
 export function QuickActionsBar() {
+  const { canAccessRoute } = useRBAC();
   const actions = [
     {
       title: 'Walk-In Counter Order',
@@ -52,7 +54,7 @@ export function QuickActionsBar() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {actions.map((act) => {
+        {actions.filter((act) => canAccessRoute(act.href)).map((act) => {
           const Icon = act.icon;
           return (
             <Link

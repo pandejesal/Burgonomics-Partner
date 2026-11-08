@@ -777,7 +777,6 @@ export function OrderDetailPage() {
         <DeliveryOtpModal
           orderId={order.id}
           customerName={order.customerName}
-          allowDemoSkip={import.meta.env.DEV}
           onVerified={() => {
             setShowOtpModal(false);
             toast.success('Handover verified — order delivered.');
