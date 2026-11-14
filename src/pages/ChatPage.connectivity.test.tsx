@@ -136,7 +136,16 @@ const retryMocks = vi.hoisted(() => ({
   retryThreads: vi.fn(),
   retryMessages: vi.fn(),
   setActiveThreadId: vi.fn(),
-  sendMessage: vi.fn(async () => undefined),
+  // MATCHING FIXTURE CORRECTION: the hook boundary reports an explicit send
+  // outcome. A guard no-op is `refused`; only `sent` means the write persisted.
+  // The old `async () => undefined` fixture silently stood for "accepted" and
+  // is exactly what hid the draft-loss defect.
+  sendMessage: vi.fn(
+    async (): Promise<{ status: 'sent'; messageId: string } | { status: 'refused' }> => ({
+      status: 'sent',
+      messageId: 'msg_page_fixture',
+    })
+  ),
 }));
 
 const chatState: Record<string, unknown> = {};
@@ -299,6 +308,54 @@ const attachChipButtons = () => {
   if (!row) return [] as HTMLButtonElement[];
   return Array.from(row.querySelectorAll<HTMLButtonElement>('button'));
 };
+
+/**
+ * Escaped-rejection probe.
+ *
+ * A settlement the page never handles fails the suite on its own, but these
+ * cases also want to assert that count directly. `process` has no ambient type
+ * in this app's DOM tsconfig, so the host is resolved from `globalThis` and
+ * structurally verified at runtime — a narrow test-boundary type, not an
+ * `any` hole, and no global tsconfig or @types change.
+ */
+interface RejectionHost {
+  on: (event: 'unhandledRejection', listener: (reason: unknown) => void) => unknown;
+  off: (event: 'unhandledRejection', listener: (reason: unknown) => void) => unknown;
+}
+
+function rejectionHost(): RejectionHost | null {
+  const scope: unknown = globalThis;
+  if (typeof scope !== 'object' || scope === null || !('process' in scope)) return null;
+  const candidate: unknown = scope.process;
+  if (typeof candidate !== 'object' || candidate === null) return null;
+  const on: unknown = 'on' in candidate ? candidate.on : undefined;
+  const off: unknown = 'off' in candidate ? candidate.off : undefined;
+  if (typeof on !== 'function' || typeof off !== 'function') return null;
+  return {
+    on: (event, listener) => Reflect.apply(on, candidate, [event, listener]),
+    off: (event, listener) => Reflect.apply(off, candidate, [event, listener]),
+  };
+}
+
+function createRejectionProbe() {
+  const rejections: unknown[] = [];
+  const host = rejectionHost();
+  const listener = (reason: unknown): void => {
+    rejections.push(reason);
+  };
+  return {
+    rejections,
+    /** Start a case with no history and one live listener. */
+    install(): void {
+      rejections.length = 0;
+      host?.on('unhandledRejection', listener);
+    },
+    /** Always removable, including after a failed assertion. */
+    uninstall(): void {
+      host?.off('unhandledRejection', listener);
+    },
+  };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -2235,5 +2292,542 @@ describe('ChatPage icon button accessible names', () => {
     const dismiss = attachChipButtons();
     expect(dismiss).toHaveLength(1);
     expect(dismiss[0].getAttribute('aria-label')).toBe('Remove attached ticket');
+  });
+});
+
+/**
+ * Send-outcome contract at the page/hook boundary.
+ *
+ * A send is only "accepted" when it really persisted. These cases pin the three
+ * pre-existing faults: a failed write consumed the draft, a guard no-op was
+ * indistinguishable from a sent message, and a completion belonging to an older
+ * owner/draft could clear or claim state it did not own.
+ */
+describe('ChatPage send outcome', () => {
+  const threadB = {
+    id: 'thread_b',
+    type: 'branch_channel' as const,
+    title: 'Ahmedabad Operations',
+    participantIds: [],
+    participantNames: {},
+    createdAt: timestamp,
+  };
+
+  const roomA = {
+    threads: [thread],
+    activeThreadId: 'thread_a',
+    activeThread: thread,
+    messages: [message],
+    loadingMessages: false,
+    messagesSynced: true,
+  };
+
+  const roomB = {
+    threads: [thread, threadB],
+    activeThreadId: 'thread_b',
+    activeThread: threadB,
+    messages: [],
+    loadingMessages: false,
+    messagesSynced: true,
+  };
+
+  interface Deferred<T> {
+    promise: Promise<T>;
+    resolve: (value: T) => void;
+    reject: (reason: unknown) => void;
+  }
+
+  const deferred = <T,>(): Deferred<T> => {
+    let resolve!: (value: T) => void;
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+
+  /** A rejection surfaces as an alert on the page, never as a silent drop. */
+  const sendAlert = () =>
+    alerts().find((node) => /could not be sent/i.test(node.textContent ?? ''));
+
+  const submit = async (): Promise<void> => {
+    const form = container.querySelector('form');
+    expect(form).not.toBeNull();
+    await act(async () => {
+      form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+  };
+
+  const attachOrder = async (): Promise<void> => {
+    const button = container.querySelector<HTMLButtonElement>('button[title^="Attach Order"]');
+    expect(button).not.toBeNull();
+    await act(async () => {
+      button?.click();
+    });
+    const pick = container.querySelector<HTMLButtonElement>('[data-testid="attach-select-order"]');
+    expect(pick).not.toBeNull();
+    await act(async () => {
+      pick?.click();
+    });
+    await act(async () => {
+      attachStub.closed?.();
+    });
+  };
+
+  /**
+   * Escaped rejections must be zero: the page settles its own promise. The
+   * probe is installed per case and removed in `afterEach`, so a failing
+   * assertion cannot leave a listener behind.
+   */
+  const rejectionProbe = createRejectionProbe();
+  const rejections = rejectionProbe.rejections;
+
+  beforeEach(() => {
+    rejectionProbe.install();
+    // Each case starts from a clean, explicit success default: a leftover
+    // one-shot implementation from a failed case must never decide the next.
+    retryMocks.sendMessage.mockReset();
+    retryMocks.sendMessage.mockImplementation(async () => ({
+      status: 'sent',
+      messageId: 'msg_page_fixture',
+    }));
+  });
+
+  afterEach(() => {
+    rejectionProbe.uninstall();
+  });
+
+  it('keeps the captured text and order chip when the write rejects, and shows a visible failure', async () => {
+    setChatState(roomA);
+    await render();
+
+    await type('please resend this');
+    await attachOrder();
+    expect(attachChipText()).toMatch(/Order #/);
+
+    retryMocks.sendMessage.mockImplementationOnce(async () => {
+      throw new Error('permission-denied');
+    });
+    await submit();
+    await act(async () => {});
+
+    // The operator's bytes are theirs until the room confirms persistence.
+    expect(composerInput()?.value).toBe('please resend this');
+    expect(attachChipText()).toMatch(/Order #/);
+    const alert = sendAlert();
+    expect(alert).toBeDefined();
+    expect((alert?.textContent ?? '').length).toBeGreaterThan(0);
+    // Caught, not escaped: an unhandled rejection would be a second defect.
+    expect(rejections).toHaveLength(0);
+  });
+
+  it('does not consume the composer or claim success when the hook refuses the send', async () => {
+    setChatState(roomA);
+    await render();
+
+    await type('this must not vanish');
+    retryMocks.sendMessage.mockResolvedValueOnce({ status: 'refused' });
+
+    await submit();
+    await act(async () => {});
+
+    expect(composerInput()?.value).toBe('this must not vanish');
+    expect(sendAlert()).toBeDefined();
+    expect(rejections).toHaveLength(0);
+
+    // No automatic resend, but a manual retry by the operator must work.
+    expect(retryMocks.sendMessage).toHaveBeenCalledTimes(1);
+    retryMocks.sendMessage.mockResolvedValueOnce({ status: 'sent', messageId: 'msg_manual' });
+    await submit();
+    expect(retryMocks.sendMessage).toHaveBeenCalledTimes(2);
+    expect(composerInput()?.value).toBe('');
+  });
+
+  it('keeps the submitted draft visible while the write is still in flight', async () => {
+    setChatState(roomA);
+    await render();
+
+    await type('still being written');
+    const pending = deferred<{ status: 'sent'; messageId: string }>();
+    retryMocks.sendMessage.mockImplementationOnce(() => pending.promise);
+
+    await submit();
+
+    // Nothing is confirmed yet, so nothing may be consumed yet.
+    expect(composerInput()?.value).toBe('still being written');
+
+    await act(async () => {
+      pending.resolve({ status: 'sent', messageId: 'msg_late' });
+      await pending.promise;
+    });
+
+    // …and once it really persisted, the submitted version is consumed.
+    expect(composerInput()?.value).toBe('');
+  });
+
+  it('keeps bytes the operator typed after submitting instead of erasing them on success', async () => {
+    setChatState(roomA);
+    await render();
+
+    await type('first message');
+    const pending = deferred<{ status: 'sent'; messageId: string }>();
+    retryMocks.sendMessage.mockImplementationOnce(() => pending.promise);
+
+    await submit();
+    await type('second thoughts');
+
+    await act(async () => {
+      pending.resolve({ status: 'sent', messageId: 'msg_late' });
+      await pending.promise;
+    });
+
+    // The old send owned the first version only.
+    expect(composerInput()?.value).toBe('second thoughts');
+    expect(retryMocks.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not duplicate the write when the same attempt is submitted twice', async () => {
+    setChatState(roomA);
+    await render();
+
+    await type('one message only');
+    const pending = deferred<{ status: 'sent'; messageId: string }>();
+    retryMocks.sendMessage.mockImplementationOnce(() => pending.promise);
+
+    // Two submits inside ONE tick, as a double Enter / Enter-plus-click does.
+    // A naive fix that clears only after the await would still be holding the
+    // same text for the second handler and write the message twice.
+    const form = container.querySelector('form');
+    expect(form).not.toBeNull();
+    await act(async () => {
+      form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+
+    expect(retryMocks.sendMessage).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      pending.resolve({ status: 'sent', messageId: 'msg_once' });
+      await pending.promise;
+    });
+
+    expect(composerInput()?.value).toBe('');
+  });
+
+  it('does not let a completion from an old room clear or warn in the room that replaced it', async () => {
+    setChatState(roomA);
+    await render();
+
+    await type('room A message');
+    const pending = deferred<{ status: 'sent'; messageId: string }>();
+    retryMocks.sendMessage.mockImplementationOnce(() => pending.promise);
+    await submit();
+
+    // Same operator, different room, while room A's write is still open.
+    setChatState({ ...roomA, activeThreadId: null, activeThread: undefined });
+    await render();
+    setChatState(roomB);
+    await render();
+    await type('room B draft');
+
+    await act(async () => {
+      pending.resolve({ status: 'sent', messageId: 'msg_room_a' });
+      await pending.promise;
+    });
+
+    expect(composerInput()?.value).toBe('room B draft');
+    expect(sendAlert()).toBeUndefined();
+    // The completion stayed with the attempt that made it.
+    expect(attachChipText()).toBe('');
+  });
+
+  it('does not surface an old room failure as this room\'s send error', async () => {
+    setChatState(roomA);
+    await render();
+
+    await type('room A failure');
+    const pending = deferred<{ status: 'sent'; messageId: string }>();
+    retryMocks.sendMessage.mockImplementationOnce(() => pending.promise);
+    await submit();
+
+    setChatState({ ...roomA, activeThreadId: null, activeThread: undefined });
+    await render();
+    setChatState(roomB);
+    await render();
+    await type('room B is fine');
+
+    await act(async () => {
+      pending.reject(new Error('permission-denied'));
+      await pending.promise.catch(() => undefined);
+    });
+    await act(async () => {});
+
+    expect(composerInput()?.value).toBe('room B is fine');
+    expect(sendAlert()).toBeUndefined();
+    expect(rejections).toHaveLength(0);
+  });
+
+  it('stops touching the page after unmount, even if the write settles late', async () => {
+    setChatState(roomA);
+    await render();
+
+    await type('unmounted attempt');
+    const pending = deferred<{ status: 'sent'; messageId: string }>();
+    retryMocks.sendMessage.mockImplementationOnce(() => pending.promise);
+    await submit();
+
+    await act(async () => root.unmount());
+
+    await act(async () => {
+      pending.resolve({ status: 'sent', messageId: 'msg_after_unmount' });
+      await pending.promise;
+    });
+
+    expect(container.textContent).toBe('');
+    expect(rejections).toHaveLength(0);
+
+    // Remount so the shared afterEach unmount has a live root to tear down.
+    root = createRoot(container);
+  });
+});
+
+/**
+ * Owner-adoption races.
+ *
+ * The composer is one slot reused by every operator/scope/room. A send attempt
+ * therefore needs an identity that survives a round trip, or a late settlement
+ * will erase or warn about a draft it never submitted.
+ */
+describe('ChatPage send attempt identity across owner round trips', () => {
+  const threadB = {
+    id: 'thread_b',
+    type: 'branch_channel' as const,
+    title: 'Ahmedabad Operations',
+    participantIds: [],
+    participantNames: {},
+    createdAt: timestamp,
+  };
+
+  /** Opaque identities: the page must consume them, never derive them. */
+  const scopeA = 'opaque-auth-scope-A';
+  const scopeB = 'opaque-auth-scope-B';
+
+  const roomA = {
+    threads: [thread],
+    activeThreadId: 'thread_a',
+    activeThread: thread,
+    messages: [message],
+    loadingMessages: false,
+    messagesSynced: true,
+    authorizationScopeKey: scopeA,
+  };
+
+  const roomB = {
+    threads: [thread, threadB],
+    activeThreadId: 'thread_b',
+    activeThread: threadB,
+    messages: [],
+    loadingMessages: false,
+    messagesSynced: true,
+    authorizationScopeKey: scopeB,
+  };
+
+  interface Deferred<T> {
+    promise: Promise<T>;
+    resolve: (value: T) => void;
+    reject: (reason: unknown) => void;
+  }
+
+  const deferred = <T,>(): Deferred<T> => {
+    let resolve!: (value: T) => void;
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+
+  const sendAlert = () =>
+    alerts().find((node) => /could not be sent/i.test(node.textContent ?? ''));
+  const otherAlerts = () =>
+    alerts().filter((node) => !/could not be sent/i.test(node.textContent ?? ''));
+
+  const submit = async (): Promise<void> => {
+    const form = container.querySelector('form');
+    expect(form).not.toBeNull();
+    await act(async () => {
+      form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+  };
+
+  const attachOrder = async (): Promise<void> => {
+    const button = container.querySelector<HTMLButtonElement>('button[title^="Attach Order"]');
+    expect(button).not.toBeNull();
+    await act(async () => {
+      button?.click();
+    });
+    const pick = container.querySelector<HTMLButtonElement>('[data-testid="attach-select-order"]');
+    expect(pick).not.toBeNull();
+    await act(async () => {
+      pick?.click();
+    });
+    await act(async () => {
+      attachStub.closed?.();
+    });
+  };
+
+  const rejectionProbe = createRejectionProbe();
+  const rejections = rejectionProbe.rejections;
+
+  beforeEach(() => {
+    rejectionProbe.install();
+    retryMocks.sendMessage.mockReset();
+    retryMocks.sendMessage.mockImplementation(async () => ({
+      status: 'sent',
+      messageId: 'msg_page_fixture',
+    }));
+  });
+
+  afterEach(() => {
+    rejectionProbe.uninstall();
+  });
+
+  /** Room A → room B → room A, keeping each room's own hook owner. */
+  async function roundTripToRoomBAndBack(): Promise<void> {
+    setChatState({ ...roomA, activeThreadId: null, activeThread: undefined });
+    await render();
+    setChatState(roomB);
+    await render();
+    setChatState(roomA);
+    await render();
+  }
+
+  it('keeps the new room-A draft when an earlier room-A attempt succeeds after the round trip', async () => {
+    setChatState(roomA);
+    await render();
+
+    await type('A one');
+    const pendingA1 = deferred<{ status: 'sent'; messageId: string }>();
+    retryMocks.sendMessage.mockImplementationOnce(() => pendingA1.promise);
+    await submit();
+
+    await roundTripToRoomBAndBack();
+    // A brand-new draft in the SAME owner keys, adopted after the round trip.
+    await type('A two');
+
+    await act(async () => {
+      pendingA1.resolve({ status: 'sent', messageId: 'msg_a1' });
+      await pendingA1.promise;
+    });
+
+    // A1 owned its own version only; A two was never submitted by it.
+    expect(composerInput()?.value).toBe('A two');
+    expect(sendAlert()).toBeUndefined();
+    expect(rejections).toHaveLength(0);
+  });
+
+  it('does not warn the new room-A draft when the earlier room-A attempt fails after the round trip', async () => {
+    setChatState(roomA);
+    await render();
+
+    await type('A one');
+    const pendingA1 = deferred<{ status: 'sent'; messageId: string }>();
+    retryMocks.sendMessage.mockImplementationOnce(() => pendingA1.promise);
+    await submit();
+
+    await roundTripToRoomBAndBack();
+    await type('A two');
+
+    await act(async () => {
+      pendingA1.reject(new Error('permission-denied'));
+      await pendingA1.promise.catch(() => undefined);
+    });
+    await act(async () => {});
+
+    expect(composerInput()?.value).toBe('A two');
+    expect(sendAlert()).toBeUndefined();
+    expect(rejections).toHaveLength(0);
+  });
+
+  it('keeps a separately submitted room-A attempt when the earlier attempt settles late', async () => {
+    setChatState(roomA);
+    await render();
+
+    await type('A one');
+    const pendingA1 = deferred<{ status: 'sent'; messageId: string }>();
+    retryMocks.sendMessage.mockImplementationOnce(() => pendingA1.promise);
+    await submit();
+
+    // Room B: its own draft and its own in-flight write.
+    setChatState({ ...roomA, activeThreadId: null, activeThread: undefined });
+    await render();
+    setChatState(roomB);
+    await render();
+    await type('B one');
+    const pendingB1 = deferred<{ status: 'sent'; messageId: string }>();
+    retryMocks.sendMessage.mockImplementationOnce(() => pendingB1.promise);
+    await submit();
+
+    // Back to room A: a new draft and a new manual submit of its own.
+    setChatState({ ...roomB, activeThreadId: null, activeThread: undefined });
+    await render();
+    setChatState(roomA);
+    await render();
+    await type('A two');
+    const pendingA2 = deferred<{ status: 'sent'; messageId: string }>();
+    retryMocks.sendMessage.mockImplementationOnce(() => pendingA2.promise);
+    await submit();
+
+    expect(retryMocks.sendMessage).toHaveBeenCalledTimes(3);
+    expect(composerInput()?.value).toBe('A two');
+
+    // The earlier attempts settle late: neither may touch A2's ownership.
+    await act(async () => {
+      pendingA1.resolve({ status: 'sent', messageId: 'msg_a1' });
+      await pendingA1.promise;
+    });
+    await act(async () => {
+      pendingB1.reject(new Error('permission-denied'));
+      await pendingB1.promise.catch(() => undefined);
+    });
+    await act(async () => {});
+
+    expect(composerInput()?.value).toBe('A two');
+    expect(sendAlert()).toBeUndefined();
+    expect(otherAlerts()).toHaveLength(0);
+    expect(rejections).toHaveLength(0);
+
+    // A2 settles its own submitted version, and only that.
+    await act(async () => {
+      pendingA2.resolve({ status: 'sent', messageId: 'msg_a2' });
+      await pendingA2.promise;
+    });
+    expect(composerInput()?.value).toBe('');
+    expect(retryMocks.sendMessage).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps a reference-only edit made while the write is pending', async () => {
+    setChatState(roomA);
+    await render();
+
+    await type('same text throughout');
+    const pending = deferred<{ status: 'sent'; messageId: string }>();
+    retryMocks.sendMessage.mockImplementationOnce(() => pending.promise);
+    await submit();
+
+    // Text untouched; only the attached reference changes.
+    await attachOrder();
+    expect(attachChipText()).toMatch(/Order #/);
+
+    await act(async () => {
+      pending.resolve({ status: 'sent', messageId: 'msg_ref_edit' });
+      await pending.promise;
+    });
+
+    expect(composerInput()?.value).toBe('same text throughout');
+    expect(attachChipText()).toMatch(/Order #/);
+    expect(sendAlert()).toBeUndefined();
   });
 });

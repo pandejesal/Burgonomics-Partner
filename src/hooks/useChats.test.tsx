@@ -1407,6 +1407,59 @@ describe('useChats authorisation-scope send ownership', () => {
 
     expect(chatMocks.sendMessage).toHaveBeenCalledTimes(1);
   });
+
+  it('reports an explicit sent outcome carrying the persisted message id', async () => {
+    chatMocks.sendMessage.mockResolvedValueOnce('msg_persisted_1');
+    const currentSend = await captureSendInRoomA();
+
+    // Typed `unknown` on purpose: the case must RUN against the pre-change hook
+    // and fail on behaviour, not on a missing/renamed return type.
+    let outcome: unknown = 'unset';
+    await act(async () => {
+      outcome = await currentSend('accepted current-room message');
+    });
+
+    // A guard refusal and an accepted write must be distinguishable, so a
+    // caller only consumes the composer for an outcome that really persisted.
+    expect(outcome).toEqual({ status: 'sent', messageId: 'msg_persisted_1' });
+    expect(chatMocks.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a refused outcome, never success, when the guard rejects the send', async () => {
+    const staleSend = await captureSendInRoomA();
+
+    authState.user = { ...operator, role: 'branch_staff' };
+    await rerender();
+
+    let outcome: unknown = 'unset';
+    await act(async () => {
+      outcome = await staleSend('message from the old scope');
+    });
+
+    // Previously this resolved to `undefined`, which a caller could not tell
+    // apart from a sent message.
+    expect(outcome).toEqual({ status: 'refused' });
+    expect(chatMocks.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not swallow a rejected write: the failure reaches the caller', async () => {
+    chatMocks.sendMessage.mockRejectedValueOnce(new Error('permission-denied'));
+    const currentSend = await captureSendInRoomA();
+
+    let caught: unknown = null;
+    await act(async () => {
+      try {
+        await currentSend('write that will fail');
+      } catch (error) {
+        caught = error;
+      }
+    });
+
+    // CONTROL for the failure path: whatever the hook returns on success, a
+    // rejected write must never be reported as one.
+    expect(caught).toBeInstanceOf(Error);
+    expect(caught instanceof Error ? caught.message : '').toBe('permission-denied');
+  });
 });
 
 describe('useChats under StrictMode', () => {

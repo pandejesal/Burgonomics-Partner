@@ -39,6 +39,12 @@ interface ComposerDraft {
   order: Order | null;
   ticket: Ticket | null;
   attachOpen: boolean;
+  /**
+   * Monotonic version of this slot's content. It never resets — not even when
+   * a different owner adopts the slot — so a revision value is unique for the
+   * life of the page and an old send can never match a newer draft.
+   */
+  revision: number;
 }
 
 const EMPTY_DRAFT: Omit<ComposerDraft, 'owner'> = {
@@ -46,7 +52,40 @@ const EMPTY_DRAFT: Omit<ComposerDraft, 'owner'> = {
   order: null,
   ticket: null,
   attachOpen: false,
+  revision: 0,
 };
+
+/** Same operator, same authorisation scope, same room. */
+function sameOwner(left: ComposerOwner, right: ComposerOwner): boolean {
+  return (
+    left.userId === right.userId &&
+    left.authScopeKey === right.authScopeKey &&
+    left.threadId === right.threadId
+  );
+}
+
+/** A send failure, tagged with the owner and draft version it belongs to. */
+interface SendFailure {
+  owner: ComposerOwner;
+  revision: number;
+  message: string;
+}
+
+/**
+ * Bounded operator copy. Deliberately NOT the SDK/provider message: that text
+ * can carry project ids, paths or backend detail that must not reach the UI.
+ */
+const SEND_FAILURE_COPY =
+  'Message could not be sent. Your draft is still here — check the connection and try again.';
+const SEND_REFUSED_COPY =
+  'Message could not be sent: this room is no longer open for this account. Your draft is still here.';
+
+/** A single in-flight send, identified for the life of the page. */
+interface SendAttempt {
+  id: number;
+  owner: ComposerOwner;
+  revision: number;
+}
 
 export const ChatPage: React.FC = () => {
   const { user } = useAuthStore();
@@ -115,6 +154,23 @@ export const ChatPage: React.FC = () => {
     };
   });
 
+  // True until this page unmounts. A late send completion must not touch state
+  // after teardown.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // The one attempt allowed to settle composer state. Identified by a page-lifetime
+  // id, so "the current attempt" is an identity comparison, never a guess from
+  // owner keys that a round trip can recreate.
+  const nextAttemptIdRef = useRef(0);
+  const pendingSendRef = useRef<SendAttempt | null>(null);
+  const [sendFailure, setSendFailure] = useState<SendFailure | null>(null);
+
   // FENCED at render: anything whose owner is not the current (uid, scope,
   // room) is foreign and displays as empty. This is the security boundary — an
   // effect alone would let old room A's draft commit into the first room B frame.
@@ -147,7 +203,10 @@ export const ChatPage: React.FC = () => {
         // displayed while the room is null, so this is not a leak.
         return previous;
       }
-      return { owner: composerOwner, ...EMPTY_DRAFT };
+      // Adopting a different owner RETIRES the slot: the revision keeps
+      // advancing, so an A → B → A round trip can never recreate the revision
+      // an older attempt in room A still holds.
+      return { owner: composerOwner, ...EMPTY_DRAFT, revision: previous.revision + 1 };
     });
   }, [user?.id, authorizationScopeKey, activeThreadId]);
 
@@ -180,6 +239,16 @@ export const ChatPage: React.FC = () => {
   const streamTone = channelLive ? 'text-emerald-400' : 'text-amber-300';
   const streamDot = channelLive ? 'bg-emerald-500' : 'bg-amber-500';
   const showRetry = !channelLive && !loadingMessages;
+
+  // A failure is shown only for the owner AND draft version it belongs to: a
+  // room/scope switch or a new keystroke makes it stale, so an old attempt can
+  // never change the error, focus or copy of the scope that replaced it.
+  const visibleSendFailure =
+    sendFailure &&
+    sameOwner(sendFailure.owner, composerOwner) &&
+    sendFailure.revision === composerDraft.revision
+      ? sendFailure.message
+      : null;
 
   // Phone pane rule: with no room there is nothing to show on the chat side, so
   // the rooms list must stay reachable (error or empty) instead of leaving a
@@ -320,7 +389,10 @@ export const ChatPage: React.FC = () => {
   // modal or re-introduce a foreign chip. The first keystroke in a genuinely
   // new room B is accepted because the committed owner is already B by then;
   // its typed value is applied to a fresh empty draft for B.
-  const updateDraft = (change: (current: ComposerDraft) => ComposerDraft) => {
+  const updateDraft = (
+    change: (current: ComposerDraft) => ComposerDraft,
+    options?: { content?: boolean }
+  ) => {
     const admittedOwner = composerOwner;
     setComposerDraft((previous) => {
       const committed = committedOwnerRef.current;
@@ -335,14 +407,28 @@ export const ChatPage: React.FC = () => {
       // Writers require a real operator and a real room.
       if (!committed.userId || !committed.threadId) return previous;
 
-      const sameOwner =
+      const sameOwnerBase =
         previous.owner.userId === committed.userId &&
         previous.owner.authScopeKey === committed.authScopeKey &&
         previous.owner.threadId === committed.threadId;
 
-      return change(
-        sameOwner ? previous : { owner: committed, ...EMPTY_DRAFT }
-      );
+      // A foreign base is REPLACED, but the revision carries forward so it can
+      // never collide with the revision an older attempt in this owner still
+      // holds (e.g. A → B → A).
+      const base = sameOwnerBase
+        ? previous
+        : { owner: committed, ...EMPTY_DRAFT, revision: previous.revision + 1 };
+
+      const applied = change(base);
+      const contentChanged =
+        applied.text !== base.text ||
+        applied.order !== base.order ||
+        applied.ticket !== base.ticket;
+      // A content edit advances the revision, so an in-flight send can never
+      // consume — or vouch for — bytes the operator changed after the submit.
+      return options?.content === false || !contentChanged
+        ? applied
+        : { ...applied, revision: base.revision + 1 };
     });
   };
 
@@ -352,7 +438,26 @@ export const ChatPage: React.FC = () => {
   const setAttachedTicket = (ticket: Ticket | null) =>
     updateDraft((current) => ({ ...current, ticket, order: ticket ? null : current.order }));
   const setShowAttachModal = (attachOpen: boolean) =>
-    updateDraft((current) => ({ ...current, attachOpen }));
+    updateDraft((current) => ({ ...current, attachOpen }), { content: false });
+
+  /** True only while this exact attempt still owns the send slot. */
+  const isCurrentAttempt = (attempt: SendAttempt): boolean =>
+    mountedRef.current &&
+    pendingSendRef.current !== null &&
+    pendingSendRef.current.id === attempt.id;
+
+  /**
+   * Publish a failure for an attempt that did not persist, but only if it still
+   * owns the slot. A replaced or retired attempt is silent: it must not warn in
+   * an owner — or about a draft — the operator moved on to.
+   */
+  const settleFailedAttempt = (attempt: SendAttempt, message: string): void => {
+    if (pendingSendRef.current?.id !== attempt.id) return;
+    pendingSendRef.current = null;
+    if (!mountedRef.current) return;
+    if (!sameOwner(committedOwnerRef.current, attempt.owner)) return;
+    setSendFailure({ owner: attempt.owner, revision: attempt.revision, message });
+  };
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -363,14 +468,13 @@ export const ChatPage: React.FC = () => {
     // A producer callback captured under an owner the committed state has moved
     // past must refuse before any payload is built or any local clear runs.
     const committed = committedOwnerRef.current;
-    if (
-      composerOwner.userId !== committed.userId ||
-      composerOwner.authScopeKey !== committed.authScopeKey ||
-      composerOwner.threadId !== committed.threadId
-    ) {
-      return;
-    }
+    if (!sameOwner(composerOwner, committed)) return;
     if (!inputMessage.trim() && !attachedOrder && !attachedTicket) return;
+
+    // Single flight per owner: submitting the attempt already in flight must not
+    // duplicate the write. Another owner's attempt is a different attempt.
+    const inFlight = pendingSendRef.current;
+    if (inFlight && sameOwner(inFlight.owner, committed)) return;
 
     const text = inputMessage.trim() || (attachedOrder ? `Referencing Order #${attachedOrder.id.slice(-6)}` : `Referencing Ticket #${attachedTicket?.id.slice(-6)}`);
     const orderRef = attachedOrder
@@ -390,13 +494,52 @@ export const ChatPage: React.FC = () => {
         }
       : undefined;
 
-    setInputMessage('');
-    setAttachedOrder(null);
-    setAttachedTicket(null);
+    // Tag the attempt with a page-lifetime id AND the exact draft version it
+    // submits. Nothing is cleared here: only a persisted write may consume.
+    nextAttemptIdRef.current += 1;
+    const attempt: SendAttempt = {
+      id: nextAttemptIdRef.current,
+      owner: committed,
+      revision: composerDraft.revision,
+    };
+    pendingSendRef.current = attempt;
+    // A fresh attempt supersedes the previous failure shown for this owner.
+    setSendFailure((previous) =>
+      previous && sameOwner(previous.owner, attempt.owner) ? null : previous
+    );
 
-    await sendMessage(text, {
-      orderReference: orderRef,
-      ticketReference: ticketRef,
+    let outcome: Awaited<ReturnType<typeof sendMessage>>;
+    try {
+      outcome = await sendMessage(text, {
+        orderReference: orderRef,
+        ticketReference: ticketRef,
+      });
+    } catch {
+      // The raw provider/SDK message is NOT surfaced: arbitrary backend detail
+      // must not reach the composer. The operator keeps the draft and gets
+      // bounded copy. Handling it here also stops the rejection escaping.
+      settleFailedAttempt(attempt, SEND_FAILURE_COPY);
+      return;
+    }
+
+    if (outcome.status !== 'sent') {
+      // A guard no-op is not acceptance: keep every byte and say so.
+      settleFailedAttempt(attempt, SEND_REFUSED_COPY);
+      return;
+    }
+
+    // Only the CURRENT attempt may publish. A replaced attempt (new owner, new
+    // draft, newer attempt) settles nothing — not even by clearing its own slot.
+    if (!isCurrentAttempt(attempt)) return;
+    pendingSendRef.current = null;
+
+    // Consume ONLY the submitted version of the draft that is still current.
+    // Bytes typed or re-attached while the write was pending survive, because
+    // their revision has moved past the one this attempt submitted.
+    setComposerDraft((previous) => {
+      if (!sameOwner(previous.owner, attempt.owner)) return previous;
+      if (previous.revision !== attempt.revision) return previous;
+      return { ...EMPTY_DRAFT, owner: attempt.owner, revision: previous.revision + 1 };
     });
   };
 
@@ -879,6 +1022,16 @@ export const ChatPage: React.FC = () => {
               )}
 
               {/* Message Composer Bar */}
+              {visibleSendFailure && (
+                <div
+                  role="alert"
+                  className="px-4 py-2 bg-amber-950/30 border-t border-amber-800/60"
+                >
+                  <p className="text-[11px] font-bold text-amber-300 break-words">
+                    {visibleSendFailure}
+                  </p>
+                </div>
+              )}
               <form
                 onSubmit={handleSend}
                 className="p-3 bg-surface border-t border-border flex items-center space-x-2"

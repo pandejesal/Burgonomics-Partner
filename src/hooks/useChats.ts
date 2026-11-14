@@ -10,6 +10,15 @@ import type { ChatThread, ChatMessage, UserRole } from '@/types';
 const EMPTY_THREADS: ChatThread[] = [];
 const EMPTY_MESSAGES: ChatMessage[] = [];
 
+/**
+ * The explicit result of a send attempt. A guard refusal (wrong owner, no room,
+ * empty draft) is NOT a success: callers must keep the composer and never
+ * report the message as delivered.
+ */
+export type ChatSendOutcome =
+  | { status: 'sent'; messageId: string }
+  | { status: 'refused' };
+
 interface ThreadsScopeState {
   scopeKey: string | null;
   threads: ChatThread[];
@@ -514,9 +523,9 @@ export function useChats() {
         priority: string;
       };
     }
-  ) => {
+  ): Promise<ChatSendOutcome> => {
     if (!user || !scopedThreadId || (!text.trim() && !options?.imageUrl && !options?.orderReference && !options?.ticketReference))
-      return;
+      return { status: 'refused' };
 
     // The producer's owner is the scope/room THIS callback closed over at
     // render time. Compare it against the LATEST committed values, so a stale
@@ -524,12 +533,12 @@ export function useChats() {
     // admitted by comparing a value with itself.
     const producerScopeKey = scopeKey;
     const producerThreadId = scopedThreadId;
-    if (producerScopeKey !== scopeKeyRef.current) return;
-    if (producerThreadId !== scopedThreadIdRef.current) return;
+    if (producerScopeKey !== scopeKeyRef.current) return { status: 'refused' };
+    if (producerThreadId !== scopedThreadIdRef.current) return { status: 'refused' };
 
     const currentThread = threads.find((t) => t.id === scopedThreadId);
 
-    await chatService.sendMessage({
+    const messageId = await chatService.sendMessage({
       chatId: scopedThreadId,
       senderId: user.id,
       senderName: user.name || 'Staff Member',
@@ -549,6 +558,10 @@ export function useChats() {
           }
         : undefined,
     });
+
+    // Only a completed write is a success. A guard refusal above returns
+    // `refused`, and a rejected write throws: neither may consume a draft.
+    return { status: 'sent', messageId };
   };
 
   const createOrOpenBranchChannel = async (branchId: string, branchName: string) => {
