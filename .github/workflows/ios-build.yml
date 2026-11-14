@@ -13,6 +13,9 @@ permissions:
 jobs:
   build-ios:
     name: iOS simulator build
+    # Simulator-only: no archive job, no signing material. Signed IPA creation
+    # lives in the separately gated ios-distribution.yml.
+    #
     # A07 (2026-10-14): macOS 14 images deprecated (removal 2026-11-02).
     # Moved to macos-26 + explicit discovery gate (Xcode major >= 26 AND
     # iOS SDK >= 26, fail closed) before any xcodebuild. Web/android/
@@ -20,8 +23,13 @@ jobs:
     # No SPM patch step here: the partner SPM graph resolves cleanly
     # (push-notifications declares from: "8.0.0" — measured, unlike customer).
     runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      CI_SIMULATOR_ONLY: 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
       - name: Validate Xcode toolchain (Xcode >= 26, iOS SDK >= 26)
         # Discovers the best installed Xcode; fails closed below either floor.
         # Never hardpins an exact Xcode version.
@@ -29,11 +37,11 @@ jobs:
         env:
           MIN_XCODE_MAJOR: "26"
           MIN_IOS_SDK_MAJOR: "26"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Prepare simulator-only compile fixture
         if: github.event_name != 'workflow_dispatch' || inputs.real_staging != true
         run: node scripts/prepare-simulator-config.mjs
@@ -91,7 +99,7 @@ jobs:
           fi
       - name: Upload launch evidence
         if: always() && github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: ios-sim-smoke
           path: smoke

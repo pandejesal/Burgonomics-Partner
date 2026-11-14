@@ -3,6 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "packageManager": "npm@11.17.0",
   "scripts": {
     "prebuild": "node scripts/generate-aasa.mjs",
     "prebuild:mobile": "node scripts/generate-aasa.mjs",
@@ -27,12 +28,12 @@
   "dependencies": {
     "@aparajita/capacitor-secure-storage": "^8.0.0",
     "@capacitor-firebase/app-check": "^8.5.2",
-    "@capacitor/android": "^8.5.0",
+    "@capacitor/android": "^8.6.0",
     "@capacitor/app": "^8.1.1",
-    "@capacitor/cli": "^8.5.0",
-    "@capacitor/core": "^8.5.0",
+    "@capacitor/cli": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
     "@capacitor/haptics": "^8.0.2",
-    "@capacitor/ios": "^8.5.0",
+    "@capacitor/ios": "^8.6.0",
     "@capacitor/keyboard": "^8.0.5",
     "@capacitor/local-notifications": "^8.3.1",
     "@capacitor/network": "^8.0.1",
@@ -57,7 +58,7 @@
     "sonner": "^2.0.8",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.3",
-    "zod": "^4.6.5",
+    "zod": "^4.6.7",
     "zustand": "^5.0.15"
   },
   "devDependencies": {
@@ -65,10 +66,11 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
+    "js-yaml": "4.3.2",
     "jsdom": "^30.1.3",
     "oxlint": "^1.75.0",
     "typescript": "^7.0.2",
-    "vite": "^8.2.0",
-    "vitest": "^5.0.1"
+    "vite": "^8.3.7",
+    "vitest": "5.0.3"
   }
 }

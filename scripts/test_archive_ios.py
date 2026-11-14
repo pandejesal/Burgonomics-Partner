@@ -13,11 +13,13 @@ from unittest import mock
 import archive_ios
 from archive_ios import SIGNING_KEYS, signing_mode
 
-TEAM = 'TEAM123'
+TEAM = 'TEAM123456'
 BUNDLE = 'com.burgonomics.partner'
 PROFILE_UUID = '11111111-2222-3333-4444-555555555555'
 INSTALLED_NAME = 'review-' + PROFILE_UUID + '.mobileprovision'
 KEYCHAIN_NAME = 'signing.keychain-db'
+OPT_IN = 'IOS_DISTRIBUTION_OPT_IN'
+ALL_KEYS = dict.fromkeys(SIGNING_KEYS, 'present')
 
 
 def profile_plist(bundle=BUNDLE, team=TEAM, push='production', uuid=PROFILE_UUID):
@@ -43,9 +45,41 @@ def is_search_list_restore(args):
 
 class SigningModeTest(unittest.TestCase):
     def test_no_secrets_is_unsigned(self): self.assertEqual(signing_mode({}), 'unsigned')
+
     def test_partial_secrets_fail(self):
-        with self.assertRaisesRegex(ValueError, 'Incomplete iOS signing secrets'): signing_mode({'ASC_KEY_ID': 'present'})
-    def test_all_secrets_allow_signing(self): self.assertEqual(signing_mode(dict.fromkeys(SIGNING_KEYS, 'present')), 'signed')
+        with self.assertRaisesRegex(ValueError, 'Incomplete iOS signing secrets'):
+            signing_mode({'ASC_KEY_ID': 'present', OPT_IN: 'true'})
+
+    def test_all_secrets_with_explicit_opt_in_allow_signing(self):
+        self.assertEqual(signing_mode(dict(ALL_KEYS, **{OPT_IN: 'true'})), 'signed')
+
+    # REGRESSION (was test_all_secrets_allow_signing): presence of material is
+    # not consent. Without the exact opt-in the script fails closed.
+    def test_all_secrets_without_opt_in_fail_closed(self):
+        with self.assertRaisesRegex(ValueError, 'IOS_DISTRIBUTION_OPT_IN'):
+            signing_mode(dict(ALL_KEYS))
+
+    def test_single_signing_material_without_opt_in_fails_closed(self):
+        with self.assertRaisesRegex(ValueError, 'IOS_DISTRIBUTION_OPT_IN'):
+            signing_mode({'ASC_KEY_ID': 'present'})
+
+    def test_opt_in_without_material_fails_closed(self):
+        with self.assertRaisesRegex(ValueError, 'Incomplete iOS signing secrets'):
+            signing_mode({OPT_IN: 'true'})
+
+    def test_only_exact_true_grants_consent(self):
+        for value in ('TRUE', 'True', 'yes', '1', 'true ', '', 'false', None):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, 'IOS_DISTRIBUTION_OPT_IN'):
+                    signing_mode(dict(ALL_KEYS, **{OPT_IN: value}))
+                self.assertEqual(signing_mode({OPT_IN: value}), 'unsigned')
+
+    def test_simulator_only_rejects_distribution_even_when_configured(self):
+        with self.assertRaisesRegex(ValueError, 'CI_SIMULATOR_ONLY'):
+            signing_mode(dict(ALL_KEYS, **{OPT_IN: 'true', 'CI_SIMULATOR_ONLY': 'true'}))
+
+    def test_simulator_only_still_allows_unsigned_archive(self):
+        self.assertEqual(signing_mode({'CI_SIMULATOR_ONLY': 'true'}), 'unsigned')
 
 
 class FakeRunner:
@@ -129,15 +163,18 @@ class ArchiveIosHarness(unittest.TestCase):
         profile_bytes = profile_plist() if profile_bytes is None else profile_bytes
         secrets = {
             'ASC_API_KEY_BASE64': base64.b64encode(b'p8-key').decode(),
-            'ASC_KEY_ID': 'KEYID123',
-            'ASC_ISSUER_ID': 'ISSUER-1',
+            'ASC_KEY_ID': 'ABCDE12345',
+            'ASC_ISSUER_ID': '11111111-2222-3333-4444-555555555555',
             'APPLE_TEAM_ID': TEAM,
             'IOS_CERTIFICATE_BASE64': base64.b64encode(b'p12-cert').decode(),
             'IOS_CERTIFICATE_PASSWORD': 'cert-secret',
             'IOS_PROFILE_BASE64': base64.b64encode(profile_bytes).decode(),
         }
         secrets.update(overrides)
-        return self.base_env(secrets)
+        env = self.base_env(secrets)
+        # Explicit consent is required for every signed-path test.
+        env[OPT_IN] = 'true'
+        return env
 
     def run_main(self, fake, env):
         with mock.patch.dict(os.environ, env), mock.patch.object(archive_ios, 'subprocess', fake):
@@ -630,6 +667,150 @@ class SecondaryFailureIsolationTest(ArchiveIosHarness):
             with self.assertRaises(subprocess.CalledProcessError) as caught:
                 self.run_main(fake, self.signed_env())
         self.assertIs(caught.exception, primary)
+
+
+class PathValidationTest(ArchiveIosHarness):
+    """Path-derived identifiers are rejected before any native work."""
+
+    def assert_rejected(self, env, pattern):
+        fake = FakeRunner()
+        with self.assertRaisesRegex(ValueError, pattern):
+            self.run_main(fake, env)
+        self.assertEqual(fake.calls, [], 'no native command may run after rejection')
+        self.assertTrue(self.profile_dir_is_empty())
+
+    def test_traversal_in_asc_key_id_is_rejected(self):
+        for value in ('../../evil', 'a/b', '..', '/etc/passwd', 'ABCDE1234 ',
+                      'abcde12345', 'SHORT', 'A' * 11, ''):
+            with self.subTest(value=value):
+                self.assert_rejected(self.signed_env(ASC_KEY_ID=value), 'ASC_KEY_ID')
+
+    def test_non_conforming_team_id_is_rejected(self):
+        for value in ('TEAM123', 'team123456', 'TEAM12345', '../evil', ''):
+            with self.subTest(value=value):
+                self.assert_rejected(self.signed_env(APPLE_TEAM_ID=value), 'APPLE_TEAM_ID')
+
+    def test_malformed_issuer_uuid_is_rejected(self):
+        for value in ('not-a-uuid', 'ISSUER-1', '../../evil',
+                      '11111111-2222-3333-4444-55555555555', ''):
+            with self.subTest(value=value):
+                self.assert_rejected(self.signed_env(ASC_ISSUER_ID=value), 'ASC_ISSUER_ID')
+
+    def test_profile_uuid_traversal_is_rejected_after_decode(self):
+        fake = FakeRunner(profile_bytes=profile_plist(uuid='../../evil'))
+        with self.assertRaisesRegex(ValueError, 'provisioning profile UUID'):
+            self.run_main(fake, self.signed_env())
+        self.assertIn(('security', 'cms'), [call[:2] for call in fake.calls])
+        for forbidden in ('create-keychain', 'import', 'list-keychains'):
+            self.assertEqual(self.calls(fake, 'security:' + forbidden), [])
+        self.assertTrue(self.profile_dir_is_empty())
+
+    def test_profile_uuid_missing_is_rejected(self):
+        fake = FakeRunner(profile_bytes=plistlib.dumps({'Entitlements': {
+            'application-identifier': TEAM + '.' + BUNDLE, 'aps-environment': 'production'}}))
+        with self.assertRaisesRegex(ValueError, 'provisioning profile UUID'):
+            self.run_main(fake, self.signed_env())
+        self.assertEqual(self.calls(fake, 'security:create-keychain'), [])
+
+
+    def test_trailing_newline_in_identifiers_is_rejected(self):
+        # `re.match` with a trailing `$` accepts one trailing newline; each
+        # identifier must be matched in full.
+        for field, valid in (('ASC_KEY_ID', 'ABCDE12345'),
+                             ('APPLE_TEAM_ID', 'ABCDE12345'),
+                             ('ASC_ISSUER_ID', '11111111-2222-3333-4444-555555555555')):
+            with self.subTest(field=field):
+                self.assert_rejected(self.signed_env(**{field: valid + '\n'}), field)
+
+    def test_trailing_newline_in_profile_uuid_is_rejected(self):
+        fake = FakeRunner(profile_bytes=profile_plist(
+            uuid='11111111-2222-3333-4444-555555555555\n'))
+        with self.assertRaisesRegex(ValueError, 'provisioning profile UUID'):
+            self.run_main(fake, self.signed_env())
+        self.assertEqual(self.calls(fake, 'security:create-keychain'), [])
+        self.assertTrue(self.profile_dir_is_empty())
+
+
+class CliBoundaryTest(ArchiveIosHarness):
+    """The CLI boundary prints fixed labels, never argv."""
+
+    def guard(self, fake, env):
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(archive_ios, 'subprocess', fake), \
+                mock.patch.object(archive_ios.secrets, 'token_urlsafe', lambda size: 'keychain-secret'):
+            return archive_ios.archive_with_cli_guard()
+
+    def test_argv_secret_is_never_printed(self):
+        sentinel = 'SENTINEL-ARGV-SECRET'
+        fake = FakeRunner()
+        fake.fail_on('security:import',
+                     subprocess.CalledProcessError(65, ['security', 'import', '-P', sentinel]))
+        stderr = io.StringIO()
+        with mock.patch.object(archive_ios.sys, 'stderr', stderr):
+            self.assertEqual(self.guard(fake, self.signed_env()), 1)
+        rendered = stderr.getvalue()
+        self.assertNotIn(sentinel, rendered)
+        self.assertNotIn('cert-secret', rendered)
+        self.assertNotIn('security import', rendered)
+        self.assertIn('ios-signing', rendered)
+        self.assertIn('CalledProcessError', rendered)
+
+    def test_consent_rejection_label(self):
+        fake = FakeRunner()
+        env = self.signed_env()
+        del env['IOS_DISTRIBUTION_OPT_IN']
+        stderr = io.StringIO()
+        with mock.patch.object(archive_ios.sys, 'stderr', stderr):
+            self.assertEqual(self.guard(fake, env), 1)
+        self.assertIn('ios-signing-consent', stderr.getvalue())
+        self.assertEqual(fake.calls, [])
+
+    def test_success_returns_zero(self):
+        with mock.patch.object(archive_ios.sys, 'stderr', io.StringIO()):
+            self.assertEqual(self.guard(FakeRunner(), self.signed_env()), 0)
+
+    def test_original_exception_still_observable(self):
+        primary = subprocess.CalledProcessError(65, ['security', 'import', '-P', 'SENTINEL'])
+        fake = FakeRunner()
+        fake.fail_on('security:import', primary)
+        with mock.patch.object(archive_ios.sys, 'stderr', io.StringIO()):
+            with self.assertRaises(subprocess.CalledProcessError) as caught:
+                self.run_main(fake, self.signed_env())
+        self.assertIs(caught.exception, primary)
+
+    def test_timeout_with_argv_is_sanitized(self):
+        timeout = subprocess.TimeoutExpired(
+            ['security', 'import', '-P', 'SENTINEL-TIMEOUT-SECRET'], 900)
+        fake = FakeRunner()
+        fake.fail_on('security:import', timeout)
+        stderr = io.StringIO()
+        with mock.patch.object(archive_ios.sys, 'stderr', stderr):
+            self.assertEqual(self.guard(fake, self.signed_env()), 1)
+        rendered = stderr.getvalue()
+        self.assertNotIn('SENTINEL-TIMEOUT-SECRET', rendered)
+        self.assertIn('TimeoutExpired', rendered)
+
+    def test_unexpected_ordinary_exception_is_sanitized(self):
+        exploding = RuntimeError("boom: ['security','import','-P','SENTINEL-RUNTIME-SECRET']")
+        fake = FakeRunner()
+        fake.fail_on('security:import', exploding)
+        stderr = io.StringIO()
+        with mock.patch.object(archive_ios.sys, 'stderr', stderr):
+            self.assertEqual(self.guard(fake, self.signed_env()), 1)
+        rendered = stderr.getvalue()
+        self.assertNotIn('SENTINEL-RUNTIME-SECRET', rendered)
+        self.assertNotIn('boom', rendered)
+        self.assertIn('RuntimeError', rendered)
+
+    def test_cancellation_is_not_swallowed(self):
+        class Cancelled(BaseException):
+            pass
+
+        fake = FakeRunner()
+        fake.fail_on('security:import', Cancelled('cancel'))
+        with mock.patch.object(archive_ios.sys, 'stderr', io.StringIO()):
+            with self.assertRaises(Cancelled):
+                self.guard(fake, self.signed_env())
 
 
 if __name__ == '__main__': unittest.main()

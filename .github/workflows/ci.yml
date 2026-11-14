@@ -1,15 +1,15 @@
-name: CI
+﻿name: CI
 
 on:
   push:
-    # Default branch is feat/partner-device-smoke — CI must fire there too,
+    # Default branch is feat/partner-device-smoke â€” CI must fire there too,
     # otherwise the gate never runs on the branch we actually ship from.
     branches: [main, master, "feat/**", "fix/**", "release/**"]
   pull_request:
   workflow_dispatch:
 
-env:
-  TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+permissions:
+  contents: read
 
 jobs:
   web:
@@ -71,15 +71,24 @@ jobs:
 
   ios:
     name: iOS simulator build
+    # Simulator-only. Signed archive/signing material lives exclusively in
+    # .github/workflows/ios-distribution.yml, which is separately gated: a
+    # generic manual dispatch here also runs the signed release-aab job, so an
+    # iOS approval must never share this trigger surface.
+    #
     # A07 (2026-10-14): macOS 14 images deprecated (removal 2026-11-02).
-    # Moved to macos-26 + explicit discovery gate (Xcode major >= 26 AND
-    # iOS SDK >= 26, fail closed) before any xcodebuild. Web/android/
-    # release jobs, triggers and secrets above/below are untouched.
-    # No SPM patch step here: the partner SPM graph resolves cleanly
-    # (push-notifications declares from: "8.0.0" — measured, unlike customer).
+    # macos-26 + explicit discovery gate (Xcode major >= 26 AND iOS SDK >= 26,
+    # fail closed) before any xcodebuild.
+    # No SPM patch step: the partner SPM graph resolves cleanly
+    # (push-notifications declares from: "8.0.0" â€” measured, unlike customer).
     runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      CI_SIMULATOR_ONLY: 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
       - name: Validate Xcode toolchain (Xcode >= 26, iOS SDK >= 26)
         # Discovers the best installed Xcode; fails closed below either floor.
         # Never hardpins an exact Xcode version.
@@ -87,11 +96,11 @@ jobs:
         env:
           MIN_XCODE_MAJOR: "26"
           MIN_IOS_SDK_MAJOR: "26"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Prepare simulator-only compile fixture
         run: node scripts/prepare-simulator-config.mjs
         env:
@@ -104,7 +113,7 @@ jobs:
 
   release-aab:
     name: Release AAB (signed)
-    # Manual only — must not burn minutes on regular pushes.
+    # Manual only â€” must not burn minutes on regular pushes.
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
@@ -133,7 +142,7 @@ jobs:
         run: echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > android/release.keystore
       - name: Fail closed if release secrets missing
         # android/app/build.gradle:50-52 silently falls back to DEBUG signing
-        # when storePass/keyPass are falsy — an empty secret must abort here
+        # when storePass/keyPass are falsy â€” an empty secret must abort here
         # instead of uploading a debug-signed AAB as a release artifact.
         env:
           RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
@@ -162,92 +171,3 @@ jobs:
           path: android/app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
 
-  ios-archive:
-    name: iOS Archive (signed when configured)
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: macos-26
-    steps:
-      - uses: actions/checkout@v4
-      - name: Validate Xcode toolchain (Xcode >= 26, iOS SDK >= 26)
-        # Same discovery gate as the ios job: fail closed below either floor.
-        run: bash scripts/select-xcode-toolchain.sh
-        env:
-          MIN_XCODE_MAJOR: "26"
-          MIN_IOS_SDK_MAJOR: "26"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - name: Preflight release configuration (skip cleanly when unconfigured)
-        id: preflight
-        # A review/simulator run has no production secrets, so
-        # prepare-native-config.mjs throws "Missing GitHub secret
-        # MOBILE_PRODUCTION_ENV" and marks the WHOLE run failed even though the
-        # simulator app built. Detect that case up front and skip the archive
-        # job with a notice instead.
-        #
-        # NOT a way to ship unsigned: on main/master or any v* release tag the
-        # job stays a HARD FAILURE, so a real release can never go out
-        # unconfigured. Only non-release runs may skip.
-        env:
-          MOBILE_PRODUCTION_ENV: ${{ secrets.MOBILE_PRODUCTION_ENV }}
-          GOOGLE_SERVICE_INFO_PLIST_BASE64: ${{ secrets.GOOGLE_SERVICE_INFO_PLIST_BASE64 }}
-        run: |
-          set -euo pipefail
-          is_release="false"
-          if [ "${{ github.ref }}" = "refs/heads/main" ] || [ "${{ github.ref }}" = "refs/heads/master" ]; then
-            is_release="true"
-          fi
-          case "${{ github.ref }}" in
-            refs/tags/v*) is_release="true" ;;
-          esac
-          missing=""
-          [ -n "${MOBILE_PRODUCTION_ENV:-}" ] || missing="MOBILE_PRODUCTION_ENV"
-          [ -n "${GOOGLE_SERVICE_INFO_PLIST_BASE64:-}" ] || missing="${missing:+$missing, }GOOGLE_SERVICE_INFO_PLIST_BASE64"
-          if [ -n "$missing" ] && [ "$is_release" = "false" ]; then
-            echo "::notice::Skipping iOS archive: production secrets absent on a non-release run ($missing). The simulator app built successfully; this job is a no-op until the release secrets are configured."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Prepare native production configuration
-        if: steps.preflight.outputs.skip != 'true'
-        run: node scripts/prepare-native-config.mjs ios
-        env:
-          MOBILE_PRODUCTION_ENV: ${{ secrets.MOBILE_PRODUCTION_ENV }}
-          GOOGLE_SERVICE_INFO_PLIST_BASE64: ${{ secrets.GOOGLE_SERVICE_INFO_PLIST_BASE64 }}
-      - run: npm run build:mobile
-        if: steps.preflight.outputs.skip != 'true'
-      - run: npx cap sync ios
-        if: steps.preflight.outputs.skip != 'true'
-      - run: node scripts/configure-ios-firebase.mjs
-        if: steps.preflight.outputs.skip != 'true'
-      - name: Show Xcode version (selected toolchain)
-        if: steps.preflight.outputs.skip != 'true'
-        run: xcodebuild -version
-      - name: Archive unsigned iOS build
-        id: archive
-        if: steps.preflight.outputs.skip != 'true'
-        run: python3 scripts/archive_ios.py
-        env:
-          ASC_API_KEY_BASE64: ${{ secrets.ASC_API_KEY_BASE64 }}
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
-          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
-          IOS_PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
-      - uses: actions/upload-artifact@v4
-        if: steps.preflight.outputs.skip != 'true'
-        with:
-          name: partner-unsigned-xcarchive
-          path: build/App.xcarchive
-          if-no-files-found: error
-      - name: Upload signed IPA (never submit automatically)
-        if: steps.archive.outputs.signed == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-store-ipa
-          path: build/ipa/*.ipa
-          if-no-files-found: error
