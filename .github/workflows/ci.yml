@@ -47,6 +47,16 @@ jobs:
 
   android:
     name: Android debug build
+    # Compile check only. The configuration prepared here is synthetic (reserved
+    # .invalid hosts, unregistered package identity, test-shaped keys) and the
+    # APK is never uploaded, installed or distributed. Production configuration,
+    # signing and artifacts belong exclusively to the manual `release-aab` job,
+    # which still runs prepare-native-config.mjs against MOBILE_PRODUCTION_ENV.
+    #
+    # Why the split: prepare-native-config.mjs fails closed when
+    # MOBILE_PRODUCTION_ENV is absent, and that secret does not exist in this
+    # repository, so this job could never compile anything. A compile check must
+    # not require production credentials.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,12 +69,15 @@ jobs:
           distribution: temurin
           java-version: "21"
       - run: npm ci
-      - name: Prepare native production configuration
-        run: node scripts/prepare-native-config.mjs android
+      - name: Prepare synthetic Android compile configuration
+        # Refuses unless GITHUB_ACTIONS=true, RUNNER_OS=Linux and the flag below.
+        # Writes .env, .env.staging and android/app/google-services.json only.
+        run: node scripts/prepare-android-compile-config.mjs
         env:
-          MOBILE_PRODUCTION_ENV: ${{ secrets.MOBILE_PRODUCTION_ENV }}
-          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
-      - run: npm run build:mobile
+          CI_ANDROID_COMPILE_ONLY: 'true'
+      # --mode staging: CI compile check only. A production-mode mobile build
+      # without release values is not what this lane is meant to prove.
+      - run: npm run build:mobile -- --mode staging
       - run: npx cap sync android
       - run: ./gradlew assembleDebug
         working-directory: android
