@@ -1,9 +1,10 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useChats } from '@/hooks/useChats';
 import { useBranches } from '@/hooks/useBranches';
 import { useAuthStore } from '@/stores/authStore';
 import { AttachReferenceModal } from '@/components/chat/AttachReferenceModal';
+import { useOnlineStatus } from '@/components/ui/OfflineBanner';
 import {
   MessageSquare,
   Send,
@@ -24,6 +25,29 @@ import {
 } from 'lucide-react';
 import type { UserRole, ChatThread, Order, Ticket } from '@/types';
 
+/** Who a draft belongs to: one operator, one authorisation scope, one room. */
+interface ComposerOwner {
+  userId: string | null;
+  /** The hook's OWN auth-scope key (role + branches). Never page-derived. */
+  authScopeKey: string | null;
+  threadId: string | null;
+}
+
+interface ComposerDraft {
+  owner: ComposerOwner;
+  text: string;
+  order: Order | null;
+  ticket: Ticket | null;
+  attachOpen: boolean;
+}
+
+const EMPTY_DRAFT: Omit<ComposerDraft, 'owner'> = {
+  text: '',
+  order: null,
+  ticket: null,
+  attachOpen: false,
+};
+
 export const ChatPage: React.FC = () => {
   const { user } = useAuthStore();
   const {
@@ -34,10 +58,19 @@ export const ChatPage: React.FC = () => {
     messages,
     loadingThreads,
     loadingMessages,
+    messagesSynced,
+    retryingThreads,
+    retryingMessages,
+    authorizationScopeKey,
+    threadsError,
+    messagesError,
+    retryThreads,
+    retryMessages,
     sendMessage,
     createOrOpenBranchChannel,
     createOrOpenDirectDm,
   } = useChats();
+  const online = useOnlineStatus();
   const { branches } = useBranches();
 
   const myBranches = branches.filter((b) => !!user?.branchIds?.includes(b.id));
@@ -46,15 +79,77 @@ export const ChatPage: React.FC = () => {
   const threadLabel = (t: ChatThread) =>
     t.title || (t.type === 'branch_channel' ? 'Branch channel' : 'Direct message');
 
-  const [inputMessage, setInputMessage] = useState('');
   const [activeTab, setActiveTab] = useState<'channels' | 'direct'>('channels');
   const [searchQuery, setSearchQuery] = useState('');
   const [showMobileList, setShowMobileList] = useState(true);
-  const [showAttachModal, setShowAttachModal] = useState(false);
-  const [attachedOrder, setAttachedOrder] = useState<Order | null>(null);
-  const [attachedTicket, setAttachedTicket] = useState<Ticket | null>(null);
+
+  // One composer draft, owned by (uid, actual room). A draft typed in room A
+  // must never render — or be sendable — under room B or another operator.
+  const [composerDraft, setComposerDraft] = useState<ComposerDraft>(() => ({
+    owner: {
+      userId: user?.id ?? null,
+      authScopeKey: authorizationScopeKey ?? null,
+      threadId: activeThreadId ?? null,
+    },
+    ...EMPTY_DRAFT,
+  }));
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const composerOwner: ComposerOwner = {
+    userId: user?.id ?? null,
+    authScopeKey: authorizationScopeKey ?? null,
+    threadId: activeThreadId ?? null,
+  };
+
+  // The owner that actually took effect on screen. Writers compare against this
+  // (not against the owner they happened to close over) so a callback captured
+  // under a previous owner is rejected rather than rebinding the live draft.
+  // Updated in a layout effect — never during render.
+  const committedOwnerRef = useRef<ComposerOwner>(composerOwner);
+  useLayoutEffect(() => {
+    committedOwnerRef.current = {
+      userId: user?.id ?? null,
+      authScopeKey: authorizationScopeKey ?? null,
+      threadId: activeThreadId ?? null,
+    };
+  });
+
+  // FENCED at render: anything whose owner is not the current (uid, scope,
+  // room) is foreign and displays as empty. This is the security boundary — an
+  // effect alone would let old room A's draft commit into the first room B frame.
+  const draftOwned =
+    composerDraft.owner.userId === composerOwner.userId &&
+    composerDraft.owner.authScopeKey === composerOwner.authScopeKey &&
+    composerDraft.owner.threadId === composerOwner.threadId;
+  const inputMessage = draftOwned ? composerDraft.text : '';
+  const attachedOrder = draftOwned ? composerDraft.order : null;
+  const attachedTicket = draftOwned ? composerDraft.ticket : null;
+  const attachModalOpen = draftOwned ? composerDraft.attachOpen : false;
+
+  // Retention/cleanup, NOT the security boundary: the render fence decides what
+  // may be displayed and the writer guard decides what may be written. This
+  // effect does actively clear a different owner's bytes after commit, and
+  // adopts the current owner. A transient null room keeps the stored draft (and
+  // its room tag) only within the SAME operator AND the SAME auth scope;
+  // nothing is shown while the room is null.
+  useEffect(() => {
+    setComposerDraft((previous) => {
+      const sameUser = previous.owner.userId === (user?.id ?? null);
+      const sameScope =
+        previous.owner.authScopeKey === (authorizationScopeKey ?? null);
+      const sameThread = previous.owner.threadId === (activeThreadId ?? null);
+      if (sameUser && sameScope && sameThread) return previous;
+      const transientNull = activeThreadId === null && sameUser && sameScope;
+      if (transientNull) {
+        // Same operator and scope, room momentarily unset: keep the stored draft
+        // AND its room tag so returning to that room restores it. Nothing is
+        // displayed while the room is null, so this is not a leak.
+        return previous;
+      }
+      return { owner: composerOwner, ...EMPTY_DRAFT };
+    });
+  }, [user?.id, authorizationScopeKey, activeThreadId]);
 
   const displayThread =
     activeThread ||
@@ -69,13 +164,212 @@ export const ChatPage: React.FC = () => {
         } as ChatThread)
       : null);
 
+  // Only claim "live" when the device is online, this thread's stream has
+  // delivered a snapshot, and it has not errored since. A quiet onSnapshot
+  // never reports network loss, so the online signal is the only evidence.
+  const channelLive = online && messagesSynced && !messagesError;
+  // A dead listener is not a network problem: permission and index failures
+  // arrive with the device still online.
+  const streamLabel = channelLive
+    ? 'Live Channel'
+    : !online
+    ? 'Offline'
+    : messagesError
+    ? 'Disconnected'
+    : 'Connecting…';
+  const streamTone = channelLive ? 'text-emerald-400' : 'text-amber-300';
+  const streamDot = channelLive ? 'bg-emerald-500' : 'bg-amber-500';
+  const showRetry = !channelLive && !loadingMessages;
+
+  // Phone pane rule: with no room there is nothing to show on the chat side, so
+  // the rooms list must stay reachable (error or empty) instead of leaving a
+  // bare "Select a conversation" with the back button gone. Desktop `md:flex`
+  // still shows both panes.
+  const listPaneVisible = showMobileList || !displayThread;
+
+  // Persist the "return to the list" intent across a forced clear. When the
+  // selection is dropped to null we cannot know which room the hook will
+  // auto-select next, so the list (not an operator-chosen room) is what the
+  // phone should land on. A real row tap still sets the flag back to false, so
+  // deliberate navigation keeps working; ordinary re-renders in the same room
+  // never touch this state.
+  useEffect(() => {
+    if (activeThreadId === null) setShowMobileList(true);
+  }, [activeThreadId]);
+
+  // On recovery, return focus to the composer only when this retry still owns
+  // focus and the operator has not moved it. Ownership is tracked on the retry
+  // button node itself (identity, not text) while the request is pending, so
+  // the control unmounting on success cannot erase the decision.
+  const composerRef = useRef<HTMLInputElement>(null);
+  /** The real stream Retry button, so an automatically started attempt can adopt focus. */
+  const retryButtonRef = useRef<HTMLButtonElement>(null);
+  /** Scope the pending retry belongs to; a stale retry must not focus a new user. */
+  const focusOwnerRef = useRef<{
+    scopeId: string;
+    authScopeKey: string | null;
+    threadId: string | null;
+  } | null>(null);
+  const retryFocusHad = useRef(false);
+  /** True once THIS attempt's focus ownership was claimed (by click or adoption). */
+  const retryFocusClaimedRef = useRef(false);
+  const wasRetryingRef = useRef(false);
+  const detachFocusWatchRef = useRef<(() => void) | null>(null);
+
+  const beginRetryFocus = (scopeId: string, threadId: string | null, button: Element | null) => {
+    detachFocusWatchRef.current?.();
+    detachFocusWatchRef.current = null;
+    focusOwnerRef.current = { scopeId, authScopeKey: authorizationScopeKey ?? null, threadId };
+    retryFocusHad.current = false;
+    retryFocusClaimedRef.current = true;
+    if (button instanceof HTMLButtonElement && document.activeElement === button) {
+      retryFocusHad.current = true;
+      // Any focus landing elsewhere during the pending retry releases ownership.
+      const onFocusIn = (event: FocusEvent) => {
+        if (event.target !== button) {
+          retryFocusHad.current = false;
+          detach();
+        }
+      };
+      const detach = () => {
+        document.removeEventListener('focusin', onFocusIn, true);
+        detachFocusWatchRef.current = null;
+      };
+      document.addEventListener('focusin', onFocusIn, true);
+      detachFocusWatchRef.current = detach;
+    }
+  };
+
+  // Never leave the focus watch attached once the page goes away.
+  useEffect(() => () => detachFocusWatchRef.current?.(), []);
+
+  useEffect(() => {
+    // Focus restoration must follow THIS feed's retry, not the aggregate: a
+    // rooms retry finishing must never move focus on behalf of the stream.
+    const finished = wasRetryingRef.current && !retryingMessages;
+    wasRetryingRef.current = !!retryingMessages;
+    if (!finished) return;
+
+    // The pending retry is over: stop watching focus before deciding.
+    detachFocusWatchRef.current?.();
+    detachFocusWatchRef.current = null;
+
+    const owner = focusOwnerRef.current;
+    focusOwnerRef.current = null;
+    const shouldRestore = retryFocusHad.current;
+    retryFocusHad.current = false;
+    retryFocusClaimedRef.current = false;
+    if (!owner || !shouldRestore) return;
+
+    // Success only: a still-failing stream must not yank focus to the composer,
+    // and a delayed old retry must never focus another user's composer.
+    if (!messagesSynced || messagesError) return;
+    if (owner.scopeId !== (user?.id ?? null)) return;
+    // A stale retry from a previous authorisation scope must never focus this
+    // scope's composer, even in the same room.
+    if (owner.authScopeKey !== (authorizationScopeKey ?? null)) return;
+    if (owner.threadId !== activeThreadId) return;
+    composerRef.current?.focus();
+  }, [
+    retryingMessages,
+    messagesSynced,
+    messagesError,
+    activeThreadId,
+    user?.id,
+    authorizationScopeKey,
+  ]);
+
+  /**
+   * Automatic attempts: a foreground hint can start this feed's retry with no
+   * click, so there is no `currentTarget` to hand over. If the operator was
+   * resting on the real Retry button, that button's focus IS the waiting
+   * intent — adopt the same ownership a click would have claimed. If focus is
+   * anywhere else, nothing is claimed and focus is never stolen.
+   */
+  const adoptWasRetryingRef = useRef(false);
+  useEffect(() => {
+    const started = !adoptWasRetryingRef.current && !!retryingMessages;
+    adoptWasRetryingRef.current = !!retryingMessages;
+    if (!started) return;
+    // A click already claimed this attempt, through the button's own handler.
+    if (retryFocusClaimedRef.current) return;
+    const button = retryButtonRef.current;
+    if (!button || document.activeElement !== button) return;
+    beginRetryFocus(user?.id ?? '', activeThreadId, button);
+  }, [retryingMessages, user?.id, activeThreadId]);
+
+  const onRetryMessages = (event: React.MouseEvent<HTMLButtonElement>) => {
+    if (retryingMessages) return;
+    beginRetryFocus(user?.id ?? '', activeThreadId, event.currentTarget);
+    retryMessages();
+  };
+
+  const onRetryThreads = () => {
+    if (retryingThreads) return;
+    retryThreads();
+  };
+
   // Auto scroll to bottom when messages update
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Writers ADMIT or REJECT. A callback captured under an owner that is no
+  // longer committed is dropped outright and returns `previous` unchanged, so
+  // it cannot rebind the live draft, overwrite fresh room B text, close B's
+  // modal or re-introduce a foreign chip. The first keystroke in a genuinely
+  // new room B is accepted because the committed owner is already B by then;
+  // its typed value is applied to a fresh empty draft for B.
+  const updateDraft = (change: (current: ComposerDraft) => ComposerDraft) => {
+    const admittedOwner = composerOwner;
+    setComposerDraft((previous) => {
+      const committed = committedOwnerRef.current;
+      // A stale callback carries an owner the committed state has moved past.
+      if (
+        admittedOwner.userId !== committed.userId ||
+        admittedOwner.authScopeKey !== committed.authScopeKey ||
+        admittedOwner.threadId !== committed.threadId
+      ) {
+        return previous;
+      }
+      // Writers require a real operator and a real room.
+      if (!committed.userId || !committed.threadId) return previous;
+
+      const sameOwner =
+        previous.owner.userId === committed.userId &&
+        previous.owner.authScopeKey === committed.authScopeKey &&
+        previous.owner.threadId === committed.threadId;
+
+      return change(
+        sameOwner ? previous : { owner: committed, ...EMPTY_DRAFT }
+      );
+    });
+  };
+
+  const setInputMessage = (text: string) => updateDraft((current) => ({ ...current, text }));
+  const setAttachedOrder = (order: Order | null) =>
+    updateDraft((current) => ({ ...current, order, ticket: order ? null : current.ticket }));
+  const setAttachedTicket = (ticket: Ticket | null) =>
+    updateDraft((current) => ({ ...current, ticket, order: ticket ? null : current.order }));
+  const setShowAttachModal = (attachOpen: boolean) =>
+    updateDraft((current) => ({ ...current, attachOpen }));
+
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Refuse without a current owned room, operator AND authorisation scope: a
+    // draft whose owner no longer matches must never be sent into whatever room
+    // happens to be open.
+    if (!user || !activeThreadId || !draftOwned) return;
+    // A producer callback captured under an owner the committed state has moved
+    // past must refuse before any payload is built or any local clear runs.
+    const committed = committedOwnerRef.current;
+    if (
+      composerOwner.userId !== committed.userId ||
+      composerOwner.authScopeKey !== committed.authScopeKey ||
+      composerOwner.threadId !== committed.threadId
+    ) {
+      return;
+    }
     if (!inputMessage.trim() && !attachedOrder && !attachedTicket) return;
 
     const text = inputMessage.trim() || (attachedOrder ? `Referencing Order #${attachedOrder.id.slice(-6)}` : `Referencing Ticket #${attachedTicket?.id.slice(-6)}`);
@@ -196,7 +490,7 @@ export const ChatPage: React.FC = () => {
         {/* Left Thread List */}
         <div
           className={`${
-            showMobileList ? 'flex' : 'hidden'
+            listPaneVisible ? 'flex' : 'hidden'
           } md:flex flex-col w-full md:w-80 lg:w-96 border-r border-border bg-[#0E1E12]`}
         >
           {/* Channel / DM Tabs */}
@@ -240,10 +534,39 @@ export const ChatPage: React.FC = () => {
           </div>
 
           {/* Threads List */}
-          <div className="flex-1 overflow-y-auto divide-y divide-[#1A3320]">
-            {loadingThreads ? (
-              <div className="p-8 text-center text-xs text-zinc-500">Loading rooms...</div>
-            ) : filteredThreads.length === 0 ? (
+          <div className="flex-1 overflow-y-auto">
+            {threadsError && !loadingThreads && (
+              <div
+                role="alert"
+                className="p-4 space-y-3 border-b border-amber-800/60 bg-amber-950/30"
+              >
+                <p className="text-xs font-bold text-amber-300">Rooms could not be refreshed.</p>
+                <p className="text-[11px] text-zinc-300 leading-relaxed break-words">
+                  {threadsError}
+                </p>
+                <p className="text-[11px] text-zinc-400 leading-relaxed">
+                  {threads.length > 0
+                    ? 'The rooms listed below are the last ones received and may be out of date.'
+                    : 'No rooms were returned for your access scope.'}
+                </p>
+                <button
+                  type="button"
+                  onClick={onRetryThreads}
+                  aria-disabled={retryingThreads}
+                  className="inline-flex items-center justify-center px-4 py-2 min-h-[44px] text-xs font-bold rounded-xl bg-surface hover:bg-surface-hover border border-border text-white transition-colors cursor-pointer aria-disabled:opacity-60"
+                >
+                  {retryingThreads ? 'Retrying…' : 'Retry'}
+                </button>
+              </div>
+            )}
+            <div className="divide-y divide-[#1A3320]">
+              {loadingThreads ? (
+                <div className="p-8 text-center text-xs text-zinc-500">Loading rooms...</div>
+              ) : threadsError && filteredThreads.length === 0 ? (
+                // The banner above already explains the failure; a second
+                // "no conversations" claim would contradict it.
+                null
+              ) : filteredThreads.length === 0 ? (
               <div className="p-8 text-center space-y-3">
                 <p className="text-xs text-zinc-400">No active conversations found.</p>
                 <p className="text-[11px] text-zinc-500 leading-relaxed">
@@ -311,63 +634,113 @@ export const ChatPage: React.FC = () => {
                   </button>
                 );
               })
-            )}
+              )}
+            </div>
           </div>
         </div>
 
         {/* Right Active Chat Box */}
         <div
           className={`${
-            !showMobileList ? 'flex' : 'hidden'
-          } md:flex flex-1 flex-col bg-[#0A0A0A]`}
+            listPaneVisible ? 'hidden' : 'flex'
+          } md:flex flex-1 flex-col min-w-0 bg-[#0A0A0A]`}
         >
           {displayThread ? (
             <>
               {/* Active Header */}
-              <div className="p-3.5 bg-surface border-b border-border flex items-center justify-between">
-                <div className="flex items-center space-x-3">
+              <div className="p-3.5 bg-surface border-b border-border flex items-center justify-between gap-2">
+                <div className="flex items-center space-x-3 min-w-0">
                   <button
+                    type="button"
+                    aria-label="Back to rooms"
                     onClick={() => setShowMobileList(true)}
-                    className="md:hidden p-1 text-zinc-400 hover:text-white cursor-pointer"
+                    className="md:hidden shrink-0 p-1 text-zinc-400 hover:text-white cursor-pointer"
                   >
                     <ArrowLeft className="w-5 h-5" />
                   </button>
-                  <div className="p-2 rounded-xl bg-surface-hover text-accent-light border border-border">
+                  <div className="p-2 rounded-xl bg-surface-hover text-accent-light border border-border shrink-0">
                     {displayThread.type === 'branch_channel' ? (
                       <Hash className="w-4 h-4" />
                     ) : (
                       <User className="w-4 h-4" />
                     )}
                   </div>
-                  <div>
-                    <h2 className="text-sm font-bold text-white flex items-center space-x-2">
-                      <span>{displayThread.title}</span>
+                  <div className="min-w-0">
+                    <h2 className="text-sm font-bold text-white flex items-center flex-wrap gap-x-2 gap-y-1 min-w-0">
+                      <span className="min-w-0 break-words">{displayThread.title}</span>
                       {displayThread.branchName && (
                         <span className="text-[10px] px-2 py-0.5 rounded bg-[#1A351F] text-emerald-400 font-bold border border-border">
                           {displayThread.branchName}
                         </span>
                       )}
                     </h2>
-                    <p className="text-[10px] text-zinc-400">
+                    <p className="text-[10px] text-zinc-400 truncate">
                       Real-time synchronized chat · Firestore persistence
                     </p>
                   </div>
                 </div>
 
-                <div className="hidden sm:flex items-center space-x-2 text-xs text-zinc-400">
+                <div className="flex items-center space-x-2 text-xs text-zinc-400 shrink-0">
                   <span className="flex h-2 w-2 relative">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                    {channelLive && (
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                    )}
+                    <span className={`relative inline-flex rounded-full h-2 w-2 ${streamDot}`} />
                   </span>
-                  <span className="text-emerald-400 font-bold text-[11px]">Live Channel</span>
+                  {/* A dead, offline or still-connecting listener is never "live". */}
+                  <span role="status" className={`font-bold text-[11px] ${streamTone}`}>
+                    {streamLabel}
+                  </span>
                 </div>
               </div>
+
+              {/* Stream failure: outside the scrolling region so it cannot
+                  scroll out of view on a phone. */}
+              {showRetry && (
+                <div
+                  role="alert"
+                  className="px-4 py-3 border-b border-amber-800/60 bg-amber-950/30 space-y-2"
+                >
+                  <p className="text-xs font-bold text-amber-300">
+                    {messagesError
+                      ? 'Live updates for this room stopped.'
+                      : !online
+                      ? 'Device offline.'
+                      : 'Connecting to this room…'}
+                  </p>
+                  {messagesError && (
+                    <p className="text-[11px] text-zinc-300 leading-relaxed break-words">
+                      {messagesError}
+                    </p>
+                  )}
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    {messagesError
+                      ? messages.length > 0
+                        ? 'Messages below are the last ones received and may be out of date.'
+                        : 'No messages could be read from this room.'
+                      : !online
+                      ? 'Messages below may be out of date until this device reconnects.'
+                      : 'Messages will appear as soon as the connection is established.'}
+                  </p>
+                  <button
+                    ref={retryButtonRef}
+                    type="button"
+                    onClick={onRetryMessages}
+                    aria-disabled={retryingMessages}
+                    className="inline-flex items-center justify-center px-4 py-2 min-h-[44px] text-xs font-bold rounded-xl bg-surface hover:bg-surface-hover border border-border text-white transition-colors cursor-pointer aria-disabled:opacity-60"
+                  >
+                    {retryingMessages ? 'Retrying…' : 'Retry'}
+                  </button>
+                </div>
+              )}
 
               {/* Messages Stream */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 {loadingMessages ? (
-                  <div className="p-8 text-center text-xs text-zinc-500">Loading messages...</div>
-                ) : messages.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-zinc-500">
+                    Loading messages...
+                  </div>
+                ) : !messagesError && messages.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-center p-8 space-y-3">
                     <div className="p-4 rounded-2xl bg-surface text-accent-light border border-border">
                       <MessageSquare className="w-8 h-8" />
@@ -479,6 +852,8 @@ export const ChatPage: React.FC = () => {
                       <ShoppingBag className="w-3.5 h-3.5" />
                       <span>Order #{attachedOrder.id.slice(-6).toUpperCase()}</span>
                       <button
+                        type="button"
+                        aria-label="Remove attached order"
                         onClick={() => setAttachedOrder(null)}
                         className="hover:text-white ml-1 cursor-pointer"
                       >
@@ -491,6 +866,8 @@ export const ChatPage: React.FC = () => {
                       <LifeBuoy className="w-3.5 h-3.5" />
                       <span>Ticket #{attachedTicket.id.slice(-6).toUpperCase()}</span>
                       <button
+                        type="button"
+                        aria-label="Remove attached ticket"
                         onClick={() => setAttachedTicket(null)}
                         className="hover:text-white ml-1 cursor-pointer"
                       >
@@ -516,17 +893,19 @@ export const ChatPage: React.FC = () => {
                 </button>
 
                 <input
+                  ref={composerRef}
                   type="text"
                   placeholder={`Message ${displayThread.title}...`}
                   value={inputMessage}
                   onChange={(e) => setInputMessage(e.target.value)}
-                  className="flex-1 px-4 py-2.5 text-xs bg-bg border border-border rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-accent"
+                  className="flex-1 min-w-0 px-4 py-2.5 text-xs bg-bg border border-border rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-accent"
                 />
 
                 <button
                   type="submit"
+                  aria-label="Send message"
                   disabled={!inputMessage.trim() && !attachedOrder && !attachedTicket}
-                  className="p-2.5 bg-accent hover:bg-accent-hover disabled:opacity-50 text-white rounded-xl transition-colors shadow-md flex items-center justify-center cursor-pointer"
+                  className="p-2.5 shrink-0 bg-accent hover:bg-accent-hover disabled:opacity-50 text-white rounded-xl transition-colors shadow-md flex items-center justify-center cursor-pointer"
                 >
                   <Send className="w-4 h-4" />
                 </button>
@@ -544,17 +923,18 @@ export const ChatPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Attach Reference Modal */}
+      {/* Attach Reference Modal — `isOpen` is the render fence, so a modal opened
+          for a previous owner is not displayed. Fencing does not stop a stale
+          callback from arriving; selection is rejected by the writer guard when
+          its captured owner is no longer committed. */}
       <AttachReferenceModal
-        isOpen={showAttachModal}
+        isOpen={attachModalOpen}
         onClose={() => setShowAttachModal(false)}
         onSelectOrder={(order) => {
           setAttachedOrder(order);
-          setAttachedTicket(null);
         }}
         onSelectTicket={(ticket) => {
           setAttachedTicket(ticket);
-          setAttachedOrder(null);
         }}
       />
     </div>

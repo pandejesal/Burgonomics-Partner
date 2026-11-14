@@ -13,15 +13,38 @@ export function useOnlineStatus(): boolean {
   );
 
   useEffect(() => {
-    const goOnline = () => setIsOnline(true);
-    const goOffline = () => setIsOnline(false);
+    // Local liveness guard: a callback captured before unmount must not write
+    // state afterwards.
+    let alive = true;
+    const readNow = () => {
+      if (!alive) return;
+      setIsOnline(navigator.onLine);
+    };
+    const goOnline = () => {
+      if (alive) setIsOnline(true);
+    };
+    const goOffline = () => {
+      if (alive) setIsOnline(false);
+    };
+
     window.addEventListener('online', goOnline);
     window.addEventListener('offline', goOffline);
+    // A hint is not proof: focus and visibility re-read the CURRENT value,
+    // which may be either true or false. Never assume recovering == online.
+    window.addEventListener('focus', readNow);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') readNow();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
     // The event pair is not exhaustive (e.g. resume from sleep); re-read once.
     setIsOnline(navigator.onLine);
     return () => {
+      alive = false;
       window.removeEventListener('online', goOnline);
       window.removeEventListener('offline', goOffline);
+      window.removeEventListener('focus', readNow);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, []);
 

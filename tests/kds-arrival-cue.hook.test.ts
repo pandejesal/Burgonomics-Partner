@@ -16,6 +16,7 @@ const h = vi.hoisted(() => ({
   states: [] as any[],
   initialized: [] as boolean[],
   refs: [] as any[],
+  memo: [] as Array<{ deps?: any[]; value: any } | undefined>,
   effects: [] as Array<{ deps?: any[]; run: () => void; cleanup?: () => void } | undefined>,
   pending: [] as Array<{ idx: number; deps?: any[]; run: () => any; cleanup?: () => void }>,
   dirty: false,
@@ -52,8 +53,23 @@ vi.mock('react', async (original) => {
       return h.refs[idx];
     },
     useCallback: (fn: any) => fn,
-    useMemo: (fn: any) => fn(),
-    useMemo: (fn: any) => fn(),
+    // Dependency-aware memo slots, indexed like every other hook slot.
+    // The previous duplicate `useMemo: (fn) => fn()` keys never cached anything,
+    // so a stable-deps memo in the hook produced a NEW value every render. That
+    // tore down the stream effect per render and invalidated in-flight async
+    // snapshots — a harness defect that masqueraded as an audio regression.
+    useMemo: (fn: any, deps?: any[]) => {
+      const idx = h.hookIndex++;
+      const prev = h.memo[idx];
+      const changed =
+        !prev ||
+        !deps ||
+        !prev.deps ||
+        prev.deps.length !== deps.length ||
+        deps.some((dep, i) => !Object.is(dep, prev.deps![i]));
+      if (changed) h.memo[idx] = { deps, value: fn() };
+      return h.memo[idx]!.value;
+    },
     useEffect: (run: () => any, deps?: any[]) => {
       const idx = h.hookIndex++;
       const prev = h.effects[idx];
@@ -213,6 +229,7 @@ function unmount() {
   h.states = [];
   h.initialized = [];
   h.refs = [];
+  h.memo = [];
   h.hookIndex = 0;
 }
 
@@ -222,6 +239,7 @@ describe('useKDSRealtimeStream — one arrival cue after an acknowledge', () => 
     h.states = [];
     h.initialized = [];
     h.refs = [];
+    h.memo = [];
     h.effects = [];
     h.pending = [];
     h.dirty = false;
@@ -276,6 +294,75 @@ describe('useKDSRealtimeStream — one arrival cue after an acknowledge', () => 
     expect(isKDSAlarmRepeating()).toBe(true);
   });
 
+  it('does not re-announce a still-pending ticket after the seen-set passes its cap', async () => {
+    // Regression: the hook ran a BLIND FIFO eviction (first 100 ids in insertion
+    // order) *before* the pending-aware helper. Once the dedupe set passed 500,
+    // that blind delete removed tickets that were STILL pending, and the very
+    // next snapshot treated the old ticket as brand new — re-announcing it and
+    // re-chiming. The pure helper test could not see this: the hook never used
+    // the helper's guarantee because it had already destroyed the id.
+    //
+    // Drive it through real snapshot emissions only. Each batch is a normal
+    // production-sized payload (1 long-lived ticket + 9 new, previous batch
+    // bumped to preparing), so the active list never exceeds the 100-doc query
+    // limit while the SEEN set accumulates across batches: 1 + 9 × 60 = 541.
+    await emit([order('LONG_PENDING', 'pending')]);
+    settle();
+    // The mount pass primes with an empty list, so this first ticket is a
+    // genuine arrival. Acknowledge it and start from a clean cue count.
+    expect(h.result.newOrderIds).toEqual(['LONG_PENDING']);
+    createdOscillators.length = 0;
+
+    let previous: string[] = [];
+    const reannouncedAt: number[] = [];
+    for (let batch = 0; batch < 60; batch += 1) {
+      const fresh = Array.from({ length: 9 }, (_, index) => `B${batch}_${index}`);
+      const cuesBefore = createdOscillators.length;
+      await emit([
+        order('LONG_PENDING', 'pending'),
+        ...previous.map((id) => order(id, 'preparing')),
+        ...fresh.map((id) => order(id, 'pending')),
+      ]);
+      // The regression signal: an old, continuously-pending ticket announced
+      // again after the seen-set overflowed its cap.
+      if (h.result.newOrderIds.includes('LONG_PENDING')) {
+        reannouncedAt.push(batch);
+      }
+      // It must also not re-chime beyond the 9 genuinely-new arrivals.
+      if (createdOscillators.length - cuesBefore > 10) {
+        reannouncedAt.push(-batch - 1);
+      }
+      previous = fresh;
+    }
+
+    // The long-lived ticket was pending through every single batch, so it must
+    // never have been re-announced or re-chimed.
+    expect(reannouncedAt).toEqual([]);
+
+    // Settle the last batch to preparing. That batch WAS a real arrival, so its
+    // banner is legitimately still showing; the operator dismisses it.
+    await emit([
+      order('LONG_PENDING', 'pending'),
+      ...previous.map((id) => order(id, 'preparing')),
+    ]);
+    h.result.dismissNewOrderAlert();
+    settle();
+
+    // Now re-deliver the identical state. Nothing has arrived, so nothing may be
+    // announced and no cue may sound — the long-pending ticket in particular
+    // must not be treated as new merely because the seen-set overflowed.
+    createdOscillators.length = 0;
+    await emit([
+      order('LONG_PENDING', 'pending'),
+      ...previous.map((id) => order(id, 'preparing')),
+    ]);
+
+    expect(h.result.pendingOrders.map((o: any) => o.id)).toContain('LONG_PENDING');
+    expect(h.result.newOrderIds).not.toContain('LONG_PENDING');
+    expect(h.result.newOrderTotal).toBe(0);
+    expect(createdOscillators).toHaveLength(0);
+  });
+
   it('hides unpaid customer orders and alerts exactly once when capture arrives', async () => {
     h.bump.mockClear();
     const unpaid = { ...order('ord_1793526177472_uiI9kl', 'pending'), paymentMethod: undefined,
@@ -320,9 +407,30 @@ describe('useKDSRealtimeStream — one arrival cue after an acknowledge', () => 
     expect(isKDSAlarmRepeating()).toBe(false);
     createdOscillators.length = 0;
 
-    // Switch outlet and deliver its makeline in the same commit, so the latch
-    // can only be cleared by the scope boundary — not by a transient 0 count.
+    // Capture branch 1's own live listener BEFORE the switch. After the new
+    // scope commits, this callback belongs to a superseded generation.
+    const branch1Listener = h.snapshot!;
+
+    // Actually commit the new scope. A query is scoped by branchId, so branch 1's
+    // listener can never deliver branch 2 documents: the previous version of this
+    // test emitted D/E/F into the OLD listener before any rerender and only
+    // passed by bypassing the scope fence. Settle first so branch 2's listener
+    // exists, and only then deliver.
     h.selectedBranchId = 'branch_2';
+    settle();
+
+    // A late payload from the superseded branch 1 listener is scope-inert: it
+    // may not add rows and may not cue.
+    branch1Listener.next({
+      docs: [order('A_LATE', 'pending')].map((o) => ({ id: o.id, data: () => o })),
+    });
+    await flush();
+    settle();
+    expect(createdOscillators).toHaveLength(0);
+    expect(h.result.activeOrders.map((o: any) => o.id)).not.toContain('A_LATE');
+
+    // Branch 2's current snapshot: 3 new pending tickets → 2 oscillators (the
+    // alarm's own chime pair) and the loop re-armed.
     await emit([
       order('D', 'pending', 'branch_2'),
       order('E', 'pending', 'branch_2'),

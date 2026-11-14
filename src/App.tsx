@@ -1,7 +1,7 @@
 import { BrowserRouter, HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useEffect, type ReactNode } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { QueryClient, QueryClientProvider, QueryCache, MutationCache } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { PrivacyPage, SupportPage } from '@/pages/PrivacyPage';
 import { LoginPage } from '@/pages/LoginPage';
 import { DashboardPage } from '@/pages/DashboardPage';
@@ -27,33 +27,15 @@ import { titleForPath } from '@/utils/routeTitle';
 import { GlobalOfflineBanner } from '@/components/ui/OfflineBanner';
 
 import { AuthProvider } from '@/core/auth/AuthContext';
-import { Toaster, toast } from 'sonner';
+import { Toaster } from 'sonner';
 import { AppErrorBoundary } from '@/core/errors/AppErrorBoundary';
+import { queryClient } from '@/core/query/queryClient';
 
-const queryCache = new QueryCache({
-  onError: (error) => {
-    console.error('[QueryCache] Uncaught query error:', error);
-    toast.error('Data load failed', { description: error?.message || 'Please reload and try again' });
-  },
-});
-
-const mutationCache = new MutationCache({
-  onError: (error) => {
-    console.error('[MutationCache] Uncaught mutation error:', error);
-    toast.error('Action failed', { description: error?.message || 'Please try again' });
-  },
-});
-
-export const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 1000 * 30, // 30 seconds
-      retry: 1,
-    },
-  },
-  queryCache,
-  mutationCache,
-});
+// `queryClient` (with the global query/mutation failure wiring) lives in
+// `@/core/query/queryClient` so its real callbacks are testable without
+// mounting the router. Re-exported here because `clearAppCaches` imports it
+// from this module.
+export { queryClient };
 
 // Router shell only: BrowserRouter breaks on native file:/// URLs (no server
 // to resolve deep paths on cold start). HashRouter keeps routing client-side

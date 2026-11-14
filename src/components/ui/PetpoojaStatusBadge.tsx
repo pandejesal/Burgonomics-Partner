@@ -66,10 +66,46 @@ export const PetpoojaStatusBadge: React.FC<PetpoojaStatusBadgeProps> = ({
     }
   };
 
+  const meta = petpoojaBadgeMeta(status);
+  // Phone widths used to hide the "Petpooja POS:" identity (`hidden lg:inline`)
+  // and leave a bare "UNKNOWN" pill that read exactly like an unknown *role*
+  // badge in the same header. The brand now stays visible at every breakpoint,
+  // and the chip carries one complete accessible name instead of relying on
+  // desktop-only text.
+  // Each state gets its own honest clause; only a completed sync may name a
+  // clock time, so 'syncing'/'fallback' never borrow one.
+  const statusDescription = (() => {
+    switch (status) {
+      case 'online':
+        return `synced at ${lastSyncTime}`;
+      case 'syncing':
+        return 'sync in progress';
+      case 'error':
+        return 'last sync attempt failed';
+      case 'unknown':
+      default:
+        return 'not verified yet';
+    }
+  })();
+  const accessibleLabel = `Petpooja POS: ${meta.label} — ${statusDescription}`;
+  // Only a role that may sync is told to tap the icon; the refusal path must
+  // not point at a control it does not render.
+  const statusHint = !maySync
+    ? 'POS link not verified yet — a manager can sync the Petpooja catalog'
+    : 'POS link not verified yet — tap the sync icon to verify';
+
   return (
+    // Bounded reflow at narrow widths with large root text: `shrink-0` plus
+    // `space-x-*` kept the chip on one unbreakable line, so at 320px CSS px
+    // with 200% root text it measured 400px inside a ~272px content box and
+    // pushed the document to 424px in real Brave. It now wraps and is capped
+    // to the row width. Nothing is truncated, hidden, or shrunk: the full
+    // identity, the honest state and the 44px target all stay.
     <div
-      className="flex shrink-0 items-center space-x-1.5 bg-surface/80 border border-border px-2 sm:px-2.5 py-1.5 rounded-full text-xs text-white">
-      <span className="flex h-2 w-2 relative">
+      role="status"
+      aria-label={accessibleLabel}
+      className="flex min-w-0 max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5 bg-surface/80 border border-border px-2 sm:px-2.5 py-1.5 rounded-full text-xs text-white">
+      <span className="flex h-2 w-2 shrink-0 relative">
         <span
           className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${petpoojaBadgeMeta(status).dot}`}
         />
@@ -78,26 +114,24 @@ export const PetpoojaStatusBadge: React.FC<PetpoojaStatusBadgeProps> = ({
         />
       </span>
 
-      <span className="font-medium text-zinc-300 hidden lg:inline">Petpooja POS:</span>
+      <span className="min-w-0 font-medium text-zinc-300">Petpooja POS:</span>
       <span
-        className="font-semibold uppercase tracking-wider text-[10px] text-zinc-300"
-        title={
-          status === 'unknown'
-            ? 'POS link not verified yet — tap the sync icon to verify'
-            : undefined
-        }
+        className="min-w-0 font-semibold uppercase tracking-wider text-[10px] text-zinc-300"
+        title={status === 'unknown' ? statusHint : undefined}
       >
-        {petpoojaBadgeMeta(status).label}
+        {meta.label}
       </span>
 
       <span className="text-zinc-500 hidden xl:inline text-[11px]">({lastSyncTime})</span>
 
       {maySync ? (
         <button
+          type="button"
           onClick={handleManualSync}
           disabled={syncing}
+          aria-label="Sync menu and items from Petpooja POS"
           title="Sync menu & items from Petpooja POS"
-          className="ml-1 p-1 hover:bg-[#1C3D21] rounded-full text-zinc-300 hover:text-white transition-colors disabled:opacity-50"
+          className="ml-1 p-1 min-h-11 min-w-11 shrink-0 inline-flex items-center justify-center hover:bg-[#1C3D21] rounded-full text-zinc-300 hover:text-white transition-colors disabled:opacity-50"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin text-accent-light' : ''}`} />
         </button>

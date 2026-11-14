@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { useAppStore } from '@/stores/appStore';
 import { db } from '@/config/firebase';
@@ -169,13 +170,91 @@ interface UseOrdersParams {
   dateRange?: 'today' | 'week' | 'month' | 'all';
 }
 
+/**
+ * Ownership proof for the rows `useOrders` returns.
+ *
+ * The fields intentionally mirror `kdsAuthScopeKey`'s inputs so a consumer can
+ * compare a full authorisation key instead of guessing from the current user.
+ * Present only for genuine cached data (see `ordersDataScope` construction).
+ */
+export interface OrdersDataScope {
+  userId: string | null;
+  role: string | null;
+  resolvedBranchIds: string[];
+  selectedBranchId: string | null;
+}
+
 export function useOrders(params: UseOrdersParams = {}) {
   const { user } = useAuthStore();
   const { selectedCity, selectedBranchId } = useAppStore();
   const queryClient = useQueryClient();
 
-  const { data: orders = [], isLoading, error, refetch, dataUpdatedAt } = useQuery({
-    queryKey: ['orders', user?.id, user?.role, selectedCity, selectedBranchId, params],
+  /**
+   * The branch scope this read is actually clamped to. Note the product filter
+   * below still narrows branch_owner/staff rows to `branchIds[0]`; this is the
+   * QUERY scope, which is what the cache entry must be keyed by.
+   */
+  const resolvedBranchIds = useMemo(
+    () =>
+      [...new Set(resolveScopedBranchIds(user, selectedBranchId).map((id) => String(id).trim()))]
+        .filter((id) => id.length > 0)
+        .sort(),
+    [user, selectedBranchId]
+  );
+
+  /**
+   * The RAW primary branch the final projection uses. `branch_owner` and
+   * `branch_staff` rows are filtered to `user.branchIds[0]` below, so swapping
+   * `[y,z]` → `[z,y]` changes which tickets can appear even though the
+   * normalised full set is identical. The normalised `resolvedBranchIds` alone
+   * cannot express that, so the raw primary is a separate key dimension.
+   */
+  const rawPrimaryBranchId = user?.branchIds?.[0] ?? null;
+
+  /**
+   * The actual `in` operand of the direct read: the RAW resolver output capped
+   * to the first ten, with ONLY its order normalised.
+   *
+   * Order matters. `queryFn` calls
+   * `where('branchId', 'in', resolveScopedBranchIds(user, selection).slice(0, 10))`
+   * — resolved FIRST, capped SECOND. Sorting before the cap would change which
+   * ten branches are queried, i.e. silently alter query semantics.
+   *
+   * The VALUES are never trimmed, string-coerced or filtered: `queryFn` passes
+   * them through verbatim, so whitespace-only differences are genuinely
+   * different operands and must not share a cache entry. Only duplicate
+   * detection and ordering are normalised, and only AFTER the cap.
+   *
+   * Known limit: the alias read uses the full raw scope, whose raw ordering is
+   * still not modelled here — that contract dimension remains open.
+   */
+  const directReadBranchIds = useMemo(() => {
+    const raw = resolveScopedBranchIds(user, selectedBranchId);
+    const capped = raw.slice(0, 10);
+    return [...new Set(capped)].sort();
+  }, [user, selectedBranchId]);
+
+  const { data: orders = [], isLoading, error, refetch, dataUpdatedAt, isPlaceholderData } = useQuery({
+    // Provenance boundary. The key carries the dimensions proven to drive this
+    // query: uid, role, city, selection, params, the full normalised branch
+    // scope, the RAW primary ("first assigned branch") projection input, and the
+    // actual capped `in` operand with its raw values preserved. The normalised
+    // full set alone was insufficient: it hides both which branch the final row
+    // filter keeps and which ten raw branches the direct read asked for.
+    //
+    // Not a claim of completeness: the alias read's full-scope raw ordering is
+    // still unmodelled (tracked as an open contract gap, not silently ignored).
+    queryKey: [
+      'orders',
+      user?.id,
+      user?.role,
+      selectedCity,
+      selectedBranchId,
+      params,
+      resolvedBranchIds,
+      rawPrimaryBranchId,
+      directReadBranchIds,
+    ],
     queryFn: async (): Promise<Order[]> => {
       // The UI selection is user-writable (localStorage) — scoped roles are
       // clamped to their assigned branches; a scoped role with no branches
@@ -343,5 +422,32 @@ export function useOrders(params: UseOrdersParams = {}) {
     },
   });
 
-  return { orders, isLoading, error, refetch, dataUpdatedAt, updateOrderStatus };
+  /**
+   * Provenance descriptor for the rows in `orders`.
+   *
+   * Returned ONLY when the cache entry behind those rows is genuine data for
+   * THIS authorisation scope: a real fetch has completed (`dataUpdatedAt > 0`)
+   * and react-query is not serving a placeholder from a previous query. A
+   * placeholder is precisely the previous identity's entry, so it can never be
+   * ownership proof — and we never stamp the current user onto it.
+   */
+  const ordersDataScope: OrdersDataScope | null =
+    dataUpdatedAt > 0 && !isPlaceholderData
+      ? {
+          userId: user?.id ?? null,
+          role: user?.role ?? null,
+          resolvedBranchIds,
+          selectedBranchId: selectedBranchId ?? null,
+        }
+      : null;
+
+  return {
+    orders,
+    isLoading,
+    error,
+    refetch,
+    dataUpdatedAt,
+    updateOrderStatus,
+    ordersDataScope,
+  };
 }

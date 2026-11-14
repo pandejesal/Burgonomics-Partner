@@ -1,24 +1,26 @@
+// @vitest-environment jsdom
 /**
- * P1-A client side, useOrders hop — bumpStatus contract emission
- * (committed HEAD e69f211; src/hooks/useOrders.ts is CLEAN in the working
- * tree — verified via git status/diff).
+ * P1-A client side, useOrders hop — bumpStatus contract emission.
  *
  * Scope note: tests/kds-bump-outbox.test.ts F3 already pins the wire level
  * (partnerFunctionsApi.bumpOrderStatus). Nothing pins the useOrders mutation
- * itself (useOrders.ts:474-499): the hop where a caller-supplied
- * expectedStatus could be silently dropped before it ever reaches the API.
+ * itself: the hop where a caller-supplied expectedStatus could be silently
+ * dropped before it ever reaches the API.
  *
  * The behavior pinned: updateOrderStatus's mutationFn forwards the caller's
  * expectedStatus verbatim when provided, sends NO precondition key when the
  * caller cannot prove the shown status (loud bump per the doc comment), does
  * not swallow bump rejections, and its onSuccess invalidates ['orders'].
  *
- * Harness: useOrders declares no local React state, so with all hook
- * providers (@tanstack/react-query, stores) mocked the hook can be invoked
- * as a plain function and the real useMutation options are captured
- * (same mock-based convention as tests/partnerops-walkin-payment-truth.test.tsx).
+ * Harness: the hook now calls React hooks (`useMemo`), so it MUST run inside a
+ * real render — invoking it as a plain function throws "invalid hook call".
+ * This mounts a minimal component with `createRoot` + `act` and captures the
+ * real `useMutation` options. Query I/O, stores and the bump API remain mocked
+ * at their existing boundaries; React itself is NOT mocked.
  */
-import { describe, expect, it, vi, beforeEach, type Mock } from 'vitest';
+import { act, createElement, type ReactElement } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterAll, afterEach, describe, expect, it, vi, beforeEach, type Mock } from 'vitest';
 
 const rq = vi.hoisted(() => ({
   mutation: null as { mutationFn?: (...a: any[]) => any; onSuccess?: (...a: any[]) => any } | null,
@@ -26,7 +28,16 @@ const rq = vi.hoisted(() => ({
 }));
 
 vi.mock('@tanstack/react-query', () => ({
-  useQuery: () => ({ data: [], isLoading: false, error: null, refetch: vi.fn(), dataUpdatedAt: 0 }),
+  // Mirrors the real hook's destructuring; nothing is cached, so no ownership
+  // descriptor is claimed (isPlaceholderData stays true / dataUpdatedAt 0).
+  useQuery: () => ({
+    data: [],
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+    dataUpdatedAt: 0,
+    isPlaceholderData: false,
+  }),
   useMutation: (opts: any) => {
     rq.mutation = opts;
     return { mutate: vi.fn(), mutateAsync: vi.fn() };
@@ -58,13 +69,48 @@ import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
 
 const bumpOrderStatus = partnerFunctionsApi.bumpOrderStatus as unknown as Mock;
 
-/** Simulates the hook mount and returns the live mutation contract. */
+/** Renders the real hook and returns the live mutation contract. */
+let root: Root | null = null;
+let container: HTMLDivElement | null = null;
+const actFlagBefore = Object.getOwnPropertyDescriptor(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+
+function Harness(): ReactElement | null {
+  useOrders();
+  return null;
+}
+
 function mountOrders(): { mutationFn: (...a: any[]) => any; onSuccess: (...a: any[]) => any } {
   rq.mutation = null;
-  useOrders();
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+  // Synchronous from the caller's perspective: the test bodies stay unchanged.
+  act(() => {
+    root!.render(createElement(Harness));
+  });
   expect(rq.mutation).toBeTruthy();
   return rq.mutation as any;
 }
+
+afterEach(async () => {
+  if (root) {
+    await act(async () => {
+      root!.unmount();
+    });
+  }
+  root = null;
+  container?.remove();
+  container = null;
+});
+
+afterAll(() => {
+  // Restore any pre-existing act-environment state instead of destroying it.
+  if (actFlagBefore) {
+    Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', actFlagBefore);
+  } else {
+    Reflect.deleteProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT');
+  }
+});
 
 function payload(): Record<string, unknown> {
   const [arg] = bumpOrderStatus.mock.calls[0] as [Record<string, unknown>];
@@ -72,6 +118,7 @@ function payload(): Record<string, unknown> {
 }
 
 beforeEach(() => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   bumpOrderStatus.mockClear().mockResolvedValue({ ok: true });
   rq.invalidateQueries.mockClear();
 });

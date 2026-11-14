@@ -44,6 +44,35 @@ export interface SendMessageParams {
   };
 }
 
+/**
+ * The message to show for a listener failure. A message that is absent, empty
+ * or whitespace-only gets the documented fallback so an error state can never
+ * be visually blank — but a meaningful message is returned UNTRIMMED, exactly
+ * as the SDK supplied it.
+ */
+function errorMessageOf(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim().length > 0) return error.message;
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    const message = error.message;
+    if (typeof message === 'string' && message.trim().length > 0) return message;
+  }
+  return fallback;
+}
+
+/**
+ * The SDK `error.code`, forwarded untouched. Firestore denials are opaque or
+ * localised in `message`, so the code is the only reliable denial signal.
+ * Presence is a trim test (a whitespace-only code carries no information), but
+ * a real code is returned UNTRIMMED and unchanged.
+ */
+function errorCodeOf(error: unknown): string | undefined {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    const code = error.code;
+    if (typeof code === 'string' && code.trim().length > 0) return code;
+  }
+  return undefined;
+}
+
 export const chatService = {
   /**
    * Subscribe to chat threads for a user (either by participation or branch scoping)
@@ -53,7 +82,7 @@ export const chatService = {
     userRole: UserRole,
     branchIds: string[],
     callback: (threads: ChatThread[]) => void,
-    onError?: (message: string) => void
+    onError?: (message: string, code?: string) => void
   ): Unsubscribe {
     const chatsRef = collection(db, 'chats');
 
@@ -88,8 +117,10 @@ export const chatService = {
       (error) => {
         console.error('Error fetching chat threads:', error);
         // Listener death is an error, never an empty list: keep existing
-        // data on screen and let the caller render the failure.
-        onError?.(error?.message || 'Chat threads failed to load');
+        // data on screen and let the caller render the failure. The SDK code
+        // travels with the message so callers can treat a denial as a denial
+        // even when the message is opaque or localised.
+        onError?.(errorMessageOf(error, 'Chat threads failed to load'), errorCodeOf(error));
       }
     );
   },
@@ -100,7 +131,7 @@ export const chatService = {
   subscribeToMessages(
     chatId: string,
     callback: (messages: ChatMessage[]) => void,
-    onError?: (message: string) => void
+    onError?: (message: string, code?: string) => void
   ): Unsubscribe {
     const messagesRef = collection(db, 'chats', chatId, 'messages');
     // Latest 50 only: the old code subscribed to the thread's ENTIRE history
@@ -121,8 +152,9 @@ export const chatService = {
       },
       (error) => {
         console.error(`Error fetching messages for chat ${chatId}:`, error);
-        // Listener death is an error, never an empty list.
-        onError?.(error?.message || 'Messages failed to load');
+        // Listener death is an error, never an empty list. The SDK code is
+        // forwarded unchanged alongside the message.
+        onError?.(errorMessageOf(error, 'Messages failed to load'), errorCodeOf(error));
       }
     );
   },
