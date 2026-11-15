@@ -160,6 +160,13 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
       if (!user) throw new Error('Not authenticated');
 
       const warnings: string[] = [];
+      // The role THIS report runs under: the RENDER-captured identity, which is
+      // what the query key pins. Not `getState()` — the rest of this queryFn
+      // builds its scope from the same closure, and a live role read could pair
+      // a new role with an old scope, widening the privileged alias read.
+      // `isGlobalRole` is a SELECTION test, never an order-access proof, so it
+      // is not used here.
+      const readRole = user?.role ?? null;
       let branchIds: string[] = [];
       const branchMeta: Record<
         string,
@@ -394,7 +401,7 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
         // Linked Delivery stores (registry; no extra reads when unmapped).
         if (branchIds.length > 0) {
           try {
-            const aliased = await fetchAliasedStoreOrders(db, branchIds);
+            const aliased = await fetchAliasedStoreOrders(db, branchIds, { role: readRole });
             aliasedOrders = aliased;
             const seen = new Set(rawDocs.map((d) => d.id));
             for (const doc of aliased) {

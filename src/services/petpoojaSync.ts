@@ -9,6 +9,7 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import type { MenuCategory, MenuItem } from '@/types';
+import { MENU_SYNC_DENIED_COPY } from '@/services/petpoojaMenuSyncRoles';
 
 export const BURGONOMICS_DEFAULT_CATEGORIES: MenuCategory[] = [
   { id: 'cat_classic_burgers', name: 'Classic Burgers', sortOrder: 1, active: true },
@@ -803,6 +804,32 @@ export const BURGONOMICS_63_ITEMS: Omit<MenuItem, 'lastSyncedAt'>[] = [
 ];
 
 /**
+ * Live authorisation for a menu SYNC, supplied by the CALLER and consulted by
+ * this module immediately before every side effect.
+ *
+ * Why the service takes this at all: both entry points below perform their own
+ * `await`s (a Firestore read here, a dynamic `import()` inside the sync). A
+ * caller that checked permission once, before entering, is checking a decision
+ * that an operator's demotion or logout can invalidate while those awaits are
+ * still outstanding. Passing a live predicate means the LAST decision before the
+ * request is made against the CURRENT identity, not the one that started the
+ * work.
+ *
+ * The server remains the only authority; this is a "do not even ask" guard.
+ * Omitting it (the `PetpoojaStatusBadge` path, which is outside this slice's
+ * allowlist) keeps the previous behaviour exactly: client-side role gate on the
+ * control, plus server enforcement.
+ */
+export interface MenuSyncGuard {
+  maySync: () => boolean;
+}
+
+/** Thrown when a guard refuses at the moment of sending. */
+function menuSyncDenied(): Error {
+  return new Error(MENU_SYNC_DENIED_COPY);
+}
+
+/**
  * Synchronize the branch menu.
  *
  * LIVE (VITE_PETPOOJA_ENABLED=true): delegates to the Cloud Functions
@@ -817,8 +844,16 @@ export const BURGONOMICS_63_ITEMS: Omit<MenuItem, 'lastSyncedAt'>[] = [
  * into `menu/{branchId}/…`, the very collection the live ingestion writes
  * once the outlet is linked. Production mock builds never assume
  * demonstration data was reality.
+ *
+ * When `guard` is supplied it is re-consulted after EVERY await below, right
+ * before the side effect it protects. The `await import(...)` calls are awaited
+ * gates in their own right: a demotion during module loading must not be spent
+ * on the request that follows it.
  */
-export async function syncPetpoojaMenuForBranch(branchId: string): Promise<{
+export async function syncPetpoojaMenuForBranch(
+  branchId: string,
+  guard?: MenuSyncGuard
+): Promise<{
   categoriesSynced: number;
   itemsSynced: number;
   syncedAt: Date;
@@ -832,6 +867,9 @@ export async function syncPetpoojaMenuForBranch(branchId: string): Promise<{
   );
   if (implementation === "live") {
     const { partnerFunctionsApi } = await import("./partnerFunctionsApi");
+    // LAST decision before the request leaves the client. Everything above is
+    // an await, so the caller's original check may already be stale.
+    if (guard && !guard.maySync()) throw menuSyncDenied();
     const res = await partnerFunctionsApi.syncPetpoojaMenu(branchId);
     return {
       categoriesSynced: res.categoriesCount ?? 0,
@@ -852,8 +890,13 @@ export async function syncPetpoojaMenuForBranch(branchId: string): Promise<{
     );
   }
 
+  // The DEV write path is a side effect too: a refused caller must not rewrite
+  // the local catalog even though no network request is involved.
+  if (guard && !guard.maySync()) throw menuSyncDenied();
+
   const batch = writeBatch(db);
   const now = Timestamp.now();
+
 
   // 1. Upsert Categories
   for (const cat of BURGONOMICS_DEFAULT_CATEGORIES) {
@@ -908,15 +951,24 @@ export async function syncPetpoojaMenuForBranch(branchId: string): Promise<{
  * - A read or sync failure is surfaced (thrown) instead of returning
  *   `false`; a failed gate must never be indistinguishable from "menu fresh,
  *   no sync needed". The single consumer (useMenu) already catches and logs.
+ * - The staleness READ is awaited, so the caller's authorisation answer can go
+ *   stale while this function is suspended. `guard` is therefore consulted
+ *   immediately before EACH of the three sync sends, not once on entry.
  */
-export async function checkAndAutoSyncMenu(branchId: string): Promise<boolean> {
+export async function checkAndAutoSyncMenu(
+  branchId: string,
+  guard?: MenuSyncGuard
+): Promise<boolean> {
   try {
     const itemsSnap = await getDocs(
       query(collection(db, 'products'), where('branchId', '==', branchId))
     );
 
     if (itemsSnap.empty) {
-      await syncPetpoojaMenuForBranch(branchId);
+      // Re-checked HERE: the read above is an await, so a demotion or logout
+      // during it must not be answered with a privileged write.
+      if (guard && !guard.maySync()) throw menuSyncDenied();
+      await syncPetpoojaMenuForBranch(branchId, guard);
       return true;
     }
 
@@ -934,14 +986,16 @@ export async function checkAndAutoSyncMenu(branchId: string): Promise<boolean> {
     }
 
     if (stampMillis.length === 0) {
-      await syncPetpoojaMenuForBranch(branchId);
+      if (guard && !guard.maySync()) throw menuSyncDenied();
+      await syncPetpoojaMenuForBranch(branchId, guard);
       return true;
     }
 
     const oldestMillis = stampMillis.reduce((min, n) => (n < min ? n : min), stampMillis[0]);
     const ageInHours = (Date.now() - oldestMillis) / (1000 * 60 * 60);
     if (ageInHours >= 1) {
-      await syncPetpoojaMenuForBranch(branchId);
+      if (guard && !guard.maySync()) throw menuSyncDenied();
+      await syncPetpoojaMenuForBranch(branchId, guard);
       return true;
     }
 

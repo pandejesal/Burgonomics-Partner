@@ -1226,7 +1226,12 @@ export function useKDSRealtimeStream() {
         // holds the LATEST rendered scope, so a resolution that outlives an
         // identity switch is rejected.
         const mergeScope = authScopeKey;
-        fetchAliasedStoreOrders(db, scopeBranchIds)
+        // The role captured for THIS listener generation. The alias read is
+        // privileged (a store.id query has no branchId predicate to prove
+        // ownership), so the helper refuses to send it for anyone but a brand
+        // reader. `scopeRole` is the exact role this subscription was built
+        // for; `isGlobalRole` is a selection test and is never used here.
+        fetchAliasedStoreOrders(db, scopeBranchIds, { role: scopeRole })
           .then((aliased) => {
             if (!ingestionGate.isCurrent(mergeToken)) return;
             if (latestAuthScopeKeyRef.current !== mergeScope) return;

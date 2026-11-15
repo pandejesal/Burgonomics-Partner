@@ -447,6 +447,11 @@ async function fetchScopedOrders(storeId: string | null): Promise<Array<{ id: st
   const user = useAuthStore.getState().user;
   const { selectedBranchId } = useAppStore.getState();
   const global = globalReadAllowed();
+  // The role captured for THIS read. It is handed to the alias helper, which
+  // refuses to issue the store.id-only query for anything but a brand reader —
+  // the alias read has no branchId predicate, so no other role can prove
+  // ownership of what it returns.
+  const readRole = user?.role ?? null;
   const scopeIds = global ? [] : resolveScopedBranchIds(user, selectedBranchId);
   if (!global && scopeIds.length === 0) return [];
 
@@ -476,7 +481,7 @@ async function fetchScopedOrders(storeId: string | null): Promise<Array<{ id: st
     if (!global && aliasedScope.length === 0) {
       for (const b of scopeIds.slice(0, FIRESTORE_IN_LIMIT)) aliasedScope.push(b);
     }
-    for (const doc of await fetchAliasedStoreOrders(db, aliasedScope)) {
+    for (const doc of await fetchAliasedStoreOrders(db, aliasedScope, { role: readRole })) {
       if (!merged.has(doc.id)) merged.set(doc.id, doc.data);
     }
   } else {
@@ -540,6 +545,9 @@ export const adminOrdersService = {
     const user = useAuthStore.getState().user;
     const { selectedBranchId } = useAppStore.getState();
     const global = globalReadAllowed();
+    // The role captured for THIS listener generation, passed to the privileged
+    // alias read so a non-brand operator never sends a store.id-only query.
+    const readRole = user?.role ?? null;
     const scopeIds = global ? [] : resolveScopedBranchIds(user, selectedBranchId);
     const storeFilter = !!storeId && storeId !== "all";
 
@@ -584,7 +592,7 @@ export const adminOrdersService = {
                 : scopeIds.length > 0
                   ? scopeIds
                   : [];
-            const aliased = await fetchAliasedStoreOrders(db, aliasedScope);
+            const aliased = await fetchAliasedStoreOrders(db, aliasedScope, { role: readRole });
             // Drop a stale generation: a newer snapshot has already started
             // (and may have painted), so this merge must not write state.
             if (cancelled || !ingestionGate.isCurrent(mergeToken)) return;

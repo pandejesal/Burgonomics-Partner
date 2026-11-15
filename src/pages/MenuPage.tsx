@@ -81,7 +81,18 @@ export function MenuPage() {
 
   const handleManualSync = async () => {
     try {
-      await syncPetpooja.mutateAsync();
+      const outcome = await syncPetpooja.mutateAsync();
+      // A retired outcome means the request finished for an outlet or a session
+      // this screen no longer represents: the sync already left the client, so
+      // there is nothing to retry, but claiming "refreshed" here would describe
+      // whatever outlet happens to be on screen now (review r3,
+      // `manual-outcome-proof-r3.json`).
+      //
+      // Neither success nor failure is honest, so paint neither — the pending
+      // state is released by the mutation itself and the operator keeps whatever
+      // the sync-health probe already told them. A rejection still reaches the
+      // catch below and stays loud: retirement is not failure.
+      if (outcome?.status === 'retired') return;
       setSyncOutcome('ok');
       setSyncSuccess(true);
       showToast('Catalog refreshed from Petpooja POS bridge');

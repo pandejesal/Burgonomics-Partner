@@ -568,18 +568,58 @@ export const createKdsIngestionGate = (): KdsIngestionGate => {
 };
 
 /**
+ * Capability required to issue the legacy store-only order read.
+ *
+ * `orders` rules (root `firestore.rules:390-395`) grant a read only to the
+ * order's own customer/user or to `ownsBranch(resource.data.branchId)`. The
+ * alias query below has NO `branchId` predicate — it selects by `store.id` — so
+ * only a brand-wide reader (`isAdmin()` = brand_owner | developer) can ever
+ * satisfy the rules with it. For everyone else the request is refused outright:
+ * rules are not filters, so issuing it is a guaranteed `permission-denied` on
+ * every snapshot, not a silently narrow result.
+ *
+ * `support` / `regional_manager` are NOT included. They appear in
+ * `branchScope.GLOBAL_ROLES` for SELECTION visibility only; that list is not a
+ * licence for a brand-wide order read, and treating it as one is precisely the
+ * bug this capability removes.
+ *
+ * This is a client hint that decides whether to ASK. The server rules remain the
+ * only authority — `fetchAliasedStoreOrders` still surfaces a denial it
+ * receives, so a wrong hint can never be mistaken for "no linked orders".
+ */
+const ALIAS_STORE_READ_ROLES: readonly string[] = ['brand_owner', 'developer'];
+
+/** May this captured role issue the store.id-only legacy read? Fails closed. */
+export function canReadAliasedStoreOrders(role: string | null | undefined): boolean {
+  if (!role) return false;
+  return ALIAS_STORE_READ_ROLES.includes(role);
+}
+
+/** The captured authorisation of the caller that is about to read. */
+export interface AliasStoreReadCapability {
+  /** Role captured by the caller FOR THIS READ (never a global-role test). */
+  role: string | null | undefined;
+}
+
+/**
  * Fetch Delivery-shaped docs for branch-scoped views.
  *
  * `where('branchId', 'in', …)` never matches Delivery docs (they carry the
  * store id nested at `store.id`), so scoped views run this second query and
- * merge the results. Zero Firestore reads when no linked stores exist.
+ * merge the results. Zero Firestore reads when no linked stores exist — and
+ * zero reads for a caller whose captured role cannot prove brand-wide access,
+ * which is why `capability` is REQUIRED rather than an optional grant.
  * Deliberately no `orderBy` (avoids a composite index and the missing
  * `createdAt` field on Delivery docs) — callers sort client-side.
  */
 export async function fetchAliasedStoreOrders(
   db: Firestore,
-  branchIds: string[]
+  branchIds: string[],
+  capability: AliasStoreReadCapability
 ): Promise<RawOrderDoc[]> {
+  // Refuse BEFORE mapping: a caller without the capability must not even build
+  // the predicate, so there is nothing to accidentally send later.
+  if (!canReadAliasedStoreOrders(capability?.role)) return [];
   const storeIds = deliveryStoreIdsForBranches(branchIds).slice(0, 10);
   if (storeIds.length === 0) return [];
   const snap = await getDocs(

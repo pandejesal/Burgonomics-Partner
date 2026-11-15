@@ -276,6 +276,15 @@ export function useOrders(params: UseOrdersParams = {}) {
           data: d.data() as Record<string, any>,
         }));
 
+      // The ROLE THIS READ runs under: the identity the query key pins.
+      //
+      // Deliberately the RENDER-captured `user`, not `getState()`: every other
+      // scope decision in this queryFn (and the key itself) is built from that
+      // same closure value. Mixing in a live read would let an identity change
+      // mid-flight pair a NEW role with the OLD scope — i.e. widen the
+      // privileged alias read past what the cache entry was keyed for.
+      const readRole = user?.role ?? null;
+
       let rawDocs: Array<{ id: string; data: Record<string, any> }> = [];
 
       if (scopeBranchIds.length > 0) {
@@ -306,10 +315,12 @@ export function useOrders(params: UseOrdersParams = {}) {
       }
 
       // Branch-scoped views: also pull Delivery docs whose store links to
-      // one of the scoped branches (registry). No-op when nothing is linked.
+      // one of the scoped branches (registry). No-op when nothing is linked and
+      // no-op for a role that cannot prove brand-wide access — the helper
+      // refuses without sending.
       if (scopeBranchIds.length > 0) {
         try {
-          const aliased = await fetchAliasedStoreOrders(db, scopeBranchIds);
+          const aliased = await fetchAliasedStoreOrders(db, scopeBranchIds, { role: readRole });
           const seen = new Set(rawDocs.map((d) => d.id));
           for (const doc of aliased) {
             if (!seen.has(doc.id)) {
