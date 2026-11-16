@@ -1,569 +1,137 @@
-import React, { useState } from 'react';
-import {
-  X,
-  Plus,
-  Minus,
-  Trash2,
-  CheckCircle2,
-  Printer,
-  CreditCard,
-  Banknote,
-  QrCode,
-  ShoppingBag,
-  UtensilsCrossed,
-  Bike,
-} from 'lucide-react';
+import React, { useRef, useState } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { useAppStore } from '@/stores/appStore';
-import { db } from '@/config/firebase';
-import { doc, getDoc, setDoc, Timestamp } from 'firebase/firestore';
-import type { Order, OrderStatus, OrderType, OrderItem } from '@/types';
-import { toDeliveryStatusMeta } from '@/utils/orderContract';
-import {
-  WALK_IN_CUSTOMER_ID,
-  createOrderDocIfAbsent,
-  generateWalkInOrderId,
-} from '@/features/orders/utils/walkInOrder';
+import { useStrictWalkInMenu, type WalkInIneligibilityReason } from '@/hooks/useMenu';
 import { useWalkInPackagingFee } from '@/features/orders/hooks/useWalkInPackagingFee';
-import { stripUndefinedDeep } from '@/utils/firestorePayload';
+import { ApiRequestError, partnerFunctionsApi, type WalkInReceipt } from '@/services/partnerFunctionsApi';
 
 interface ManualOrderCreateModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onOrderCreated?: (order: Order) => void;
+  onOrderCreated?: (receipt: WalkInReceipt) => void;
 }
 
-const MENU_ITEMS = [
-  { id: 'itm_paneer_makhani', name: 'Paneer Makhani Burst Burger', price: 199, petpoojaId: 'PP-BRG-103' },
-  { id: 'itm_cheese_lava', name: 'Cheese Lava Monster Burger', price: 249, petpoojaId: 'PP-BRG-104' },
-  { id: 'itm_classic_crunch', name: 'Classic Veggie Crunch Burger', price: 129, petpoojaId: 'PP-BRG-101' },
-  { id: 'itm_truffle_smash', name: 'Double Truffle Smash Burger', price: 349, petpoojaId: 'PP-BRG-107' },
-  { id: 'itm_peri_peri_fries', name: 'Peri-Peri Crinkle Fries', price: 99, petpoojaId: 'PP-SDE-301' },
-  { id: 'itm_cheesy_dip', name: 'Signature Garlic Herb Dip', price: 49, petpoojaId: 'PP-DIP-401' },
-  { id: 'itm_iced_tea', name: 'Peach Passion Iced Tea', price: 89, petpoojaId: 'PP-BEV-501' },
-];
+const reasons: Record<WalkInIneligibilityReason, string> = {
+  branch_mismatch: 'Unavailable at this branch', out_of_stock: 'Out of stock',
+  invalid_price: 'Price unavailable', price_unavailable: 'Price unavailable',
+  invalid_name: 'Item details unavailable', configurable_unsupported: 'Customizable items are unavailable',
+};
 
-export function ManualOrderCreateModal({
-  isOpen,
-  onClose,
-  onOrderCreated,
-}: ManualOrderCreateModalProps) {
+function newRequestId(): string {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+export function ManualOrderCreateModal({ isOpen, onClose, onOrderCreated }: ManualOrderCreateModalProps) {
   const { user } = useAuthStore();
   const { selectedBranchId } = useAppStore();
-
-  const [orderType, setOrderType] = useState<OrderType>('takeaway');
+  const branchId = selectedBranchId || user?.branchIds?.[0];
+  const menu = useStrictWalkInMenu(branchId);
+  const [orderType, setOrderType] = useState<'takeaway' | 'dinein'>('takeaway');
   const [tableNumber, setTableNumber] = useState('');
   const [customerName, setCustomerName] = useState('Walk-in Customer');
-  const [customerPhone, setCustomerPhone] = useState('+91 ');
-  const [specialInstructions, setSpecialInstructions] = useState('');
-
-  const [selectedItems, setSelectedItems] = useState<
-    Array<{ item: (typeof MENU_ITEMS)[0]; quantity: number; notes?: string }>
-  >([
-    { item: MENU_ITEMS[0], quantity: 1 },
-    { item: MENU_ITEMS[4], quantity: 1 },
-  ]);
-
-  const [paymentMethod, setPaymentMethod] = useState<'cod' | 'upi' | 'razorpay'>('cod');
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const [cashTendered, setCashTendered] = useState<string>('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [phoneError, setPhoneError] = useState<string | null>(null);
-
-  // A walk-in order must be stamped with a real branch (no fallback: a wrong
-  // outlet corrupts revenue/KDS). The same id scopes the packaging quote.
-  const branchId = selectedBranchId || user?.branchIds?.[0];
-
-  // Packaging is server-owned (Petpooja-driven). Branch + order type only; a
-  // failure blocks Create instead of guessing a fee.
-  const {
-    packagingFee,
-    isLoading: packagingLoading,
-    error: packagingError,
-    retry: retryPackaging,
-  } = useWalkInPackagingFee({
-    branchId,
-    orderType,
-    enabled: isOpen && !!branchId,
-  });
-
-  /** Normalized +91XXXXXXXXXX or null. Riders/KOT need a real number — never a fake default. */
-  const normalizedPhone = (raw: string): string | null => {
-    const digits = raw.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
-    return digits.length === 10 ? `+91 ${digits.slice(0, 5)} ${digits.slice(5)}` : null;
-  };
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [notes, setNotes] = useState('');
+  const [cart, setCart] = useState<Array<{ productId: string; quantity: number }>>([]);
+  const [cash, setCash] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [priceChange, setPriceChange] = useState<{ fingerprint: string; paise: number; total: number } | null>(null);
+  const identity = useRef<{ fingerprint: string; id: string } | null>(null);
+  const { packagingFee, isLoading: packagingLoading, error: packagingError, retry } = useWalkInPackagingFee({ branchId, orderType, enabled: isOpen && !!branchId });
 
   if (!isOpen) return null;
-
-  const subtotal = selectedItems.reduce((acc, curr) => acc + curr.item.price * curr.quantity, 0);
-  // R9 / owner decision 31 Oct 2026: menu prices are GST-INCLUSIVE. The bill
-  // must never add tax on top of the menu value — the stored `tax` is only the
-  // share already contained in it (R1: netFood * rate / (1 + rate), to paise).
-  // Packaging sits outside the GST base and is added as its own line.
-  const GST_RATE = 0.05;
-  const round2 = (value: number) => Math.round(value * 100) / 100;
-  const gstIncluded = round2((subtotal * GST_RATE) / (1 + GST_RATE));
-  const total = round2(subtotal + (packagingFee ?? 0));
-
-  const tenderedNumber = parseFloat(cashTendered) || 0;
-  const changeDue = Math.max(0, tenderedNumber - total);
-
-  const handleAddItem = (item: (typeof MENU_ITEMS)[0]) => {
-    setSelectedItems((prev) => {
-      const existing = prev.find((i) => i.item.id === item.id);
-      if (existing) {
-        return prev.map((i) => (i.item.id === item.id ? { ...i, quantity: i.quantity + 1 } : i));
-      }
-      return [...prev, { item, quantity: 1 }];
-    });
+  const selected = cart.map(line => ({ ...line, item: menu.eligibleItems.find(item => item.id === line.productId) }));
+  const validCart = selected.length > 0 && selected.every(line => line.item && line.quantity <= 99);
+  const subtotal = selected.reduce((sum, line) => sum + (line.item?.price ?? 0) * line.quantity, 0);
+  const netFood = Math.round(subtotal * 100) / 100;
+  const total = Math.round((netFood + (packagingFee ?? 0)) * 100) / 100;
+  const gst = Math.round((netFood * 0.05 / 1.05) * 100) / 100;
+  const payload = {
+    branchId: branchId ?? '', orderType, items: cart,
+    ...(orderType === 'dinein' && tableNumber.trim() ? { tableNumber: tableNumber.trim() } : {}),
+    ...(notes.trim() ? { notes: notes.trim() } : {}),
+    ...(customerName.trim() ? { customerName: customerName.trim() } : {}),
+    ...(customerPhone.trim() ? { customerPhone: customerPhone.trim() } : {}),
   };
+  const fingerprint = JSON.stringify({ ...payload, previewPaise: Math.round(total * 100) });
+  const confirmedPrice = priceChange?.fingerprint === fingerprint ? priceChange : null;
+  const expectedTotalPaise = confirmedPrice?.paise ?? Math.round(total * 100);
+  const payable = expectedTotalPaise / 100;
 
-  const handleUpdateQty = (itemId: string, delta: number) => {
-    setSelectedItems((prev) =>
-      prev
-        .map((i) => {
-          if (i.item.id === itemId) {
-            const nextQty = i.quantity + delta;
-            return nextQty > 0 ? { ...i, quantity: nextQty } : null;
-          }
-          return i;
-        })
-        .filter(Boolean) as Array<{ item: (typeof MENU_ITEMS)[0]; quantity: number; notes?: string }>
-    );
-  };
-
-  const handleCreateOrder = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (selectedItems.length === 0) return;
-    if (packagingFee === null) {
-      setSubmitError(
-        'The server packaging fee has not loaded. Retry before creating the order — no fee is assumed.'
-      );
-      return;
-    }
-
-    // Counter orders used to persist the literal '+91 ' placeholder as the
-    // customer phone (dial-fail downstream, unsearchable in CRM). Normalize
-    // for ALL order types; store '' when absent, block only delivery.
-    const phone = normalizedPhone(customerPhone) || '';
-    if (orderType === 'delivery' && !phone) {
-      setPhoneError('Enter a valid 10-digit mobile number — the rider needs it.');
-      return;
-    }
-    setPhoneError(null);
-
-    setIsSubmitting(true);
-
-    // Loop 49/120: no fallback branch — a walk-in order stamped to the wrong
-    // outlet corrupts branch revenue, KDS routing, and courier dispatch.
-    // Block loudly when the operator has no branch context.
-    if (!branchId) {
-      setSubmitError(
-        "No branch context — select your outlet (or ask your manager to assign one) before creating walk-in orders."
-      );
-      setIsSubmitting(false);
-      return;
-    }
-
-    if (!user?.id) {
-      setSubmitError(
-        'No signed-in operator — counter orders must be stamped with your user id before they can be saved.'
-      );
-      setIsSubmitting(false);
-      return;
-    }
-
-    const orderItems: OrderItem[] = selectedItems.map((i) => ({
-      itemId: i.item.id,
-      petpoojaItemId: i.item.petpoojaId,
-      name: i.item.name,
-      quantity: i.quantity,
-      price: i.item.price,
-      // Omit the key entirely: Firestore rejects an undefined field value.
-      ...(i.notes ? { specialInstructions: i.notes } : {}),
-    }));
-
-    // Random Firestore auto-id — never Date.now(): the old 6-digit stamp
-    // wrapped every ~16.7 minutes and the blind setDoc that followed silently
-    // OVERWROTE the earlier walk-in order (revenue + KOT lost, no error).
-    const orderId = generateWalkInOrderId();
-
-    const newOrder: Order = {
-      id: orderId,
-      customerId: WALK_IN_CUSTOMER_ID,
-      // firestore.rules orders create requires customerId == auth.uid OR
-      // userId == auth.uid. A counter order's customerId is the walk-in
-      // sentinel and can never match, so the creating operator's uid MUST be
-      // stamped here or every walk-in create is denied. DEPENDENCY: the
-      // rules lane is adding the `userId == uid` accept branch in the same
-      // session — both fields must exist on every order this modal writes.
-      userId: user.id,
-      customerName: customerName || 'Walk-in Customer',
-      customerPhone: phone,
-      branchId,
-      branchName: branchId.includes('surat') ? 'Surat Adajan' : 'Ahmedabad SG Highway',
-      city: branchId.includes('surat') ? 'Surat' : 'Ahmedabad',
-      items: orderItems,
-      subtotal,
-      tax: gstIncluded,
-      deliveryFee: 0,
-      total,
-      orderType,
-      ...(orderType === 'dinein' ? { tableNumber: tableNumber || '01' } : {}),
-      // Delivery-compatible object form (see orderContract): ALL readers go
-      // through normalizeOrderDoc/toPartnerStatus, which map this to
-      // 'pending' (pinned by tests/order-contract.test.ts). Never read
-      // .status raw off a Firestore doc — always normalize first.
-      status: toDeliveryStatusMeta('pending') as unknown as OrderStatus,
-      paymentMethod,
-      paymentStatus: 'completed',
-      // Petpooja sync state is server-owned (orderPush). The client cannot
-      // observe a push from here, so it must not plant any sync claim at birth.
-      specialInstructions,
-      createdAt: Timestamp.now(),
-      updatedAt: Timestamp.now(),
-    };
-
-    // Success-only close: the old code closed + toasted success even when the
-    // write failed (offline/denied) — staff lost the whole form believing the
-    // order existed. On failure the modal stays open with every field intact.
-    const safeOrder = stripUndefinedDeep(newOrder);
-    setSubmitError(null);
+  function add(productId: string) {
+    setPriceChange(null);
+    setCart(previous => previous.some(line => line.productId === productId)
+      ? previous.map(line => line.productId === productId ? { ...line, quantity: Math.min(99, line.quantity + 1) } : line)
+      : [...previous, { productId, quantity: 1 }]);
+  }
+  function remove(productId: string) {
+    setPriceChange(null);
+    setCart(previous => previous.flatMap(line => line.productId !== productId ? [line] : line.quantity > 1 ? [{ ...line, quantity: line.quantity - 1 }] : []));
+  }
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (submitting || !branchId || !validCart || packagingFee === null || packagingLoading) return;
+    const requestFingerprint = JSON.stringify({ ...payload, expectedTotalPaise });
+    if (identity.current?.fingerprint !== requestFingerprint) identity.current = { fingerprint: requestFingerprint, id: newRequestId() };
+    const requestId = identity.current.id;
+    setSubmitting(true); setError(null);
     try {
-      const orderRef = doc(db, 'orders', orderId);
-      // getFirestore has no ignoreUndefinedProperties: any undefined field
-      // (top-level or nested item) throws client-side before the write.
-      await createOrderDocIfAbsent(orderRef, safeOrder, {
-        get: (ref) => getDoc(ref as typeof orderRef),
-        set: (ref, data) => setDoc(ref as typeof orderRef, data as Order),
-      });
-    } catch (err: any) {
-      setIsSubmitting(false);
-      setSubmitError(
-        err?.message || 'Order could not be saved (offline or permission denied). Check connection and retry — nothing was lost.'
-      );
-      return;
-    }
+      const receipt = await partnerFunctionsApi.createWalkInOrder({ ...payload, branchId, expectedTotalPaise, requestId });
+      identity.current = null; setPriceChange(null); setCart([]);
+      onOrderCreated?.(receipt); onClose();
+    } catch (err: unknown) {
+      if (err instanceof ApiRequestError && (err.code === 'PRICE_CHANGED' || err.code === 'IDEMPOTENCY_CONFLICT')) {
+        identity.current = null;
+        if (err.code === 'PRICE_CHANGED' && err.totals && Number.isSafeInteger(err.totals.split?.totalAmountPaise)) {
+          setPriceChange({ fingerprint, paise: err.totals.split.totalAmountPaise, total: err.totals.grandTotal });
+        } else setPriceChange(null);
+      }
+      setError(err instanceof Error ? err.message : 'Order could not be created. Please retry.');
+    } finally { setSubmitting(false); }
+  }
 
-    setIsSubmitting(false);
-    onOrderCreated?.(safeOrder);
-    onClose();
-  };
-
-  return (
-    <div
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center overflow-y-auto p-4"
-      style={{
-        // Fixed overlays sit outside #root's bottom inset. Use max() so the
-        // fallback 1rem is not added on top of the device inset (no doubling).
-        paddingTop: "max(1rem, env(safe-area-inset-top, 0px))",
-        paddingBottom: "max(1rem, env(safe-area-inset-bottom, 0px))",
-      }}
-    >
-      <div className="bg-[#0F0F0F] border border-neutral-800 rounded-3xl w-full max-w-2xl max-h-full flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-        {/* Header */}
-        <div className="p-4 sm:p-5 bg-neutral-900/90 border-b border-neutral-800 flex items-center justify-between">
-          <div>
-            <h2 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
-              <span>+ New Walk-in Counter Order</span>
-              <span className="text-[10px] px-2 py-0.5 rounded bg-[#0E4825] text-emerald-300 font-bold uppercase">
-                Instant Billing
-              </span>
-            </h2>
-            <p className="text-xs text-neutral-400">Fast cashier tender & Petpooja KOT generation</p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 text-neutral-400 hover:text-white rounded-xl hover:bg-neutral-800 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Scrollable Content */}
-        <form onSubmit={handleCreateOrder} className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4 text-xs sm:text-sm">
-          {/* Channel Selector */}
-          <div>
-            <label className="block text-xs font-bold uppercase text-neutral-400 mb-1.5">
-              Fulfillment Mode
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => setOrderType('takeaway')}
-                className={`py-2 px-3 rounded-xl border font-bold flex items-center justify-center gap-1.5 transition-colors ${
-                  orderType === 'takeaway'
-                    ? 'bg-emerald-700 text-white border-emerald-500 shadow-xs'
-                    : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white'
-                }`}
-              >
-                <ShoppingBag className="w-4 h-4" />
-                <span>Takeaway</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setOrderType('dinein')}
-                className={`py-2 px-3 rounded-xl border font-bold flex items-center justify-center gap-1.5 transition-colors ${
-                  orderType === 'dinein'
-                    ? 'bg-cyan-700 text-white border-cyan-500 shadow-xs'
-                    : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white'
-                }`}
-              >
-                <UtensilsCrossed className="w-4 h-4" />
-                <span>Dine-In</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setOrderType('delivery')}
-                className={`py-2 px-3 rounded-xl border font-bold flex items-center justify-center gap-1.5 transition-colors ${
-                  orderType === 'delivery'
-                    ? 'bg-orange-600 text-white border-orange-500 shadow-xs'
-                    : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white'
-                }`}
-              >
-                <Bike className="w-4 h-4" />
-                <span>Delivery</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Customer info */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-neutral-400 mb-1">Customer Name</label>
-              <input
-                type="text"
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-700 text-white text-xs font-semibold focus:outline-none focus:border-[#FF6600]"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-neutral-400 mb-1">
-                {orderType === 'dinein' ? 'Table Number' : 'Phone Number'}
-              </label>
-              {orderType === 'dinein' ? (
-                <input
-                  type="text"
-                  placeholder="e.g. Table 04"
-                  value={tableNumber}
-                  onChange={(e) => setTableNumber(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-700 text-white text-xs font-semibold focus:outline-none focus:border-[#FF6600]"
-                  required
-                />
-              ) : (
-                <>
-                  <input
-                    type="tel"
-                    placeholder="+91 98765 43210"
-                    value={customerPhone}
-                    onChange={(e) => {
-                      setCustomerPhone(e.target.value);
-                      if (phoneError) setPhoneError(null);
-                    }}
-                    className="w-full px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-700 text-white text-xs font-semibold focus:outline-none focus:border-[#FF6600]"
-                    required={orderType === 'delivery'}
-                  />
-                  {phoneError && (
-                    <p role="alert" className="mt-1 text-[11px] font-bold text-rose-400">
-                      {phoneError}
-                    </p>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Quick Menu Item Picker */}
-          <div>
-            <label className="block text-xs font-bold uppercase text-neutral-400 mb-1.5">
-              Add Items from Menu
-            </label>
-            <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-1">
-              {MENU_ITEMS.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => handleAddItem(item)}
-                  className="px-2.5 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-white text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <span>{item.name}</span>
-                  <span className="font-bold text-[#FF6600]">₹{item.price}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Selected items order cart */}
-          <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-3 space-y-2">
-            <span className="text-[11px] uppercase font-bold text-neutral-500 block">
-              Cart Items ({selectedItems.length})
-            </span>
-            {selectedItems.map(({ item, quantity }, idx) => (
-              <div key={idx} className="flex items-center justify-between gap-2 py-1 border-b border-neutral-900">
-                <div className="min-w-0 flex-1">
-                  <p className="font-bold text-white text-xs truncate">{item.name}</p>
-                  <p className="text-[11px] text-neutral-400">₹{item.price} each</p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleUpdateQty(item.id, -1)}
-                    className="p-1 rounded bg-neutral-800 hover:bg-neutral-700 text-white"
-                  >
-                    <Minus className="w-3 h-3" />
-                  </button>
-                  <span className="font-mono font-bold text-white text-xs px-1">{quantity}</span>
-                  <button
-                    type="button"
-                    onClick={() => handleUpdateQty(item.id, 1)}
-                    className="p-1 rounded bg-neutral-800 hover:bg-neutral-700 text-white"
-                  >
-                    <Plus className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Payment Method & Tender Mode */}
-          <div>
-            <label className="block text-xs font-bold uppercase text-neutral-400 mb-1.5">
-              Payment Tender
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => setPaymentMethod('cod')}
-                className={`py-2 px-3 rounded-xl border font-bold flex items-center justify-center gap-1.5 ${
-                  paymentMethod === 'cod'
-                    ? 'bg-emerald-700 text-white border-emerald-500'
-                    : 'bg-neutral-900 border-neutral-800 text-neutral-400'
-                }`}
-              >
-                <Banknote className="w-4 h-4" />
-                <span>Cash</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setPaymentMethod('upi')}
-                className={`py-2 px-3 rounded-xl border font-bold flex items-center justify-center gap-1.5 ${
-                  paymentMethod === 'upi'
-                    ? 'bg-purple-700 text-white border-purple-500'
-                    : 'bg-neutral-900 border-neutral-800 text-neutral-400'
-                }`}
-              >
-                <QrCode className="w-4 h-4" />
-                <span>UPI QR</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setPaymentMethod('razorpay')}
-                className={`py-2 px-3 rounded-xl border font-bold flex items-center justify-center gap-1.5 ${
-                  paymentMethod === 'razorpay'
-                    ? 'bg-blue-700 text-white border-blue-500'
-                    : 'bg-neutral-900 border-neutral-800 text-neutral-400'
-                }`}
-              >
-                <CreditCard className="w-4 h-4" />
-                <span>Card/UPI at counter</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Cash Change Calculator */}
-          {paymentMethod === 'cod' && (
-            <div className="p-3 rounded-xl bg-neutral-950 border border-neutral-800 flex items-center justify-between gap-3">
-              <div>
-                <label className="block text-[11px] font-bold text-neutral-400">Cash Received (₹)</label>
-                <input
-                  type="number"
-                  placeholder={String(total)}
-                  value={cashTendered}
-                  onChange={(e) => setCashTendered(e.target.value)}
-                  className="w-28 px-2 py-1 rounded bg-neutral-900 border border-neutral-700 text-white font-mono text-xs font-bold"
-                />
-              </div>
-              <div className="text-right">
-                <span className="text-[11px] font-bold text-neutral-400 block">Change to Return</span>
-                <span className="font-mono text-base font-black text-emerald-400">₹{changeDue}</span>
-              </div>
-            </div>
-          )}
-
-          {/* Pricing Math Summary */}
-          <div className="p-3 rounded-xl bg-neutral-950 border border-neutral-800 space-y-1 text-xs text-neutral-400">
-            <div className="flex justify-between">
-              <span>Subtotal</span>
-              <span className="font-mono text-white">₹{subtotal}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>GST (5%, included)</span>
-              <span className="font-mono text-white">₹{gstIncluded.toFixed(2)}</span>
-            </div>
-            {packagingLoading ? (
-              <div className="flex justify-between text-amber-300" role="status">
-                <span>Store Packaging</span>
-                <span>Loading from server…</span>
-              </div>
-            ) : packagingError ? (
-              <div className="rounded-lg border border-rose-500/50 bg-rose-950/50 p-2 text-rose-200 space-y-1" role="alert">
-                <p className="font-bold">{packagingError}</p>
-                <button
-                  type="button"
-                  onClick={retryPackaging}
-                  className="px-2.5 py-1 rounded-lg bg-rose-800 hover:bg-rose-700 text-white font-bold text-[11px] cursor-pointer"
-                >
-                  Retry packaging fee
-                </button>
-              </div>
-            ) : (
-              <div className="flex justify-between">
-                <span>Store Packaging</span>
-                <span className="font-mono text-white">₹{packagingFee ?? 0}</span>
-              </div>
-            )}
-            <div className="flex justify-between pt-1.5 border-t border-neutral-800 text-sm font-black text-white">
-              <span>Total Bill</span>
-              <span className="font-mono text-[#FF6600]">
-                ₹{packagingFee === null ? '—' : total}
-              </span>
-            </div>
-          </div>
-
-          {/* Submit button */}
-          {submitError && (
-            <div role="alert" className="rounded-xl border border-rose-500/50 bg-rose-950/60 p-3 text-xs font-bold text-rose-200">
-              {submitError}
-            </div>
-          )}
-          <button
-            type="submit"
-            disabled={
-              selectedItems.length === 0 ||
-              isSubmitting ||
-              packagingLoading ||
-              packagingFee === null
-            }
-            className="w-full h-12 rounded-xl bg-[#0E4825] hover:bg-[#135d30] text-emerald-300 font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer disabled:opacity-50"
-          >
-            <Printer className="w-4 h-4" />
-            <span>
-              {isSubmitting
-                ? 'Creating Order...'
-                : `Place & Print KOT (${packagingFee === null ? '—' : `₹${total}`})`}
-            </span>
-          </button>
-        </form>
-      </div>
+  return <div
+    className="fixed inset-0 z-50 overflow-y-auto bg-black/80 p-4 flex items-center justify-center"
+    style={{
+      // Fixed overlays sit outside #root's bottom inset (index.css:111), so the
+      // panel must clear the status bar and gesture area itself. max() keeps the
+      // 1rem floor WITHOUT stacking it on top of the device inset (no doubling).
+      paddingTop: 'max(1rem, env(safe-area-inset-top, 0px))',
+      paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))',
+    }}
+  >
+    <div className="bg-neutral-950 text-white border border-neutral-700 rounded-2xl w-full max-w-2xl max-h-full overflow-y-auto p-5">
+      <div className="flex justify-between items-center"><h2 className="text-lg font-bold">New walk-in order</h2><button type="button" onClick={onClose} aria-label="Close">Close</button></div>
+      <p className="text-sm text-neutral-300">Cash tender · Payment pending</p>
+      <form onSubmit={submit} className="space-y-4 mt-4">
+        <fieldset><legend>Fulfillment mode</legend><div className="flex gap-2">
+          <button type="button" aria-pressed={orderType === 'takeaway'} onClick={() => setOrderType('takeaway')}>Takeaway</button>
+          <button type="button" aria-pressed={orderType === 'dinein'} onClick={() => setOrderType('dinein')}>Dine-In</button>
+        </div></fieldset>
+        <label className="block">Customer name <input className="block bg-neutral-800 p-2" value={customerName} onChange={e => setCustomerName(e.target.value)} maxLength={200} /></label>
+        <label className="block">Phone number (optional) <input className="block bg-neutral-800 p-2" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} maxLength={32} /></label>
+        {orderType === 'dinein' && <label className="block">Table number <input className="block bg-neutral-800 p-2" value={tableNumber} onChange={e => setTableNumber(e.target.value)} maxLength={64} /></label>}
+        <label className="block">Notes (optional) <textarea className="block bg-neutral-800 p-2" value={notes} onChange={e => setNotes(e.target.value)} maxLength={1000} /></label>
+        <section><h3 className="font-bold">Add items from menu</h3>
+          {menu.isLoading && <p>Loading menu…</p>}{menu.error && <p role="alert">Menu could not be loaded: {menu.error.message}</p>}
+          {!menu.isLoading && !menu.error && menu.allItems.length === 0 && <p>No menu items available.</p>}
+          <div className="flex flex-wrap gap-2">{menu.eligibleItems.map(item => <button className="bg-neutral-800 rounded p-2" type="button" key={item.id} onClick={() => add(item.id)}>{item.name} ₹{item.price}</button>)}
+            {menu.ineligibleItems.map(item => <button className="bg-neutral-800 rounded p-2 opacity-60" type="button" key={item.id} disabled>{item.name} — {reasons[item.reason]}</button>)}</div>
+        </section>
+        <section><h3 className="font-bold">Cart items ({cart.length})</h3>{selected.map(line => <div key={line.productId} className="flex gap-3 items-center"><span>{line.item?.name ?? 'Item unavailable'} × {line.quantity}</span><button type="button" onClick={() => remove(line.productId)} aria-label={`Remove one ${line.item?.name ?? 'item'}`}>−</button><button type="button" onClick={() => add(line.productId)} aria-label={`Add one ${line.item?.name ?? 'item'}`}>+</button></div>)}{!validCart && cart.length > 0 && <p role="alert">A cart item is unavailable; remove it before creating the order.</p>}</section>
+        <section><h3>Cash tender</h3><label>Change calculator (not recorded) <input type="number" min="0" className="bg-neutral-800 p-2" value={cash} onChange={e => setCash(e.target.value)} /></label><p>Change: ₹{Math.max(0, (Number(cash) || 0) - payable).toFixed(2)}</p></section>
+        <section><p>Subtotal ₹{netFood}</p><p>GST (5%, included) ₹{gst.toFixed(2)}</p>
+          {packagingLoading ? <p role="status">Store Packaging: Loading from server…</p> : packagingError ? <div role="alert"><p>{packagingError}</p><button type="button" onClick={retry}>Retry packaging fee</button></div> : <p>Store Packaging ₹{packagingFee === null ? '—' : packagingFee}</p>}
+          <p>Total ₹{packagingFee === null ? '—' : payable}</p>
+        </section>
+        {error && <p role="alert">{error}</p>}
+        {confirmedPrice && <p role="alert">Server total is ₹{confirmedPrice.total}. Review and submit again to confirm this price.</p>}
+        {!branchId && <p role="alert">Select a branch before creating an order.</p>}
+        <button type="submit" className="bg-emerald-800 rounded p-3 disabled:opacity-50" disabled={!branchId || !validCart || submitting || packagingLoading || packagingFee === null}>{submitting ? 'Creating order…' : confirmedPrice ? `Confirm ₹${payable} and create order` : `Create order — payment pending (₹${packagingFee === null ? '—' : payable})`}</button>
+      </form>
     </div>
-  );
+  </div>;
 }
 
 export default ManualOrderCreateModal;

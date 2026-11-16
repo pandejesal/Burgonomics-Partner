@@ -1,251 +1,67 @@
-/**
- * P1-C — ManualOrderCreateModal walk-in payment truth (committed HEAD e69f211;
- * this source is CLEAN in the working tree — verified via git diff).
- *
- * LIVE pins: the committed modal offers Cash / UPI QR / Card Machine tender and
- * an explicit cash-received field; the cash calculator only shows for cash.
- *
- * EXPECTED-FAIL skips: every tender is stamped `paymentStatus: 'completed'`
- * (ManualOrderCreateModal.tsx:189) regardless of what the operator actually
- * collected. A walk-in whose UPI/card/cash tender was never confirmed must not
- * be recorded as paid. These are skipped because the honest behavior does not
- * exist yet; unskip them in the fix lane.
- */
-import React, { isValidElement, type ReactElement, type ReactNode } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
+// @vitest-environment jsdom
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const reactState = vi.hoisted(() => ({
-  index: 0,
-  overrides: new Map<number, unknown>(),
-}));
-
-vi.mock('react', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('react')>();
-  return {
-    ...actual,
-    useState: (initial: unknown) => {
-      const hookIndex = reactState.index;
-      reactState.index += 1;
-      const setter = vi.fn();
-      const value = reactState.overrides.has(hookIndex)
-        ? reactState.overrides.get(hookIndex)
-        : initial;
-      return [value, setter];
-    },
-    useEffect: vi.fn(),
-  };
-});
-
-const submitCaptured = vi.hoisted(() => ({ docs: [] as any[] }));
-
-vi.mock('@/stores/authStore', () => ({
-  useAuthStore: () => ({
-    user: { id: 'uid_counter_1', role: 'branch_staff', branchIds: ['branch_surat_01'] },
-  }),
-}));
-
-vi.mock('@/stores/appStore', () => ({
-  useAppStore: () => ({ selectedBranchId: 'branch_surat_01' }),
-}));
-
-vi.mock('@/config/firebase', () => ({
-  db: {},
-  auth: { currentUser: null },
-}));
-
+const user = { id: 'operator_1', role: 'branch_staff', branchIds: ['branch_1'] };
+vi.mock('@/stores/authStore', () => ({ useAuthStore: Object.assign(() => ({ user }), { getState: () => ({ user }), subscribe: vi.fn(() => () => {}) }) }));
+vi.mock('@/stores/appStore', () => ({ useAppStore: Object.assign(() => ({ selectedBranchId: 'branch_1' }), { getState: () => ({ selectedBranchId: 'branch_1' }), subscribe: vi.fn(() => () => {}) }) }));
+vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ user, loading: false }) }));
+vi.mock('@/config/firebase', () => ({ db: {}, auth: { currentUser: null }, getAppCheckToken: async () => null }));
 vi.mock('firebase/firestore', () => ({
-  doc: () => ({ id: 'ord_pos_test' }),
-  getDoc: vi.fn(async () => ({ exists: () => false })),
-  setDoc: vi.fn(async () => undefined),
-  Timestamp: { now: () => ({ _ts: 'now' }) },
+  collection: vi.fn(() => ({})), query: vi.fn(() => ({})), where: vi.fn(() => ({})),
+  getDocs: vi.fn(async () => ({ empty: false, docs: [
+    { id: 'burger', data: () => ({ name: 'Test Burger', branchId: 'branch_1', inStock: true, price: 199 }) },
+    { id: 'fries', data: () => ({ name: 'Test Fries', branchId: 'branch_1', inStock: true, price: 99 }) },
+  ] })),
+  doc: vi.fn(), getDoc: vi.fn(), setDoc: vi.fn(), Timestamp: { now: () => ({}) },
 }));
+import { ManualOrderCreateModal } from '../src/features/orders/components/ManualOrderCreateModal';
 
-vi.mock('@/features/orders/utils/walkInOrder', () => ({
-  WALK_IN_CUSTOMER_ID: 'cust_walkin',
-  generateWalkInOrderId: () => 'ord_pos_t_e_s_t_000001',
-  createOrderDocIfAbsent: async (_ref: unknown, data: any, probe?: any) => {
-    submitCaptured.docs.push(data);
-    if (probe?.get) await probe.get(_ref);
-    if (probe?.set) await probe.set(_ref, data);
-  },
-}));
-
-const packagingState = vi.hoisted(() => ({
-  packagingFee: 15 as number | null,
-  isLoading: false,
-  error: null as string | null,
-  retry: () => {},
-}));
-
-vi.mock('@/features/orders/hooks/useWalkInPackagingFee', () => ({
-  useWalkInPackagingFee: () => packagingState,
-}));
-
-import { ManualOrderCreateModal } from '@/features/orders/components/ManualOrderCreateModal';
-
-function flattenText(node: ReactNode): string {
-  if (node === null || node === undefined || typeof node === 'boolean') return '';
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map((child) => flattenText(child)).join('');
-  if (isValidElement<{ children?: ReactNode }>(node)) return flattenText(node.props.children);
-  return '';
-}
-
-function findButton(node: ReactNode, text: string): any {
-  if (Array.isArray(node)) {
-    for (const child of node) {
-      const hit = findButton(child, text);
-      if (hit) return hit;
-    }
-    return undefined;
+describe('walk-in cash tender and pending payment truth', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  const onCreated = vi.fn();
+  const fetchMock = vi.fn(async (url: string | URL | Request) => new Response(JSON.stringify(
+    String(url).includes('/checkout/fees') ? { packagingFee: 15 } : {
+      orderId: 'order_1', replayed: false, paymentStatus: 'pending', settlementAvailable: false,
+      status: { code: 'PLACED', label: 'Order placed', kind: 'upcoming', terminal: false },
+      totals: { foodSubtotal: 298, packagingFee: 15, deliveryFee: 0, gst: 14.19, cgst: 7.10, sgst: 7.09, discount: 0, loyaltyDiscount: 0, grandTotal: 313, pricingDegraded: false, split: { courierFeePaise: 0, branchTransferPaise: 31300, totalAmountPaise: 31300 } },
+    },
+  ), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+  beforeEach(async () => {
+    vi.stubEnv('VITE_FUNCTIONS_API_URL', 'https://example.invalid/api');
+    vi.stubGlobal('fetch', fetchMock); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await act(async () => { root.render(<QueryClientProvider client={client}><ManualOrderCreateModal isOpen onClose={vi.fn()} onOrderCreated={onCreated} /></QueryClientProvider>); });
+    await vi.waitFor(() => expect(container.textContent).toContain('Test Burger'));
+  });
+  afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.clearAllMocks(); });
+  async function add(name: string) {
+    const button = [...container.querySelectorAll('button')].find(element => element.textContent?.includes(name));
+    expect(button).toBeDefined(); await act(async () => { button!.click(); });
   }
-  if (!isValidElement<{ children?: ReactNode; onClick?: () => unknown }>(node)) return undefined;
-  if (node.type === 'button' && flattenText(node.props.children).includes(text)) return node;
-  return findButton(node.props.children, text);
-}
 
-// useState call order in the modal: 0 orderType ... 6 paymentMethod ... 8 cashTendered
-const PAYMENT_METHOD_STATE_INDEX = 6;
-
-let lastTree: ReactNode | null = null;
-
-/** Renders the committed modal in this file's node harness. */
-function renderModal(overrides?: Map<number, unknown>): string {
-  reactState.index = 0;
-  reactState.overrides.clear();
-  overrides?.forEach((value, key) => reactState.overrides.set(key, value));
-  // Plain function call: a JSX element's props.children is undefined until
-  // React renders it, so the mock-based hook stubs must back a direct call
-  // to produce a concrete tree that findButton can traverse. The react mock
-  // provides useState/useEffect, so this is safe outside a real render.
-  lastTree = (ManualOrderCreateModal as unknown as (props: any) => any)({
-    isOpen: true,
-    onClose: vi.fn(),
-  });
-  return renderToStaticMarkup(lastTree as unknown as ReactElement);
-}
-
-function renderTree(overrides?: Map<number, unknown>): any {
-  reactState.index = 0;
-  reactState.overrides.clear();
-  overrides?.forEach((value, key) => reactState.overrides.set(key, value));
-  lastTree = (ManualOrderCreateModal as unknown as (props: any) => any)({
-    isOpen: true,
-    onClose: vi.fn(),
-  });
-  return lastTree;
-}
-
-/** Finds the <form onSubmit={...}> wrapper in the last rendered element tree. */
-function findForm(node: ReactNode | null): any {
-  if (!node) return undefined;
-  if (Array.isArray(node)) {
-    for (const child of node) {
-      const hit = findForm(child);
-      if (hit) return hit;
-    }
-    return undefined;
-  }
-  if (!isValidElement<{ children?: ReactNode; onSubmit?: unknown }>(node)) return undefined;
-  if (node.type === 'form' && typeof node.props.onSubmit === 'function') return node;
-  return findForm(node.props.children);
-}
-
-beforeEach(() => {
-  submitCaptured.docs.length = 0;
-});
-
-afterEach(() => {
-  reactState.overrides.clear();
-});
-
-describe('ManualOrderCreateModal — tender surface (committed behavior)', () => {
-  it('offers Cash / UPI QR / Card Machine tender with an explicit cash-received field', () => {
-    const html = renderModal();
-
-    // All three tenders are offered from the committed source.
-    expect(findButton(lastTree as ReactNode, 'Cash')).toBeTruthy();
-    expect(findButton(lastTree as ReactNode, 'UPI QR')).toBeTruthy();
-    // Owner decision 1 Nov 2026: staff-selected tender is not a gateway receipt.
-    expect(findButton(lastTree as ReactNode, 'Card/UPI at counter')).toBeTruthy();
-    // Default cash tender shows the explicit cash-handling surface.
-    expect(html).toContain('Cash Received (₹)');
-    expect(html).toContain('Change to Return');
-    // Default list: burger 199 + fries 99 = 298 of GST-inclusive menu value,
-    // plus 15 packaging outside the GST base = 313 payable (R9).
-    // '&' renders escaped in static markup.
-    expect(html).toContain('Place &amp; Print KOT (₹313)');
+  it('offers cash only and does not offer UPI or card tender', () => {
+    const buttons = [...container.querySelectorAll('button')].map(button => button.textContent ?? '');
+    expect(container.textContent).toMatch(/cash/i);
+    expect(buttons.some(text => /upi|card/i.test(text))).toBe(false);
+    expect(container.textContent).toMatch(/payment pending/i);
+    expect(container.textContent).not.toMatch(/KOT (printed|dispatched)/i);
   });
 
-  it('hides the cash change calculator when UPI is the tender', () => {
-    const html = renderModal(new Map([[PAYMENT_METHOD_STATE_INDEX, 'upi']]));
-
-    expect(html).not.toContain('Cash Received (₹)');
-    expect(html).not.toContain('Change to Return');
-    expect(html).toContain('UPI QR');
-    expect(html).toContain('bg-purple-700'); // UPI QR is the visually selected tender
-  });
-});
-
-describe('ManualOrderCreateModal — walk-in payment TRUTH (HONEST BEHAVIOR DOES NOT EXIST YET)', () => {
-  // EXPECTED FAIL: walk-in records unverified tender as completed - ManualOrderCreateModal.tsx:189
-  // A UPI-tendered walk-in has no confirmed payment at create time; the order
-  // doc must NOT claim `paymentStatus: 'completed'`.
-  it.skip('creates a UPI walk-in with paymentStatus NOT completed before confirmation', async () => {
-    const tree = renderTree(new Map([[PAYMENT_METHOD_STATE_INDEX, 'upi']]));
-    const form = findForm(tree);
-    expect(form).toBeTruthy();
-
-    await form.props.onSubmit({ preventDefault: () => {} });
-
-    expect(submitCaptured.docs).toHaveLength(1);
-    const order = submitCaptured.docs[0];
-    expect(order.paymentMethod).toBe('upi');
-    // The truth assertion the current code violates (it hardcodes 'completed'):
-    expect(order.paymentStatus).not.toBe('completed');
-  });
-
-  // EXPECTED FAIL: walk-in records unverified tender as completed - ManualOrderCreateModal.tsx:189
-  // Cash without a recorded tendered amount must not be trusted as paid either.
-  it.skip('creates a cash walk-in with no tendered amount as paymentStatus NOT completed', async () => {
-    const tree = renderTree();
-    const form = findForm(tree);
-    expect(form).toBeTruthy();
-
-    await form.props.onSubmit({ preventDefault: () => {} });
-
-    expect(submitCaptured.docs).toHaveLength(1);
-    const order = submitCaptured.docs[0];
-    expect(order.paymentMethod).toBe('cod');
-    expect(order.paymentStatus).not.toBe('completed');
-  });
-});
-
-describe('ManualOrderCreateModal — menu prices are GST-inclusive (R9)', () => {
-  it('never adds GST on top: total = subtotal + packaging, GST is the included share', () => {
-    const html = renderModal();
-
-    // Default list: 199 + 99 = 298 inclusive food value. R1 inclusive share is
-    // round2(298 * 0.05 / 1.05) = 14.19; packaging 15 is outside the GST base.
-    expect(html).toContain('GST (5%, included)');
-    expect(html).toContain('₹14.19');
-    expect(html).toContain('Place &amp; Print KOT (₹313)');
-    // The old behavior added 5% on top (298 + 15 + 15 = 328).
-    expect(html).not.toContain('₹328');
-  });
-
-  it('persists the inclusive GST share and a total with no tax added', async () => {
-    const tree = renderTree();
-    const form = findForm(tree);
-    expect(form).toBeTruthy();
-
-    await form.props.onSubmit({ preventDefault: () => {} });
-
-    expect(submitCaptured.docs).toHaveLength(1);
-    const order = submitCaptured.docs[0];
-    expect(order.subtotal).toBe(298);
-    expect(order.tax).toBe(14.19);
-    expect(order.total).toBe(313);
+  it('creates a pending cash order through the API and preserves inclusive GST', async () => {
+    await add('Test Burger'); await add('Test Fries');
+    expect(container.textContent).toContain('GST (5%, included)');
+    expect(container.textContent).toContain('₹14.19');
+    expect(container.textContent).toContain('₹313');
+    expect(container.textContent).not.toContain('₹328');
+    await act(async () => { container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+    await vi.waitFor(() => expect(onCreated).toHaveBeenCalledOnce());
+    const orderCall = fetchMock.mock.calls.find(call => String(call[0]).includes('/orders/createWalkIn'));
+    expect(orderCall).toBeDefined();
+    expect(onCreated.mock.calls[0][0]).toMatchObject({ paymentStatus: 'pending' });
   });
 });

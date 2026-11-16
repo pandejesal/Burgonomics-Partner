@@ -1,230 +1,180 @@
+// @vitest-environment jsdom
 import React, { act } from 'react';
-import { readFileSync } from 'node:fs';
 import { createRoot, type Root } from 'react-dom/client';
-import { JSDOM } from 'jsdom';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-/**
- * Manual walk-in create payload — the real submit path.
- *
- * The operator UI must not plant POS/KOT state the client cannot observe.
- * Petpooja sync state is server-owned; a `petpoojaSyncStatus: 'pending'`
- * literal at birth is a fabricated claim and is rejected by the newer rules
- * lane. This test submits the actual form and inspects the object handed to
- * `setDoc`, so removing the field cannot silently regress.
- */
-
-const h = vi.hoisted(() => ({
-  setDoc: vi.fn(async () => undefined),
-  getDoc: vi.fn(async () => ({ exists: () => false })),
-  onClose: vi.fn(),
-  onOrderCreated: vi.fn(),
+const boundary = vi.hoisted(() => ({
+  docs: [] as Array<{ id: string; data: () => Record<string, unknown> }>,
+  getDoc: vi.fn(), setDoc: vi.fn(),
 }));
-
-vi.mock('@/config/firebase', () => ({
-  db: {},
-  auth: { currentUser: null },
-}));
-
+const user = { id: 'operator_1', role: 'branch_staff', branchIds: ['branch_1'] };
+vi.mock('@/stores/authStore', () => ({ useAuthStore: Object.assign(() => ({ user }), { getState: () => ({ user }), subscribe: vi.fn(() => () => {}) }) }));
+vi.mock('@/stores/appStore', () => ({ useAppStore: Object.assign(() => ({ selectedBranchId: 'branch_1' }), { getState: () => ({ selectedBranchId: 'branch_1' }), subscribe: vi.fn(() => () => {}) }) }));
+vi.mock('@/hooks/useAuth', () => ({ useAuth: () => ({ user, loading: false }) }));
+vi.mock('@/config/firebase', () => ({ db: {}, auth: { currentUser: { getIdToken: async () => 'test-token' } }, getAppCheckToken: async () => null }));
 vi.mock('firebase/firestore', () => ({
-  collection: vi.fn(() => ({})),
-  doc: vi.fn(() => ({ id: 'auto_test' })),
-  getDoc: h.getDoc,
-  setDoc: h.setDoc,
-  Timestamp: {
-    now: () => ({ toMillis: () => 1760000000000 }),
-  },
+  collection: vi.fn(() => ({})), query: vi.fn(() => ({})), where: vi.fn(() => ({})),
+  getDocs: vi.fn(async () => ({ empty: boundary.docs.length === 0, docs: boundary.docs })),
+  doc: vi.fn(() => ({ id: 'unused' })), getDoc: boundary.getDoc, setDoc: boundary.setDoc,
+  Timestamp: { now: () => ({ seconds: 1, nanoseconds: 0 }) },
 }));
-
-vi.mock('@/stores/authStore', () => ({
-  useAuthStore: () => ({
-    user: {
-      id: 'usr_operator_1',
-      name: 'Test Operator',
-      role: 'branch_owner',
-      branchIds: ['branch_surat_01'],
-    },
-  }),
-}));
-
-vi.mock('@/stores/appStore', () => ({
-  useAppStore: () => ({ selectedBranchId: 'branch_surat_01' }),
-}));
-
-vi.mock('sonner', () => ({
-  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
-}));
-
-vi.mock('@/features/orders/hooks/useWalkInPackagingFee', () => ({
-  useWalkInPackagingFee: () => ({
-    packagingFee: 15,
-    isLoading: false,
-    error: null,
-    retry: vi.fn(),
-  }),
-}));
-
 import { ManualOrderCreateModal } from '../src/features/orders/components/ManualOrderCreateModal';
 
-const RULE_FORBIDDEN_KEYS = (): string[] => {
-  const rules = readFileSync(new URL('../firestore.rules', import.meta.url), 'utf8');
-  const block = rules.match(
-    /function orderCreateForbiddenKeys\(\)\s*\{[\s\S]*?return \[([\s\S]*?)\];/,
-  );
-  expect(block).not.toBeNull();
-  return [...block![1].matchAll(/'([^']+)'/g)].map((match) => match[1]);
-};
+const totals = { foodSubtotal: 298, packagingFee: 15, deliveryFee: 0, gst: 14.19, cgst: 7.10, sgst: 7.09, discount: 0, loyaltyDiscount: 0, grandTotal: 313, pricingDegraded: false, split: { courierFeePaise: 0, branchTransferPaise: 31300, totalAmountPaise: 31300 } };
+const receipt = { orderId: 'order_1', replayed: false, status: { code: 'PLACED', label: 'Order placed', kind: 'upcoming', terminal: false }, paymentStatus: 'pending', totals, settlementAvailable: false };
+const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 
-describe('Manual walk-in order — actual create payload', () => {
+describe('walk-in modal against transport and Firestore boundaries', () => {
   let root: Root;
   let container: HTMLDivElement;
-  const originalGlobals = new Map<string, PropertyDescriptor | undefined>();
+  let fetchMock: ReturnType<typeof vi.fn>;
+  const created = vi.fn();
+  const close = vi.fn();
 
-  beforeAll(() => {
-    const { window } = new JSDOM('<!doctype html><html><body></body></html>');
-    const globals: Record<string, unknown> = {
-      window,
-      document: window.document,
-      HTMLElement: window.HTMLElement,
-      IS_REACT_ACT_ENVIRONMENT: true,
-    };
-    for (const [key, value] of Object.entries(globals)) {
-      originalGlobals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
-      Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
-    }
-  });
-
-  afterEach(async () => {
-    await act(async () => root?.unmount());
-    container?.remove();
-    h.setDoc.mockClear();
-    h.getDoc.mockClear();
-    h.onClose.mockClear();
-    h.onOrderCreated.mockClear();
-  });
-
-  afterAll(() => {
-    for (const [key, descriptor] of originalGlobals) {
-      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
-      else Reflect.deleteProperty(globalThis, key);
-    }
-  });
-
-  it('submits a rules-shaped walk-in doc with no client-owned Petpooja sync state', async () => {
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-
-    await act(async () => {
-      root.render(
-        <ManualOrderCreateModal
-          isOpen
-          onClose={h.onClose}
-          onOrderCreated={h.onOrderCreated}
-        />,
-      );
-    });
-
-    const form = container.querySelector('form');
-    expect(form).not.toBeNull();
-
-    await act(async () => {
-      form!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-      await vi.waitFor(() => expect(h.setDoc).toHaveBeenCalledTimes(1));
-    });
-
-    const [, payload] = h.setDoc.mock.calls[0] as [unknown, Record<string, unknown>];
-
-    // The exact two accepted fields plus the operator branch stamp.
-    expect(payload.customerId).toBe('cust_walkin');
-    expect(payload.userId).toBe('usr_operator_1');
-    expect(payload.branchId).toBe('branch_surat_01');
-
-    // Canonical birth status: fires rules orderCreateInitialStatus().
-    expect(payload.status).toEqual({
-      code: 'PLACED',
-      label: 'Order placed',
-      kind: 'upcoming',
-      terminal: false,
-    });
-    expect(Object.keys(payload.status as object)).toEqual([
-      'code',
-      'label',
-      'kind',
-      'terminal',
-    ]);
-
-    // Real Firestore rejects `undefined` field values (getFirestore has no
-    // ignoreUndefinedProperties) — the submitted doc must contain none, at any
-    // depth. Takeaway defaults used to send tableNumber: undefined and per-item
-    // specialInstructions: undefined, so this failed client-side before any
-    // network call.
-    const findUndefinedPaths = (value: unknown, path = ''): string[] => {
-      if (value === undefined) return [path || '<root>'];
-      if (Array.isArray(value)) {
-        return value.flatMap((entry, index) => findUndefinedPaths(entry, `${path}[${index}]`));
-      }
-      if (value && typeof value === 'object') {
-        return Object.entries(value as Record<string, unknown>).flatMap(([key, entry]) =>
-          findUndefinedPaths(entry, path ? `${path}.${key}` : key)
-        );
-      }
-      return [];
-    };
-    expect(findUndefinedPaths(payload)).toEqual([]);
-
-    // Every top-level key is on the rules' create allowlist.
-    const CREATE_ALLOWLIST = [
-      'id', 'shortCode', 'orderId', 'customerId', 'userId', 'branchId', 'branchName', 'city',
-      'branchCoordinates', 'orderType', 'fulfillment', 'tableNumber', 'customerName', 'customerPhone',
-      'items', 'subtotal', 'tax', 'deliveryFee', 'total', 'totals', 'tipAmount', 'promo',
-      'loyaltyPointsRedeemed', 'checkoutFingerprint', 'store', 'address', 'deliveryAddress',
-      'deliveryQuoteId', 'notes', 'specialInstructions', 'fulfillmentInstructions', 'status',
-      'payment', 'paymentMethod', 'paymentStatus', 'whatsappOptIn', 'placedAt', 'estimatedAt',
-      'createdAt', 'updatedAt', 'petpoojaError',
+  beforeEach(() => {
+    vi.stubEnv('VITE_FUNCTIONS_API_URL', 'https://example.invalid/api');
+    boundary.docs = [
+      { id: 'burger', data: () => ({ name: 'Test Burger', branchId: 'branch_1', inStock: true, price: 199 }) },
+      { id: 'fries', data: () => ({ name: 'Test Fries', branchId: 'branch_1', inStock: true, price: 99 }) },
+      { id: 'sold', data: () => ({ name: 'Sold Out', branchId: 'branch_1', inStock: false, price: 50 }) },
     ];
-    expect(Object.keys(payload).filter((key) => !CREATE_ALLOWLIST.includes(key))).toEqual([]);
+    fetchMock = vi.fn(async (url: string | URL | Request) => String(url).includes('/checkout/fees') ? json({ packagingFee: 15 }) : json(receipt, 201));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
+  });
+  afterEach(async () => {
+    await act(async () => root.unmount()); container.remove();
+    vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.clearAllMocks();
+  });
+  async function render() {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    await act(async () => { root.render(<QueryClientProvider client={client}><ManualOrderCreateModal isOpen onClose={close} onOrderCreated={created} /></QueryClientProvider>); });
+    await vi.waitFor(() => expect(container.textContent).toContain('Test Burger'));
+  }
+  async function click(text: string) {
+    const button = [...container.querySelectorAll('button')].find(b => b.textContent?.includes(text));
+    expect(button, `button ${text}`).toBeDefined();
+    await act(async () => { button!.click(); });
+  }
+  async function submit() {
+    const form = container.querySelector('form'); expect(form).not.toBeNull();
+    await act(async () => { form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+  }
+  function orderCalls(): RequestInit[] {
+    return fetchMock.mock.calls.filter(call => String(call[0]).includes('/orders/createWalkIn')).map(call => call[1] as RequestInit);
+  }
 
-    // Cash walk-in totals and line items remain the operator's payload.
-    expect(payload.paymentMethod).toBe('cod');
-    expect(payload.paymentStatus).toBe('completed');
-    expect(payload.items).toEqual([
-      {
-        itemId: 'itm_paneer_makhani',
-        petpoojaItemId: 'PP-BRG-103',
-        name: 'Paneer Makhani Burst Burger',
-        quantity: 1,
-        price: 199,
-      },
-      {
-        itemId: 'itm_peri_peri_fries',
-        petpoojaItemId: 'PP-SDE-301',
-        name: 'Peri-Peri Crinkle Fries',
-        quantity: 1,
-        price: 99,
-      },
-    ]);
-    expect(payload.subtotal).toBe(298);
-    expect(payload.tax).toBe(14.19); // R9: inclusive GST share, never added on top
-    expect(payload.deliveryFee).toBe(0);
-    expect(payload.total).toBe(313); // 298 inclusive menu + ₹15 server packaging
-    expect(payload.createdAt).toBeDefined();
-    expect(payload.updatedAt).toBeDefined();
+  it('sends only contract fields and idempotency header, never writes Firestore', async () => {
+    await render();
+    const unavailable = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Sold Out'));
+    expect(unavailable?.disabled).toBe(true);
+    expect(container.textContent).toMatch(/out of stock|unavailable/i);
+    await click('Test Burger'); await click('Test Fries');
+    expect(container.textContent).toContain('₹14.19');
+    expect(container.textContent).toContain('₹313');
+    expect(container.textContent).not.toContain('₹328');
+    await submit();
+    await vi.waitFor(() => expect(orderCalls()).toHaveLength(1));
+    const call = orderCalls()[0];
+    const body = JSON.parse(String(call.body));
+    expect(body).toEqual({ requestId: expect.any(String), branchId: 'branch_1', orderType: 'takeaway', tender: 'cash', items: [{ productId: 'burger', quantity: 1 }, { productId: 'fries', quantity: 1 }], expectedTotalPaise: 31300, customerName: 'Walk-in Customer' });
+    expect(new Headers(call.headers).get('X-Idempotency-Key')).toBe(body.requestId);
+    expect(boundary.getDoc).not.toHaveBeenCalled(); expect(boundary.setDoc).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(created).toHaveBeenCalledOnce());
+    expect(created.mock.calls[0][0]).toMatchObject({ paymentStatus: 'pending' });
+  });
 
-    // No top-level POS/KOT state invented by the client; nested menu identity
-    // (`items[].petpoojaItemId`) is menu data and intentionally allowed.
-    expect(Object.keys(payload).filter((key) => key.startsWith('petpooja'))).toEqual([]);
-    expect(payload).not.toHaveProperty('petpoojaSyncStatus');
-    expect(payload).not.toHaveProperty('petpoojaStatus');
-    expect(payload).not.toHaveProperty('petpoojaOrderId');
+  it('requires reconfirmation after PRICE_CHANGED and submits server paise under a fresh id', async () => {
+    const changed = { ...totals, grandTotal: 330, split: { ...totals.split, totalAmountPaise: 33000, branchTransferPaise: 33000 } };
+    fetchMock.mockImplementation(async (url: string | URL | Request) => {
+      if (String(url).includes('/checkout/fees')) return json({ packagingFee: 15 });
+      return orderCalls().length === 1 ? json({ code: 'PRICE_CHANGED', error: 'Price changed', totals: changed }, 409) : json({ ...receipt, totals: changed }, 201);
+    });
+    await render(); await click('Test Burger'); await click('Test Fries'); await submit();
+    await vi.waitFor(() => expect(container.textContent).toContain('330'));
+    expect(close).not.toHaveBeenCalled(); expect(orderCalls()).toHaveLength(1);
+    await submit(); await vi.waitFor(() => expect(orderCalls()).toHaveLength(2));
+    const first = JSON.parse(String(orderCalls()[0].body)); const second = JSON.parse(String(orderCalls()[1].body));
+    expect(second.expectedTotalPaise).toBe(33000); expect(second.requestId).not.toBe(first.requestId);
+  });
 
-    // Static rules contract: never plant any create-forbidden key.
-    const forbidden = RULE_FORBIDDEN_KEYS();
-    expect(forbidden).toContain('petpoojaOrderId');
-    expect(Object.keys(payload).filter((key) => forbidden.includes(key))).toEqual([]);
+  it('shows the server payable total and calculates change from it before reconfirming', async () => {
+    const changed = { ...totals, grandTotal: 330, split: { ...totals.split, totalAmountPaise: 33000, branchTransferPaise: 33000 } };
+    fetchMock.mockImplementation(async (url: string | URL | Request) => String(url).includes('/checkout/fees')
+      ? json({ packagingFee: 15 })
+      : orderCalls().length === 1 ? json({ code: 'PRICE_CHANGED', error: 'Price changed', totals: changed }, 409) : json({ ...receipt, totals: changed }, 201));
+    await render(); await click('Test Burger'); await click('Test Fries'); await submit();
+    await vi.waitFor(() => expect(container.textContent).toContain('Server total is ₹330'));
+    const cash = container.querySelector<HTMLInputElement>('input[type="number"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(cash, '500');
+      cash.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(container.textContent).toContain('Total ₹330');
+    expect(container.textContent).toContain('Change: ₹170.00');
+    expect(container.querySelector('button[type="submit"]')?.textContent).toContain('₹330');
+    await submit();
+    expect(JSON.parse(String(orderCalls()[1].body)).expectedTotalPaise).toBe(33000);
+  });
 
-    // The create must never claim a sync result it did not observe.
-    expect(h.onOrderCreated).toHaveBeenCalledTimes(1);
-    expect(h.onClose).toHaveBeenCalledTimes(1);
+  it('drops the authoritative total after a basket edit', async () => {
+    const changed = { ...totals, grandTotal: 330, split: { ...totals.split, totalAmountPaise: 33000 } };
+    fetchMock.mockImplementation(async (url: string | URL | Request) => String(url).includes('/checkout/fees')
+      ? json({ packagingFee: 15 }) : json({ code: 'PRICE_CHANGED', error: 'Price changed', totals: changed }, 409));
+    await render(); await click('Test Burger'); await click('Test Fries'); await submit();
+    await vi.waitFor(() => expect(container.textContent).toContain('Server total is ₹330'));
+    await click('Test Fries');
+    expect(container.textContent).not.toContain('Server total is ₹330');
+    expect(container.textContent).toContain('Total ₹412');
+  });
+
+  it('rounds food before packaging in the preview and transport total', async () => {
+    boundary.docs = [{ id: 'burger', data: () => ({ name: 'Test Burger', branchId: 'branch_1', inStock: true, price: 1.005 }) }];
+    await render(); await click('Test Burger');
+    expect(container.textContent).toContain('Subtotal ₹1');
+    expect(container.textContent).toContain('Total ₹16');
+    expect(container.textContent).not.toContain('Total ₹16.01');
+    await submit();
+    expect(JSON.parse(String(orderCalls()[0].body)).expectedTotalPaise).toBe(1600);
+  });
+
+  it('reuses the request id after transport failure on an identical retry', async () => {
+    fetchMock.mockImplementation(async (url: string | URL | Request) => {
+      if (String(url).includes('/checkout/fees')) return json({ packagingFee: 15 });
+      if (orderCalls().length <= 2) throw new TypeError('network down');
+      return json(receipt, 201);
+    });
+    await render(); await click('Test Burger'); await submit();
+    await vi.waitFor(() => expect(container.querySelector('[role="alert"]')).not.toBeNull());
+    expect(close).not.toHaveBeenCalled();
+    const failed = orderCalls(); expect(failed.length).toBeGreaterThan(0);
+    await submit(); await vi.waitFor(() => expect(created).toHaveBeenCalledOnce());
+    const ids = orderCalls().map(call => JSON.parse(String(call.body)).requestId);
+    expect(new Set(ids).size).toBe(1);
+  });
+
+  it('rotates the request id after the payload changes following a failure', async () => {
+    fetchMock.mockImplementation(async (url: string | URL | Request) => {
+      if (String(url).includes('/checkout/fees')) return json({ packagingFee: 15 });
+      if (orderCalls().length <= 2) throw new TypeError('network down');
+      return json(receipt, 201);
+    });
+    await render(); await click('Test Burger'); await submit();
+    await vi.waitFor(() => expect(container.querySelector('[role="alert"]')).not.toBeNull());
+    const firstId = JSON.parse(String(orderCalls()[0].body)).requestId;
+    await click('Test Fries'); await submit();
+    await vi.waitFor(() => expect(created).toHaveBeenCalledOnce());
+    const lastId = JSON.parse(String(orderCalls().at(-1)!.body)).requestId;
+    expect(lastId).not.toBe(firstId);
+  });
+
+  it('renders no demo menu or delivery option when the catalog is empty', async () => {
+    boundary.docs = [];
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await act(async () => { root.render(<QueryClientProvider client={client}><ManualOrderCreateModal isOpen onClose={close} /></QueryClientProvider>); });
+    expect(container.textContent).not.toMatch(/Paneer Makhani|Peri-Peri Crinkle|Delivery/i);
+    expect(container.querySelectorAll('button[type="submit"]')[0]).toHaveProperty('disabled', true);
   });
 });

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 /**
  * Partner screenshot-defect lane (2026-10-27).
@@ -333,8 +334,20 @@ describe('Delivery Queue heading — dark-native page and admin canvas', () => {
 
 describe('Partner modals — top/bottom safe insets with a scrollable body', () => {
   it('ManualOrderCreateModal clears the status bar and gesture area without double inset', () => {
+    // The real modal now walks the strict walk-in menu seam (useStrictWalkInMenu
+    // -> useAuth -> useNavigate) and TanStack useQuery, so the harness supplies
+    // the real Router context plus an isolated QueryClient (retry off). The
+    // component under test is not mocked: the safe-area assertions below stay
+    // strict.
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
     const html = renderToStaticMarkup(
-      <ManualOrderCreateModal isOpen onClose={() => {}} />,
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <ManualOrderCreateModal isOpen onClose={() => {}} />
+        </QueryClientProvider>
+      </MemoryRouter>,
     );
 
     expect(html.match(/safe-area-inset-top/g) ?? []).toHaveLength(1);
