@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useSyncHealth } from '@/admin/dashboard/hooks/useDashboardData';
 import { petpoojaBadgeMeta, type PetpoojaBadgeStatus } from '@/components/ui/PetpoojaStatusBadge';
+import { isManualMenuSyncCurrent } from '@/hooks/useMenu';
 import { canSyncPetpoojaMenu, MENU_SYNC_DENIED_COPY } from '@/services/petpoojaMenuSyncRoles';
 import type { MenuItem } from '@/types';
 
@@ -88,11 +89,18 @@ export function MenuPage() {
       // whatever outlet happens to be on screen now (review r3,
       // `manual-outcome-proof-r3.json`).
       //
+      // `retired` alone is not enough: the mutation's final fence and this
+      // continuation are separate microtasks, so a session, role or outlet
+      // change landing in between still resolves `{ status: 'ok' }` for work the
+      // screen no longer represents (review GLM r1, Low). The SAME shared fence
+      // the mutation and the header badge use is asked once more here — never a
+      // second, weaker copy of it.
+      //
       // Neither success nor failure is honest, so paint neither — the pending
       // state is released by the mutation itself and the operator keeps whatever
       // the sync-health probe already told them. A rejection still reaches the
       // catch below and stays loud: retirement is not failure.
-      if (outcome?.status === 'retired') return;
+      if (!isManualMenuSyncCurrent(outcome)) return;
       setSyncOutcome('ok');
       setSyncSuccess(true);
       showToast('Catalog refreshed from Petpooja POS bridge');

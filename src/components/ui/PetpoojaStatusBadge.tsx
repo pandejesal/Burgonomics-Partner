@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
-import { syncPetpoojaMenuForBranch } from '@/services/petpoojaSync';
+import { isManualMenuSyncCurrent, useGuardedManualMenuSync } from '@/hooks/useMenu';
 import { useAuthStore } from '@/stores/authStore';
 import { canSyncPetpoojaMenu, MENU_SYNC_DENIED_COPY } from '@/services/petpoojaMenuSyncRoles';
 
@@ -37,6 +37,7 @@ export const PetpoojaStatusBadge: React.FC<PetpoojaStatusBadgeProps> = ({
   onSyncComplete,
 }) => {
   const { user } = useAuthStore();
+  const syncPetpooja = useGuardedManualMenuSync(branchId);
   // The server refuses POST /petpooja/syncMenu for anything outside
   // brand_owner/developer/regional_manager/branch_owner, so offering the
   // refresh icon to (say) branch_staff only produced a 403 that looked like a
@@ -46,6 +47,11 @@ export const PetpoojaStatusBadge: React.FC<PetpoojaStatusBadgeProps> = ({
   const [lastSyncTime, setLastSyncTime] = useState<string>('Not checked');
   const [status, setStatus] = useState<PetpoojaBadgeStatus>('unknown');
 
+  useEffect(() => {
+    setStatus('unknown');
+    setLastSyncTime('Not checked');
+  }, [branchId, user?.id, user?.role]);
+
   // Loop 58/120: no timer pulse — the old 60s interval rewrote the
   // "last sync" timestamp to now() without syncing, so an unverified or
   // long-stale link always looked freshly checked. The timestamp now only
@@ -54,7 +60,11 @@ export const PetpoojaStatusBadge: React.FC<PetpoojaStatusBadgeProps> = ({
     try {
       setSyncing(true);
       setStatus('syncing');
-      await syncPetpoojaMenuForBranch(branchId);
+      const outcome = await syncPetpooja.mutateAsync();
+      if (!isManualMenuSyncCurrent(outcome)) {
+        setStatus('unknown');
+        return;
+      }
       setStatus('online');
       setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       if (onSyncComplete) onSyncComplete();

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
 import { useAuthStore } from '@/stores/authStore';
 import { useAppStore } from '@/stores/appStore';
@@ -310,6 +310,62 @@ function menuSyncGuard(branchId: string, scope: MenuSyncScope): MenuSyncGuard {
   };
 }
 
+/** One lifetime token per consumer, sharing the session transition ledger. */
+function useMenuSyncOwner() {
+  const ownerRef = useRef<MenuSyncOwner>({ active: true });
+  useEffect(() => {
+    const owner = ownerRef.current;
+    owner.active = true;
+    const releaseSession = subscribeMenuSyncSession();
+    return () => {
+      owner.active = false;
+      releaseSession();
+    };
+  }, []);
+  return ownerRef;
+}
+
+function useManualMenuSyncMutation(
+  branchId: string | null,
+  ownerRef: { current: MenuSyncOwner },
+  queryClient: QueryClient,
+) {
+  return useMutation<ManualSyncOutcome, Error, void>({
+    mutationFn: async () => {
+      if (!branchId) throw new Error('No branch selected');
+      if (!maySyncMenuNow(branchId)) throw new Error(MENU_SYNC_DENIED_COPY);
+      const syncScope = currentMenuSyncScope(ownerRef.current);
+      let result: Awaited<ReturnType<typeof syncPetpoojaMenuForBranch>>;
+      try {
+        result = await syncPetpoojaMenuForBranch(branchId, menuSyncGuard(branchId, syncScope));
+      } catch (error) {
+        if (!isSameMenuSyncScope(syncScope)) return { status: 'retired', branchId };
+        throw error;
+      }
+      if (!isSameMenuSyncScope(syncScope)) return { status: 'retired', branchId };
+      return { status: 'ok', branchId, syncScope, result };
+    },
+    onSuccess: (outcome) => {
+      if (!isManualMenuSyncCurrent(outcome)) return;
+      queryClient.invalidateQueries({ queryKey: ['menuItems', outcome.branchId] });
+    },
+  });
+}
+
+/** Manual sync without mounting a menu query or background sync. */
+export function useGuardedManualMenuSync(branchId: string | null) {
+  const ownerRef = useMenuSyncOwner();
+  const queryClient = useQueryClient();
+  return useManualMenuSyncMutation(branchId, ownerRef, queryClient);
+}
+
+/** Recheck after the mutation promise settles, before a consumer claims freshness. */
+export function isManualMenuSyncCurrent(outcome: ManualSyncOutcome): boolean {
+  return outcome.status === 'ok'
+    && isSameMenuSyncScope(outcome.syncScope)
+    && maySyncMenuNow(outcome.branchId);
+}
+
 /**
  * Canonical menu source: the `products` collection (written by server
  * Petpooja sync). `petpoojaItemId` is the join key for 86-ing both ways.
@@ -373,25 +429,7 @@ export function useMenu() {
    * re-renders (and StrictMode's synchronous replay of the same instance) and so
    * no other instance can ever hold it.
    */
-  const ownerRef = useRef<MenuSyncOwner>({ active: true });
-
-  // Keep the session ledger (see `sessionGeneration`) live for as long as this
-  // screen exists, and deactivate THIS instance's owner token when it goes.
-  //
-  // The owner deactivation is what makes one consumer's unmount retire that
-  // consumer's work even while another menu screen is still mounted — the
-  // reference-counted session listener cannot express that, and the R4 review
-  // found it. Reactivation after a StrictMode replay is safe precisely because
-  // the ref belongs to this instance.
-  useEffect(() => {
-    const owner = ownerRef.current;
-    owner.active = true;
-    const releaseSession = subscribeMenuSyncSession();
-    return () => {
-      owner.active = false;
-      releaseSession();
-    };
-  }, []);
+  const ownerRef = useMenuSyncOwner();
 
   // Single canonical fetch: `products` where branchId matches. Categories are
   // derived from the items (no category collection — single source of truth).
@@ -521,47 +559,7 @@ export function useMenu() {
   // whose sync may well have succeeded. So a retired operation reports
   // `{ status: 'retired' }` and the caller can release its pending state without
   // asserting either freshness or failure.
-  const syncPetpooja = useMutation<ManualSyncOutcome, Error, void>({
-    mutationFn: async () => {
-      if (!branchId) throw new Error('No branch selected');
-      if (!maySyncMenuNow(branchId)) throw new Error(MENU_SYNC_DENIED_COPY);
-      // The mutation's own scope is captured here, and the service re-checks it
-      // after ITS awaits. An accepted request cannot be recalled, but a request
-      // not yet sent must not be sent by an operator who has since changed.
-      const syncScope = currentMenuSyncScope(ownerRef.current);
-      let result: Awaited<ReturnType<typeof syncPetpoojaMenuForBranch>>;
-      try {
-        result = await syncPetpoojaMenuForBranch(
-          branchId,
-          menuSyncGuard(branchId, syncScope),
-        );
-      } catch (error) {
-        if (!isSameMenuSyncScope(syncScope)) return { status: 'retired', branchId };
-        throw error;
-      }
-      // Past this await the request is already spent. If the owner, session or
-      // outlet changed while it was in flight, this completion belongs to
-      // nobody: report retirement instead of a success the caller would paint on
-      // the wrong outlet.
-      if (!isSameMenuSyncScope(syncScope)) {
-        return { status: 'retired', branchId };
-      }
-      // The outlet that STARTED this sync travels with the result, so a
-      // completion that lands after an outlet switch cannot be mistaken for the
-      // new outlet's freshness.
-      return { status: 'ok', branchId, syncScope, result };
-    },
-    onSuccess: (outcome) => {
-      // A pending sync the server already accepted cannot be recalled, but its
-      // late completion must not invalidate (or claim freshness for) an outlet
-      // the operator has left, or a session they no longer hold.
-      if (outcome.status !== 'ok') return;
-      const { branchId: syncedBranchId, syncScope } = outcome;
-      if (!isSameMenuSyncScope(syncScope)) return;
-      if (effectiveBranchId(useAuthStore.getState().user) !== syncedBranchId) return;
-      queryClient.invalidateQueries({ queryKey: ['menuItems', syncedBranchId] });
-    },
-  });
+  const syncPetpooja = useManualMenuSyncMutation(branchId, ownerRef, queryClient);
 
   // Calculate last synced timestamp
   const lastSyncedAt = useMemo(() => {

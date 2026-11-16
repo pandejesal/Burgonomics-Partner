@@ -183,6 +183,7 @@ vi.mock('@/stores/appStore', () => {
 
 import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react-query';
 import { useMenu } from '@/hooks/useMenu';
+import { PetpoojaStatusBadge } from '@/components/ui/PetpoojaStatusBadge';
 import { syncPetpoojaMenuForBranch, checkAndAutoSyncMenu } from '@/services/petpoojaSync';
 
 type MenuResult = ReturnType<typeof useMenu>;
@@ -384,6 +385,110 @@ describe('useMenu — Petpooja sync stays a manager action', () => {
 
   const selectBranch = (branchId: string) => transition(() => { h.selectedBranchId = branchId; });
   const setUser = (user: any) => transition(() => { h.user = user; });
+
+  async function mountBadge(onSyncComplete = vi.fn()) {
+    secondContainer = document.createElement('div');
+    document.body.appendChild(secondContainer);
+    secondRoot = createRoot(secondContainer);
+    await act(async () => {
+      secondRoot!.render(
+        <QueryClientProvider client={client}>
+          <PetpoojaStatusBadge branchId="demo" onSyncComplete={onSyncComplete} />
+        </QueryClientProvider>,
+      );
+    });
+    return { container: secondContainer, onSyncComplete };
+  }
+
+  it('badge offers no manual sync to a disallowed role', async () => {
+    h.user = identity('branch_staff');
+    const badge = await mountBadge();
+    expect(badge.container.querySelector('button')).toBeNull();
+    expect(h.syncCalls).toEqual([]);
+  });
+
+  it('badge rechecks a demoted role even before its old button rerenders', async () => {
+    const badge = await mountBadge();
+    h.user = identity('branch_staff');
+    notifyStores();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await act(async () => {
+        badge.container.querySelector('button')!.click();
+        for (let i = 0; i < 24; i += 1) await Promise.resolve();
+      });
+      expect(h.syncCalls).toEqual([]);
+      expect(badge.onSyncComplete).not.toHaveBeenCalled();
+      expect(h.invalidated).toEqual([]);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it('badge uses the guarded manual sync and reports an authorized completion', async () => {
+    const badge = await mountBadge();
+    await act(async () => {
+      badge.container.querySelector('button')!.click();
+      for (let i = 0; i < 24; i += 1) await Promise.resolve();
+    });
+    expect(vi.mocked(syncPetpoojaMenuForBranch)).toHaveBeenCalledWith(
+      'demo', expect.objectContaining({ maySync: expect.any(Function) }),
+    );
+    expect(badge.container.textContent).toMatch(/live/i);
+    expect(badge.onSyncComplete).toHaveBeenCalledTimes(1);
+    expect(invalidatedKeys()).toContain(JSON.stringify(['menuItems', 'demo']));
+  });
+
+  it('badge does not report or invalidate a sync retired by an outlet round trip', async () => {
+    h.user = { id: 'owner', role: 'branch_owner', branchIds: ['demo', 'demo2'], cityIds: [] };
+    let release: (() => void) | undefined;
+    h.syncImpl = () => new Promise((resolve) => {
+      release = () => resolve({ categoriesSynced: 1, itemsSynced: 1, syncedAt: new Date() });
+    });
+    const badge = await mountBadge();
+    await act(async () => { badge.container.querySelector('button')!.click(); });
+    expect(release).toBeDefined();
+    h.selectedBranchId = 'demo2'; notifyStores();
+    h.selectedBranchId = 'demo'; notifyStores();
+    await act(async () => { release!(); for (let i = 0; i < 24; i += 1) await Promise.resolve(); });
+    expect(badge.container.textContent).not.toMatch(/live/i);
+    expect(badge.onSyncComplete).not.toHaveBeenCalled();
+    expect(h.invalidated).toEqual([]);
+  });
+
+  it('badge retires a pending sync after logout and relogin of the same account', async () => {
+    const operator = identity('branch_owner');
+    h.user = operator;
+    let release: (() => void) | undefined;
+    h.syncImpl = () => new Promise((resolve) => {
+      release = () => resolve({ categoriesSynced: 1, itemsSynced: 1, syncedAt: new Date() });
+    });
+    const badge = await mountBadge();
+    await act(async () => { badge.container.querySelector('button')!.click(); });
+    expect(release).toBeDefined();
+    h.user = null; notifyStores();
+    h.user = operator; notifyStores();
+    await act(async () => { release!(); for (let i = 0; i < 24; i += 1) await Promise.resolve(); });
+    expect(badge.container.textContent).not.toMatch(/live/i);
+    expect(badge.onSyncComplete).not.toHaveBeenCalled();
+    expect(h.invalidated).toEqual([]);
+  });
+
+  it('badge owner unmount retires a pending sync even while another menu owner remains', async () => {
+    h.rows = [productRow('prd_a')];
+    let release: (() => void) | undefined;
+    h.syncImpl = () => new Promise((resolve) => {
+      release = () => resolve({ categoriesSynced: 1, itemsSynced: 1, syncedAt: new Date() });
+    });
+    await mount();
+    const badge = await mountBadge();
+    await act(async () => { badge.container.querySelector('button')!.click(); });
+    expect(release).toBeDefined();
+    await unmountSecond();
+    await act(async () => { release!(); for (let i = 0; i < 24; i += 1) await Promise.resolve(); });
+    expect(badge.onSyncComplete).not.toHaveBeenCalled();
+    expect(h.invalidated).toEqual([]);
+  });
 
   it('an ordinary product read still works for a scoped operator', async () => {
     h.user = identity('branch_staff');
