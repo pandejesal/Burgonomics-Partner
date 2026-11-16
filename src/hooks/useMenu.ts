@@ -14,6 +14,25 @@ import {
 } from 'firebase/firestore';
 import type { MenuItem, MenuCategory } from '@/types';
 import {
+  evaluateWalkInEligibility,
+  projectStrictWalkInCatalog,
+  type RawProductDocData,
+  type WalkInIneligibilityReason,
+  type WalkInEligibilityResult,
+  type IneligibleWalkInItem,
+  type StrictWalkInCatalog,
+} from './walkInCatalog';
+
+export {
+  evaluateWalkInEligibility,
+  projectStrictWalkInCatalog,
+  type RawProductDocData,
+  type WalkInIneligibilityReason,
+  type WalkInEligibilityResult,
+  type IneligibleWalkInItem,
+  type StrictWalkInCatalog,
+};
+import {
   syncPetpoojaMenuForBranch,
   checkAndAutoSyncMenu,
   BURGONOMICS_63_ITEMS,
@@ -579,5 +598,86 @@ export function useMenu() {
     refetch: refetchProducts,
     lastSyncedAt,
     syncPetpooja,
+  };
+}
+
+/**
+ * Strict walk-in menu hook.
+ * Reuses the same products collection query and schema, but applies strict walk-in
+ * validation rules (evaluateWalkInEligibility, projectStrictWalkInCatalog).
+ * - Distinct TanStack query key ['strictWalkInMenuItems', branchId] to prevent cache poisoning
+ * - Never syncs Petpooja or triggers background auto-sync
+ * - Never seeds dev demo items on an empty catalog
+ * - Categorizes based on eligible items
+ * - Exposes partitioned eligibleItems, ineligibleItems with machine-readable reasons, and allItems
+ */
+const EMPTY_WALK_IN_CATALOG: StrictWalkInCatalog = { eligibleItems: [], ineligibleItems: [], allItems: [] };
+
+export function useStrictWalkInMenu(overrideBranchId?: string | null) {
+  const { user } = useAuth();
+  const { selectedBranchId } = useAppStore();
+
+  const branchId = overrideBranchId ?? (selectedBranchId || user?.branchIds?.[0] || null);
+
+  const {
+    data: catalog = EMPTY_WALK_IN_CATALOG,
+    isLoading,
+    error,
+    refetch,
+  } = useQuery<StrictWalkInCatalog, Error>({
+    queryKey: ['strictWalkInMenuItems', branchId],
+    queryFn: async () => {
+      if (!branchId) {
+        return EMPTY_WALK_IN_CATALOG;
+      }
+
+      const itemsSnap = await getDocs(
+        query(collection(db, 'products'), where('branchId', '==', branchId))
+      );
+
+      if (itemsSnap.empty) {
+        return EMPTY_WALK_IN_CATALOG;
+      }
+
+      const docs = itemsSnap.docs.map((d) => ({
+        id: d.id,
+        data: d.data() as RawProductDocData,
+      }));
+
+      return projectStrictWalkInCatalog(docs, branchId);
+    },
+    enabled: !!branchId,
+    retry: 1,
+  });
+
+  const categories: MenuCategory[] = useMemo(() => {
+    const seen = new Map<string, MenuCategory & { itemCount: number }>();
+    for (const item of catalog.eligibleItems) {
+      const id = item.categoryId || 'uncategorized';
+      const existing = seen.get(id);
+      if (existing) {
+        existing.itemCount += 1;
+      } else {
+        seen.set(id, {
+          id,
+          name: (item as any).category || id,
+          sortOrder: seen.size + 1,
+          active: true,
+          itemCount: 1,
+        } as MenuCategory & { itemCount: number });
+      }
+    }
+    return [...seen.values()] as MenuCategory[];
+  }, [catalog.eligibleItems]);
+
+  return {
+    branchId,
+    categories,
+    eligibleItems: catalog.eligibleItems,
+    ineligibleItems: catalog.ineligibleItems,
+    allItems: catalog.allItems,
+    isLoading,
+    error,
+    refetch,
   };
 }
