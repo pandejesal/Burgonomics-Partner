@@ -136,7 +136,10 @@ vi.mock('@/utils/kdsAudio', () => ({
   syncKDSAlarmState: vi.fn(),
 }));
 vi.mock('@/stores/authStore', () => ({
-  useAuthStore: Object.assign(() => ({ user: h.user }), { getState: () => ({ user: h.user }) }),
+  useAuthStore: Object.assign(() => ({ user: h.user }), {
+    getState: () => ({ user: h.user }),
+    subscribe: vi.fn(() => vi.fn()),
+  }),
 }));
 vi.mock('@/stores/appStore', () => ({
   useAppStore: Object.assign(

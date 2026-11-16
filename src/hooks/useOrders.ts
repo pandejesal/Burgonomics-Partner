@@ -1,15 +1,17 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { useAppStore } from '@/stores/appStore';
 import { db } from '@/config/firebase';
 import {
   collection,
+  doc,
   query,
   where,
   orderBy,
   limit,
   getDocs,
+  onSnapshot,
   Timestamp,
 } from 'firebase/firestore';
 import type { Order, OrderStatus } from '@/types';
@@ -18,7 +20,7 @@ import {
   normalizeOrderDoc,
   orderDocTimeMs,
 } from '@/utils/orderContract';
-import { isGlobalRole, resolveScopedBranchIds } from '@/utils/branchScope';
+import { chunkOrderBranchIds, isGlobalRole, resolveOrderReadScope, resolveScopedBranchIds } from '@/utils/branchScope';
 
 /**
  * Demo seeds are DEV-only (Runbook §8). Production shows real orders or an
@@ -184,10 +186,102 @@ export interface OrdersDataScope {
   selectedBranchId: string | null;
 }
 
+interface ScopedFeed {
+  key: string;
+  orders: Order[];
+  branchIds: string[];
+  loading: boolean;
+  error: Error | null;
+  updatedAt: number;
+}
+
+/**
+ * One shared empty list for the not-yet-scoped fallback. Consumers key effects
+ * on these arrays (the KDS seeding effect does), so a fresh `[]` per render is
+ * an identity change, not "no change".
+ */
+const NO_SCOPED_ORDERS: Order[] = [];
+const NO_SCOPED_BRANCHES: string[] = [];
+
+function useScopedOrderFeed(user: ReturnType<typeof useAuthStore.getState>['user'], selection: string | null) {
+  const scoped = !!user && !['brand_owner', 'developer', 'support'].includes(user.role);
+  // The assignment ORDER is not an access dimension: [y,z] and [z,y] grant the
+  // same rows. Canonicalise the set so an equivalent reorder keeps the live
+  // subscriptions instead of tearing them down and re-reading the same scope.
+  // A malformed claim shape is treated as "no assignment" rather than crashing
+  // the render before the scope resolver can fail closed.
+  const assignedBranchIds = Array.isArray(user?.branchIds) ? user.branchIds : [];
+  const assignedKey = [...new Set(assignedBranchIds)].sort();
+  const key = JSON.stringify([user?.id, user?.role, assignedKey, selection]);
+  const [generation, setGeneration] = useState(0);
+  const [feed, setFeed] = useState<ScopedFeed>({ key: '', orders: [], branchIds: [], loading: true, error: null, updatedAt: 0 });
+
+  useEffect(() => {
+    if (!scoped || !user) return;
+    let active = true;
+    let revision = 0;
+    let orderUnsubscribers: Array<() => void> = [];
+    const clearListeners = () => { orderUnsubscribers.forEach((unsubscribe) => unsubscribe()); orderUnsubscribers = []; };
+    const fail = (error: Error) => {
+      if (!active) return;
+      revision++;
+      clearListeners();
+      setFeed({ key, orders: [], branchIds: [], loading: false, error, updatedAt: 0 });
+    };
+    const start = (registry: unknown) => {
+      revision++;
+      const currentRevision = revision;
+      clearListeners();
+      const { branchIds } = resolveOrderReadScope(user.role, Array.isArray(user.branchIds) ? user.branchIds : [], selection, registry);
+      const chunks = chunkOrderBranchIds(branchIds);
+      // Ownership is provable only from a server-confirmed snapshot. A denied
+      // or empty scope starts no listener, so it must NOT advertise a
+      // descriptor — an empty board is not verified data.
+      setFeed({ key, orders: [], branchIds, loading: chunks.length > 0, error: null, updatedAt: 0 });
+      const pages = new Map<number, Array<{ id: string; data: Record<string, any> }>>();
+      chunks.forEach((chunk, index) => {
+        const unsubscribe = onSnapshot(
+          query(collection(db, 'orders'), where('branchId', 'in', chunk), orderBy('createdAt', 'desc'), limit(100)),
+          (snapshot) => {
+            if (!active || revision !== currentRevision) return;
+            pages.set(index, snapshot.docs.map((row) => ({ id: row.id, data: row.data() })).filter((row) => chunk.includes(row.data.branchId)));
+            const merged = new Map([...pages.values()].flat().map((row) => [row.id, row]));
+            const orders = [...merged.values()]
+              .sort((a, b) => orderDocTimeMs(b.data) - orderDocTimeMs(a.data))
+              .slice(0, 100)
+              .map((row) => normalizeOrderDoc(row.id, row.data));
+            const complete = pages.size === chunks.length;
+            setFeed({ key, orders: complete ? orders : [], branchIds, loading: !complete, error: null, updatedAt: complete ? Date.now() : 0 });
+          },
+          (error) => { if (revision === currentRevision) fail(error); },
+        );
+        orderUnsubscribers.push(unsubscribe);
+      });
+    };
+    setFeed({ key, orders: [], branchIds: [], loading: true, error: null, updatedAt: 0 });
+    const unsubscribeRegistry = user.role === 'regional_manager'
+      ? onSnapshot(doc(db, 'admins', user.id), { includeMetadataChanges: true }, (snapshot) => {
+          if (!active) return;
+          // Cached registry data cannot prove a current assignment.
+          start(snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites || !snapshot.exists() ? null : snapshot.data());
+        }, fail)
+      : (start(null), () => {});
+    return () => { active = false; revision++; unsubscribeRegistry(); clearListeners(); };
+  }, [key, scoped, generation]);
+
+  const current = feed.key === key
+    ? feed
+    : { key, orders: NO_SCOPED_ORDERS, branchIds: NO_SCOPED_BRANCHES, loading: true, error: null, updatedAt: 0 };
+  // Stable like React Query's `refetch`: consumers list it in effect deps.
+  const refresh = useCallback(() => setGeneration((value) => value + 1), []);
+  return { scoped, ...current, refresh };
+}
+
 export function useOrders(params: UseOrdersParams = {}) {
   const { user } = useAuthStore();
   const { selectedCity, selectedBranchId } = useAppStore();
   const queryClient = useQueryClient();
+  const scopedFeed = useScopedOrderFeed(user, selectedBranchId);
 
   /**
    * The branch scope this read is actually clamped to. Note the product filter
@@ -392,7 +486,7 @@ export function useOrders(params: UseOrdersParams = {}) {
 
       return list;
     },
-    enabled: !!user,
+    enabled: !!user && !scopedFeed.scoped,
     // One-shot getDocs: without a poll the "Auto-refreshes" badge was a lie
     // — the list froze at mount until a manual navigation. 30s keeps the
     // orders board current without a listener; the KDS owns its own
@@ -442,7 +536,9 @@ export function useOrders(params: UseOrdersParams = {}) {
    * placeholder is precisely the previous identity's entry, so it can never be
    * ownership proof — and we never stamp the current user onto it.
    */
-  const ordersDataScope: OrdersDataScope | null =
+  const ordersDataScope: OrdersDataScope | null = scopedFeed.scoped
+    ? scopedFeed.updatedAt > 0 ? { userId: user?.id ?? null, role: user?.role ?? null, resolvedBranchIds: scopedFeed.branchIds, selectedBranchId: selectedBranchId ?? null } : null
+    :
     dataUpdatedAt > 0 && !isPlaceholderData
       ? {
           userId: user?.id ?? null,
@@ -452,12 +548,26 @@ export function useOrders(params: UseOrdersParams = {}) {
         }
       : null;
 
+  // Memoised: a new array on every render made consumer effects keyed on
+  // `orders` (KDS seeding) set state on every render — an unbounded loop. The
+  // rows only change when the feed or a filter changes, exactly as React
+  // Query's `data` behaves on the unscoped path.
+  const scopedOrders = useMemo(() => scopedFeed.orders.filter((order) => {
+    if (selectedCity && selectedCity !== 'all' && order.city && order.city.toLowerCase() !== selectedCity.toLowerCase()) return false;
+    if (params.status && params.status !== 'all' && order.status !== params.status) return false;
+    if (params.dateRange && params.dateRange !== 'all') {
+      const now = new Date();
+      const start = params.dateRange === 'today' ? new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() : now.getTime() - (params.dateRange === 'week' ? 7 : 30) * 86400000;
+      if (orderDocTimeMs(order as unknown as Record<string, any>) < start) return false;
+    }
+    return true;
+  }), [scopedFeed.orders, selectedCity, params.status, params.dateRange]);
   return {
-    orders,
-    isLoading,
-    error,
-    refetch,
-    dataUpdatedAt,
+    orders: scopedFeed.scoped ? scopedOrders : orders,
+    isLoading: scopedFeed.scoped ? scopedFeed.loading : isLoading,
+    error: scopedFeed.scoped ? scopedFeed.error : error,
+    refetch: scopedFeed.scoped ? scopedFeed.refresh : refetch,
+    dataUpdatedAt: scopedFeed.scoped ? scopedFeed.updatedAt : dataUpdatedAt,
     updateOrderStatus,
     ordersDataScope,
   };

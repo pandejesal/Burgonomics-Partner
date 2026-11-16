@@ -4,23 +4,28 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
- * ORDER PROVENANCE — `useOrders` ownership contract.
+ * ORDER PROVENANCE — `useOrders` ownership contract (order-read R1).
  *
- * The KDS hook adopted `useOrders` rows whenever its own scope stamp matched,
- * but a stamp proves nothing about which identity the CACHED rows belong to.
- * These tests pin the bounded provenance API that makes ownership provable:
+ * Scoped roles no longer read through a react-query `getDocs` entry: they open
+ * authoritative per-branch `onSnapshot` subscriptions (<=10-value `in` chunks)
+ * and stamp the rows they deliver. The provenance questions are unchanged:
  *
- *   - the cache key carries EVERY authorisation dimension the query function
- *     actually clamps by (uid, role, RESOLVED branch ids, selection), so a
- *     branch-assignment narrowing is a different cache entry, not a filtered
- *     view of someone else's;
- *   - an additive `ordersDataScope` descriptor is returned ONLY when the cached
- *     data is real (`dataUpdatedAt > 0` and not placeholder), otherwise null.
+ *   - the feed is keyed by EVERY authorisation dimension the query function
+ *     clamps by (uid, role, resolved branch set, selection), so a narrowing is
+ *     a different feed, not a filtered view of someone else's rows;
+ *   - an additive `ordersDataScope` descriptor is returned ONLY once a real
+ *     server-confirmed snapshot has delivered the complete chunk set. No
+ *     snapshot (pending switch, denial, error) means no ownership.
  *
- * The DOM environment comes from the documented `@vitest-environment jsdom`
- * directive, so no untyped `jsdom` import or manual global installation is
- * needed. They use the REAL `QueryClient` and the real hook; only Firestore and
- * the alias fetch are stubbed. No IO.
+ * R1 contract changes pinned below: every assigned branch is served (not just
+ * `branchIds[0]`), assignments past the Firestore `in` cap are read in
+ * complete chunks (never silently truncated), and malformed assignment ids
+ * fail closed. The legacy store-only alias read was never granted to these
+ * roles (`canReadAliasedStoreOrders` admits brand_owner/developer only), so
+ * the scoped feed issuing no alias read is not a compatibility loss.
+ *
+ * They use the REAL hook and a REAL QueryClient; only Firestore and the alias
+ * fetch are stubbed. No IO.
  */
 const h = vi.hoisted(() => {
   const userHolder: { user: any } = {
@@ -30,35 +35,44 @@ const h = vi.hoisted(() => {
   return {
     userHolder,
     appHolder,
-    // Rows handed back by the stubbed reads, so a test can make A's data linger.
+    // Rows handed to a listener, so a test can choose what each scope delivers.
     rows: [] as any[],
-    // Boundary inspection: which `in` operand each read actually used.
-    whereCalls: [] as Array<{ field: string; op: string; value: unknown }>,
-    inArrayCalls: [] as unknown[][],
+    // Boundary inspection: every subscription target and whether it was retired.
+    listeners: [] as Array<{
+      target: any;
+      next: (snapshot: any) => void;
+      error: (error: Error) => void;
+      stopped: boolean;
+    }>,
+    // The scoped feed must never fall back to an unbounded read.
     getDocsCalls: 0,
     aliasCalls: 0,
-    aliasImpl: null as null | (() => Promise<any[]>),
   };
 });
 
 vi.mock('firebase/firestore', () => ({
-  collection: () => ({}),
-  query: (...parts: any[]) => ({ parts }),
-  orderBy: (field: string) => ({ field }),
-  limit: () => ({}),
+  collection: (_db: unknown, name: string) => ({ kind: 'collection', name }),
+  doc: (_db: unknown, name: string, id: string) => ({ kind: 'doc', name, id }),
+  query: (...parts: any[]) => ({ kind: 'query', parts }),
+  orderBy: (field: string) => ({ kind: 'orderBy', field }),
+  limit: (value: number) => ({ kind: 'limit', value }),
   // Records the operands of every `in` filter so a test can prove which
-  // first-ten subset was actually queried — not just that "a read happened".
-  where: (field: string, op: string, value: unknown) => {
-    h.whereCalls.push({ field, op, value: Array.isArray(value) ? [...value] : value });
-    return { field, op, value };
-  },
-  getDocs: vi.fn(async (q?: any) => {
+  // branches were actually subscribed — not just that "a read happened".
+  where: (field: string, op: string, value: unknown) => ({ kind: 'where', field, op, value }),
+  getDocs: async () => {
     h.getDocsCalls += 1;
-    const inFilter = (q?.parts ?? []).find((part: any) => part?.op === 'in');
-    if (inFilter) h.inArrayCalls.push([...(inFilter.value as unknown[])]);
-    return { docs: h.rows.map((row) => ({ id: row.id, data: () => row })) };
-  }),
-  onSnapshot: vi.fn(() => () => undefined),
+    throw new Error('scoped order reads must subscribe per branch, not run an unbounded getDocs');
+  },
+  onSnapshot: (target: any, optionsOrNext: any, nextOrError: any, errorCallback?: any) => {
+    const next = typeof optionsOrNext === 'function' ? optionsOrNext : nextOrError;
+    const error = typeof optionsOrNext === 'function' ? nextOrError : errorCallback;
+    const listener = { target, next, error, stopped: false };
+    h.listeners.push(listener);
+    return () => {
+      listener.stopped = true;
+    };
+  },
+  Timestamp: { now: () => ({}) },
 }));
 vi.mock('@/config/firebase', () => ({ db: {} }));
 vi.mock('@/stores/authStore', () => ({
@@ -85,11 +99,11 @@ vi.mock('@/utils/orderContract', async (original) => ({
   ...(await original<typeof import('@/utils/orderContract')>()),
   fetchAliasedStoreOrders: vi.fn(async () => {
     h.aliasCalls += 1;
-    return h.aliasImpl ? h.aliasImpl() : [];
+    return [];
   }),
 }));
 
-import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useOrders } from '@/hooks/useOrders';
 
 type OrdersResult = ReturnType<typeof useOrders>;
@@ -120,15 +134,8 @@ describe('useOrders — authorisation-scoped cache ownership', () => {
     'IS_REACT_ACT_ENVIRONMENT',
   );
 
-  // Default QueryClient notification is `setTimeout(cb, 0)`; a fixed number of
-  // microtask turns is not an authoritative flush. Query documents a microtask
-  // scheduler for tests, and we route notifications through `act`.
-  // `notifyManager` exports SETTERS only — there is no getter — so the default
-  // notify function is restored to the documented identity `fn => fn()`.
   beforeEach(() => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-    notifyManager.setScheduler(queueMicrotask);
-    notifyManager.setNotifyFunction((fn) => act(fn));
     h.userHolder.user = {
       id: 'userA',
       role: 'branch_owner',
@@ -138,11 +145,9 @@ describe('useOrders — authorisation-scoped cache ownership', () => {
     h.appHolder.selectedCity = null;
     h.appHolder.selectedBranchId = null;
     h.rows = [order('Y1', 'branch_y'), order('Z1', 'branch_z')];
+    h.listeners = [];
     h.getDocsCalls = 0;
-    h.whereCalls = [];
-    h.inArrayCalls = [];
     h.aliasCalls = 0;
-    h.aliasImpl = null;
     latest = null;
     client = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -158,11 +163,6 @@ describe('useOrders — authorisation-scoped cache ownership', () => {
   });
 
   afterAll(() => {
-    // Restore the documented defaults so this file cannot change timing for a
-    // later suite in the same worker. `notifyManager` exposes setters only, so
-    // the default notify function is the documented identity `fn => fn()`.
-    notifyManager.setNotifyFunction((fn) => fn());
-    notifyManager.setScheduler((cb) => setTimeout(cb, 0));
     // Restore any pre-existing act-environment state instead of destroying it.
     if (actFlagBefore) {
       Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', actFlagBefore);
@@ -182,9 +182,7 @@ describe('useOrders — authorisation-scoped cache ownership', () => {
         </QueryClientProvider>,
       );
     });
-    await act(async () => {
-      for (let i = 0; i < 8; i += 1) await Promise.resolve();
-    });
+    await settle();
   }
 
   async function settle() {
@@ -206,12 +204,43 @@ describe('useOrders — authorisation-scoped cache ownership', () => {
 
   const scope = () => latest!.ordersDataScope;
 
-  it('ORD1: an assigned-branch narrowing must query a fresh cache entry for Z', async () => {
+  /** Order subscriptions that are still live (retired ones stay in the log). */
+  const activeOrderListeners = () =>
+    h.listeners.filter((listener) => listener.target.kind === 'query' && !listener.stopped);
+
+  /** The actual `in` operand of a subscription. */
+  const inOperand = (listener: { target: any }) =>
+    listener.target.parts.find((part: any) => part?.op === 'in')?.value;
+
+  /** Deliver one real snapshot to one listener. */
+  async function emit(listener: { next: (snapshot: any) => void }, rows: any[]) {
+    await act(async () => {
+      listener.next({ docs: rows.map((row) => ({ id: row.id, data: () => row })) });
+    });
+  }
+
+  /** Complete every live chunk so the feed stops being partial. */
+  async function emitAll(rows: any[] = h.rows) {
+    for (const listener of activeOrderListeners()) {
+      await emit(listener, rows);
+    }
+    await settle();
+  }
+
+  it('ORD1: an assigned-branch narrowing must start a fresh subscription for Z and drop Y', async () => {
     await mount();
-    // Existing product behaviour (unchanged, not a defect): a branch_owner's
-    // rows are filtered to `branchIds[0]`, so only Y1 is on the board even
-    // though the QUERY scope covers Y and Z.
-    expect(latest!.orders.map((o) => o.id)).toEqual(['Y1']);
+    // The scoped path never issues the old unbounded read or an alias read.
+    expect(h.getDocsCalls).toBe(0);
+    expect(h.aliasCalls).toBe(0);
+    expect(activeOrderListeners()).toHaveLength(1);
+    expect(inOperand(activeOrderListeners()[0])).toEqual(['branch_y', 'branch_z']);
+    // No ownership before a real server snapshot.
+    expect(latest!.orders).toEqual([]);
+    expect(scope()).toBeNull();
+
+    await emitAll();
+    // R1: every assigned branch is served, not just branchIds[0].
+    expect(latest!.orders.map((o) => o.id).sort()).toEqual(['Y1', 'Z1']);
     expect(scope()).toEqual({
       userId: 'userA',
       role: 'branch_owner',
@@ -219,16 +248,22 @@ describe('useOrders — authorisation-scoped cache ownership', () => {
       selectedBranchId: null,
     });
 
-    // Same uid and role; only the ASSIGNED set narrows Y,Z → Z. The query scope
-    // changes, so this must be a FRESH read — not the wider cached entry.
-    const callsBefore = h.getDocsCalls;
+    const wide = activeOrderListeners();
     h.userHolder.user = { id: 'userA', role: 'branch_owner', branchIds: ['branch_z'], cityIds: [] };
     h.rows = [order('Z1', 'branch_z')];
     await rerender();
 
-    // ~(red) the query key omits assigned branch ids, so the Y,Z entry is reused
-    // and no new read happens for a genuinely narrower scope.
-    expect(h.getDocsCalls).toBeGreaterThan(callsBefore);
+    // The wider listeners are retired, and the narrower scope is a NEW feed.
+    expect(wide.every((listener) => listener.stopped)).toBe(true);
+    const narrowed = activeOrderListeners();
+    expect(narrowed).toHaveLength(1);
+    expect(inOperand(narrowed[0])).toEqual(['branch_z']);
+    // A's wider rows cannot linger in the narrower entry.
+    expect(latest!.orders).toEqual([]);
+    expect(scope()).toBeNull();
+
+    await emitAll();
+    expect(latest!.orders.map((o) => o.id)).toEqual(['Z1']);
     expect(scope()).toEqual({
       userId: 'userA',
       role: 'branch_owner',
@@ -239,7 +274,8 @@ describe('useOrders — authorisation-scoped cache ownership', () => {
 
   it('ORD2: a pending switch to a new identity exposes NO ownership', async () => {
     await mount();
-    // Explicitly A's descriptor on A's cached data before any switch.
+    await emitAll();
+    // Explicitly A's descriptor on A's server-confirmed data before any switch.
     expect(scope()).toEqual({
       userId: 'userA',
       role: 'branch_owner',
@@ -247,13 +283,16 @@ describe('useOrders — authorisation-scoped cache ownership', () => {
       selectedBranchId: null,
     });
 
-    // Switch to B and hold the fetch open by never resolving the read.
+    const aListeners = activeOrderListeners();
+    // Switch to B and leave B's subscription unfulfilled (no snapshot).
     h.rows = [];
-    h.aliasImpl = () => new Promise<any[]>(() => undefined);
     h.userHolder.user = { id: 'userB', role: 'branch_owner', branchIds: ['branch_y'], cityIds: [] };
     await rerender();
 
-    // ~(red) A's cached/placeholder result must never be described as B's.
+    // A's listeners are retired and A's result must never be described as B's.
+    expect(aListeners.every((listener) => listener.stopped)).toBe(true);
+    expect(activeOrderListeners()).toHaveLength(1);
+    expect(latest!.orders).toEqual([]);
     expect(scope()).toBeNull();
   });
 
@@ -263,64 +302,41 @@ describe('useOrders — authorisation-scoped cache ownership', () => {
     h.userHolder.user = { id: 'userA', role: 'branch_owner', branchIds: ['branch_y'], cityIds: [] };
     h.rows = [order('A_Y1', 'branch_y')];
     await mount();
+    await emitAll();
+    expect(latest!.orders.map((o) => o.id)).toEqual(['A_Y1']);
+    const aListener = activeOrderListeners()[0];
 
-    // Hold A's OWN refetch open. This is a real in-flight A query, not B's.
-    let releaseA: (rows: any[]) => void = () => undefined;
-    let aliasDeferred = false;
-    h.aliasImpl = () => {
-      aliasDeferred = true;
-      return new Promise<any[]>((resolve) => {
-        releaseA = resolve;
-      });
-    };
-
-    await act(async () => {
-      void latest!.refetch();
-      await settle();
-    });
-    expect(aliasDeferred).toBe(true);
-
-    // Switch to B while A's refetch is still outstanding.
+    // Switch to B while A's listener is retired but still callable.
     h.userHolder.user = { id: 'userB', role: 'branch_owner', branchIds: ['branch_y'], cityIds: [] };
     h.rows = [order('B_Y1', 'branch_y')];
-    // B's own query must not be blocked by A's deferred alias.
-    h.aliasImpl = null;
     await rerender();
-    await settle();
+    expect(aListener.stopped).toBe(true);
+    const bListener = activeOrderListeners()[0];
+    expect(bListener).not.toBe(aListener);
 
-    // B's current result is in place; ownership must name B, unconditionally.
-    expect(scope()).toEqual({
+    await emit(bListener, h.rows);
+    await settle();
+    const bScope = {
       userId: 'userB',
       role: 'branch_owner',
       resolvedBranchIds: ['branch_y'],
       selectedBranchId: null,
-    });
-    const afterB = latest!.orders.map((o) => o.id);
-    expect(afterB).toContain('B_Y1');
+    };
+    expect(latest!.orders.map((o) => o.id)).toEqual(['B_Y1']);
+    expect(scope()).toEqual(bScope);
 
     // Now A's late payload lands — same branch, so no RBAC filter can hide it.
-    await act(async () => {
-      releaseA([order('A_LATE', 'branch_y')]);
-      await settle();
-    });
+    await emit(aListener, [order('A_LATE', 'branch_y')]);
+    await settle();
 
-    // ~(red) a late A result must never be attributed to B or shown for B.
+    // A retired generation must never be attributed to B or shown for B.
     expect(latest!.orders.map((o) => o.id)).not.toContain('A_LATE');
-    expect(scope()).toEqual({
-      userId: 'userB',
-      role: 'branch_owner',
-      resolvedBranchIds: ['branch_y'],
-      selectedBranchId: null,
-    });
+    expect(scope()).toEqual(bScope);
   });
 
-  it('ORD4 (CONTROL): an equal effective authorisation scope should reuse one cache entry', async () => {
-    // The cache key must be stable for scopes the PRODUCT treats as equivalent.
-    // Equivalence here means all three query dimensions are unchanged: the
-    // RAW primary (branchIds[0], which drives the branch_owner projection), the
-    // actual first-ten direct-read subset, and the full alias scope.
-    // [y,z,x] → [y,x,z] keeps primary=y, keeps the same first ten, and keeps the
-    // same full set — only the tail order differs.
+  it('ORD4 (CONTROL): an equal effective authorisation scope reuses one subscription set', async () => {
+    // [y,z,x] → [y,x,z] keeps the same uid, role and assigned SET; only the
+    // order of the assignment array changes, which grants nothing new.
     h.userHolder.user = {
       id: 'userA',
       role: 'branch_owner',
@@ -329,10 +345,18 @@ describe('useOrders — authorisation-scoped cache ownership', () => {
     };
     h.rows = [order('Y1', 'branch_y')];
     await mount();
-    const callsAfterMount = h.getDocsCalls;
+    await emitAll();
     expect(latest!.orders.map((o) => o.id)).toEqual(['Y1']);
+    const listenersAfterMount = activeOrderListeners();
+    const registeredAfterMount = h.listeners.length;
+    // The descriptor names the operand the rows were actually fetched with.
+    expect(scope()).toEqual({
+      userId: 'userA',
+      role: 'branch_owner',
+      resolvedBranchIds: ['branch_y', 'branch_z', 'branch_x'],
+      selectedBranchId: null,
+    });
 
-    // Same uid/role/full set, brand-new user object, tail reordered.
     h.userHolder.user = {
       id: 'userA',
       role: 'branch_owner',
@@ -341,27 +365,21 @@ describe('useOrders — authorisation-scoped cache ownership', () => {
     };
     await rerender();
 
-    // CONTROL, not a current defect: equivalent dimensions must not refetch.
-    expect(h.getDocsCalls).toBe(callsAfterMount);
+    // CONTROL, not a current defect: an equivalent set must not refetch.
+    expect(h.listeners.length).toBe(registeredAfterMount);
+    expect(activeOrderListeners()).toEqual(listenersAfterMount);
     expect(scope()).toEqual({
       userId: 'userA',
       role: 'branch_owner',
-      resolvedBranchIds: ['branch_x', 'branch_y', 'branch_z'],
+      resolvedBranchIds: ['branch_y', 'branch_z', 'branch_x'],
       selectedBranchId: null,
     });
-    // The displayed projection is unchanged too (primary y).
     expect(latest!.orders.map((o) => o.id)).toEqual(['Y1']);
   });
 
-  /**
-   * ORD6 — the RAW PRIMARY is a query dimension.
-   *
-   * `queryFn` projects branch_owner/staff rows to `user.branchIds[0]`. Swapping
-   * [y,z] → [z,y] keeps the same full set (so the current sorted key is
-   * unchanged) but changes which branch the board can show: the stale entry
-   * would keep displaying Y1 forever.
-   */
-  it('ORD6: swapping the primary branch must select a new cache entry and show Z1', async () => {
+  it('ORD6: swapping the assignment order neither refetches nor hides an outlet', async () => {
+    // R1 removed the branchIds[0] projection: both assigned outlets are served,
+    // so the old "primary swap hides Z1" defect cannot exist.
     h.userHolder.user = {
       id: 'userA',
       role: 'branch_owner',
@@ -370,39 +388,26 @@ describe('useOrders — authorisation-scoped cache ownership', () => {
     };
     h.rows = [order('Y1', 'branch_y'), order('Z1', 'branch_z')];
     await mount();
-    expect(latest!.orders.map((o) => o.id)).toEqual(['Y1']);
-    const callsAfterMount = h.getDocsCalls;
+    await emitAll();
+    expect(latest!.orders.map((o) => o.id)).toEqual(['Y1', 'Z1']);
+    const registeredAfterMount = h.listeners.length;
 
-    // Primary moves y → z. Same sorted full set ['branch_y','branch_z'].
     h.userHolder.user = {
       id: 'userA',
       role: 'branch_owner',
       branchIds: ['branch_z', 'branch_y'],
       cityIds: [],
     };
-    h.rows = [order('Y1', 'branch_y'), order('Z1', 'branch_z')];
     await rerender();
 
-    // ~(red) the key omits the primary, so the stale entry keeps showing Y1.
-    expect(h.getDocsCalls).toBeGreaterThan(callsAfterMount);
-    expect(latest!.orders.map((o) => o.id)).toEqual(['Z1']);
-    // Product projection semantics are untouched: still the first assigned id.
-    expect(latest!.orders.every((o) => o.branchId === 'branch_z')).toBe(true);
+    // Same set → same authorisation scope; no teardown, and Z1 stays visible.
+    expect(h.listeners.length).toBe(registeredAfterMount);
+    expect(latest!.orders.map((o) => o.id)).toEqual(['Y1', 'Z1']);
+    expect(latest!.orders.every((o) => ['branch_y', 'branch_z'].includes(o.branchId))).toBe(true);
   });
 
-  /**
-   * ORD7 — the DIRECT READ's first-ten subset is a query dimension.
-   *
-   * `queryFn` calls `where('branchId','in', scopeBranchIds.slice(0,10))` on the
-   * RAW resolved ids while the alias read uses the FULL scope. With >10 assigned
-   * branches, moving a tail branch into the raw first ten changes which tickets
-   * can be fetched even though the full set is identical.
-   */
-  it('ORD7: a branch moving into the raw first-ten subset must use a new cache entry', async () => {
-    // 12 assigned branches. `branchIds[0]` is branch_1, so the branch_owner
-    // projection keeps branch_1 rows only — the fixture must therefore contain a
-    // branch_1 ticket, otherwise an empty primary filter could masquerade as a
-    // successful outcome.
+  it('ORD7: assignments past the Firestore in-cap are read in complete chunks', async () => {
+    // 12 assigned branches: the old first-ten read silently dropped the tail.
     const twelve = Array.from({ length: 12 }, (_, index) => `branch_${index + 1}`);
     h.userHolder.user = {
       id: 'userA',
@@ -417,33 +422,29 @@ describe('useOrders — authorisation-scoped cache ownership', () => {
     ];
     await mount();
 
-    // The direct read really used the unsorted first ten.
-    expect(h.inArrayCalls.at(-1)).toEqual(twelve.slice(0, 10));
-    expect(latest!.orders.map((o) => o.id)).toEqual(['B1']);
-    expect(scope()?.resolvedBranchIds).toEqual([...twelve].sort());
-    const callsAfterMount = h.getDocsCalls;
+    const listeners = activeOrderListeners();
+    // Every assigned branch is covered: 10 + 2, never a silent truncation.
+    expect(listeners).toHaveLength(2);
+    expect(listeners.map(inOperand)).toEqual([twelve.slice(0, 10), twelve.slice(10)]);
+    // An incomplete chunk set exposes nothing (no partial board).
+    expect(latest!.orders).toEqual([]);
+    await emitAll();
+    expect(latest!.orders.map((o) => o.id).sort()).toEqual(['B1', 'B10', 'B11']);
+    expect(scope()?.resolvedBranchIds).toEqual(twelve);
 
-    // Swap the RAW positions 9 and 10 (branch_10 ↔ branch_11). That brings
-    // branch_11 INTO the raw first ten and drops branch_10 out of it — a genuine
-    // cross-cap move, while the full assigned set stays identical.
+    // Swap the raw positions 9 and 10 (branch_10 ↔ branch_11). The SET is
+    // unchanged, so the existing two chunks already cover it.
+    const registeredAfterMount = h.listeners.length;
     const swapped = [...twelve];
     [swapped[9], swapped[10]] = [swapped[10], swapped[9]];
     h.userHolder.user = { id: 'userA', role: 'branch_owner', branchIds: swapped, cityIds: [] };
     await rerender();
 
-    // ~(red) the key omits the first-ten subset, so the stale entry is reused.
-    expect(h.getDocsCalls).toBeGreaterThan(callsAfterMount);
-    // The NEW read must actually ask for the shifted subset (not sorted).
-    expect(h.inArrayCalls.at(-1)).toEqual(swapped.slice(0, 10));
-    expect(h.inArrayCalls.at(-1)).not.toEqual(twelve.slice(0, 10));
-    // Primary unchanged, so the projected row is still B1 — never empty.
-    expect(latest!.orders.map((o) => o.id)).toEqual(['B1']);
+    expect(h.listeners.length).toBe(registeredAfterMount);
+    expect(activeOrderListeners()).toHaveLength(2);
+    expect(latest!.orders.map((o) => o.id).sort()).toEqual(['B1', 'B10', 'B11']);
   });
 
-  /**
-   * ORD8 (POSITIVE CONTROL) — a reorder wholly inside the capped first ten,
-   * with the primary and the full alias scope unchanged, is the SAME scope.
-   */
   it('ORD8: a reorder inside the capped first ten must not refetch', async () => {
     const twelve = Array.from({ length: 12 }, (_, index) => `branch_${index + 1}`);
     h.userHolder.user = {
@@ -452,15 +453,12 @@ describe('useOrders — authorisation-scoped cache ownership', () => {
       branchIds: twelve,
       cityIds: [],
     };
-    // `branchIds[0]` is branch_1, so the primary projection keeps branch_1 rows.
-    // Without a branch_1 ticket the board would be empty for reasons unrelated to
-    // the cache key, and "no refetch" could pass vacuously.
     h.rows = [order('B1', 'branch_1'), order('B2', 'branch_2'), order('B3', 'branch_3')];
     await mount();
-    expect(latest!.orders.map((o) => o.id)).toEqual(['B1']);
+    await emitAll();
+    expect(latest!.orders.map((o) => o.id)).toEqual(['B1', 'B2', 'B3']);
     // Public query-success facts only: `dataVerified` belongs to the KDS hook's
-    // derived stream state, not to `useOrders`. Asserting it here was a
-    // wrong-API oracle, not a product defect.
+    // derived stream state, not to `useOrders`.
     expect(latest!.isLoading).toBe(false);
     expect(latest!.error).toBeNull();
     expect(latest!.dataUpdatedAt).toBeGreaterThan(0);
@@ -468,37 +466,32 @@ describe('useOrders — authorisation-scoped cache ownership', () => {
     expect(descriptorBefore).toEqual({
       userId: 'userA',
       role: 'branch_owner',
-      resolvedBranchIds: [...twelve].sort(),
+      resolvedBranchIds: twelve,
       selectedBranchId: null,
     });
-    const callsAfterMount = h.getDocsCalls;
+    const registeredAfterMount = h.listeners.length;
 
-    // Reorder WITHIN the first ten (keep index 0 fixed so the primary is
-    // unchanged; the effective `in` subset is identical as a set).
+    // Reorder WITHIN the first ten: same assigned set, same chunks.
     const reordered = [...twelve];
     [reordered[1], reordered[2]] = [reordered[2], reordered[1]];
     h.userHolder.user = { id: 'userA', role: 'branch_owner', branchIds: reordered, cityIds: [] };
     await rerender();
 
-    // CONTROL: same effective scope → no extra read, same descriptor and row.
-    expect(h.getDocsCalls).toBe(callsAfterMount);
+    // CONTROL: same effective scope → no extra subscription, same rows.
+    expect(h.listeners.length).toBe(registeredAfterMount);
     expect(scope()).toEqual(descriptorBefore);
-    expect(latest!.orders.map((o) => o.id)).toEqual(['B1']);
+    expect(latest!.orders.map((o) => o.id)).toEqual(['B1', 'B2', 'B3']);
   });
 
   /**
-   * ORD9 — the DIRECT READ's in-operand is compared on RAW values.
+   * ORD9 — malformed assignment ids fail closed.
    *
-   * `queryFn` passes the resolver output straight into
-   * `where('branchId','in', …)`; whitespace and empty entries are NOT removed.
-   * The key component currently trims/filters that subset before using it, so
-   * `'branch_y'` and `' branch_y '` collapse to the same key while the actual
-   * Firestore operand differs. That is the exact-query key contract, not a
-   * permission or query rewrite: production must keep sending the raw values.
-   *
-   * No network/provider is involved — the Firestore stub only records operands.
+   * `resolveOrderReadScope` rejects any assignment that is not a non-empty,
+   * untrimmed string, so `' branch_y '` denies the WHOLE scope instead of
+   * quietly querying a different operand than the session claims. This is the
+   * same fail-closed rule R1 applies to a malformed regional registry.
    */
-  it('ORD9: whitespace in the raw in-operand must use a new cache entry', async () => {
+  it('ORD9: a whitespace-padded assignment denies the scope', async () => {
     h.userHolder.user = {
       id: 'userA',
       role: 'branch_owner',
@@ -507,25 +500,16 @@ describe('useOrders — authorisation-scoped cache ownership', () => {
     };
     h.rows = [order('B1', 'branch_1')];
     await mount();
+    await emitAll();
 
-    // Baseline facts: projected row, descriptor, query success, raw operand.
+    // Baseline facts: projected row, descriptor, query success.
     expect(latest!.orders.map((o) => o.id)).toEqual(['B1']);
     expect(latest!.isLoading).toBe(false);
     expect(latest!.error).toBeNull();
     expect(latest!.dataUpdatedAt).toBeGreaterThan(0);
-    const descriptorBefore = scope();
-    expect(descriptorBefore).toEqual({
-      userId: 'userA',
-      role: 'branch_owner',
-      resolvedBranchIds: ['branch_1', 'branch_y'],
-      selectedBranchId: null,
-    });
-    expect(h.inArrayCalls.at(-1)).toEqual(['branch_1', 'branch_y']);
-    const callsAfterMount = h.getDocsCalls;
+    expect(scope()).not.toBeNull();
+    const valid = activeOrderListeners();
 
-    // Only WHITESPACE changes in the second assigned branch. Normalised full
-    // set is identical, and the trimmed capped key is identical too — but the
-    // RAW in-operand is a different value.
     h.userHolder.user = {
       id: 'userA',
       role: 'branch_owner',
@@ -534,19 +518,48 @@ describe('useOrders — authorisation-scoped cache ownership', () => {
     };
     await rerender();
 
-    // ~(red) current key trims/filters the subset, so the stale entry is reused
-    // and no new read is issued for a genuinely different operand.
-    expect(h.getDocsCalls).toBeGreaterThan(callsAfterMount);
-    // The new read must carry the untrimmed raw value.
-    expect(h.inArrayCalls.at(-1)).toEqual(['branch_1', ' branch_y ']);
-    expect(h.inArrayCalls.at(-1)).not.toEqual(['branch_1', 'branch_y']);
-    // Primary unchanged: the projected row stays B1 (never an empty board).
-    expect(latest!.orders.map((o) => o.id)).toEqual(['B1']);
+    // Malformed scope: no subscription, no fallback read, no ownership, no rows.
+    expect(valid.every((listener) => listener.stopped)).toBe(true);
+    expect(activeOrderListeners()).toHaveLength(0);
+    expect(h.getDocsCalls).toBe(0);
+    expect(latest!.orders).toEqual([]);
+    expect(scope()).toBeNull();
+  });
+
+  it('ORD10: a listener error clears ownership, and refetch starts a clean subscription', async () => {
+    await mount();
+    await emitAll();
+    expect(scope()).not.toBeNull();
+    const failing = activeOrderListeners()[0];
+
+    await act(async () => {
+      failing.error(new Error('permission denied'));
+    });
+    await settle();
+    expect(latest!.error?.message).toBe('permission denied');
+    expect(latest!.orders).toEqual([]);
+    expect(scope()).toBeNull();
+
+    // A retry must be a NEW subscription, not a revived failed generation.
+    h.rows = [order('Y1', 'branch_y')];
+    await act(async () => {
+      latest!.refetch();
+    });
+    await settle();
+    const retry = activeOrderListeners();
+    expect(retry).toHaveLength(1);
+    await emit(retry[0], h.rows);
+    await settle();
+    expect(latest!.error).toBeNull();
+    expect(latest!.orders.map((o) => o.id)).toEqual(['Y1']);
   });
 
   it('ORD5: a genuinely current owner exposes a usable ownership descriptor', async () => {
     await mount();
+    // No snapshot yet: the empty board is not ownership proof.
+    expect(scope()).toBeNull();
 
+    await emitAll();
     // The happy path the KDS seeding/fallback will depend on.
     expect(scope()).not.toBeNull();
     expect(scope()!.userId).toBe('userA');

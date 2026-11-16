@@ -47,6 +47,48 @@ export function resolveScopedBranchIds(
  */
 export const FIRESTORE_IN_LIMIT = 10;
 
+export interface OrderReadScope {
+  readonly global: boolean;
+  readonly branchIds: string[];
+}
+
+/** Regional orders must use the server-administered registry, not session claims. */
+export function resolveOrderReadScope(
+  role: UserRole | undefined,
+  sessionBranchIds: readonly string[],
+  selection: string | null,
+  regionalRegistry: unknown,
+): OrderReadScope {
+  const global = role === 'brand_owner' || role === 'developer' || role === 'support';
+  const selected = selection && selection !== 'all' ? selection : null;
+  if (global) return { global: true, branchIds: selected ? [selected] : [] };
+
+  let assigned: readonly unknown[] = [];
+  if (role === 'regional_manager') {
+    if (regionalRegistry && typeof regionalRegistry === 'object') {
+      const registry = regionalRegistry as Record<string, unknown>;
+      if (registry.role === 'regional_manager' && Array.isArray(registry.branchIds)) {
+        assigned = registry.branchIds;
+      }
+    }
+  } else if (role === 'branch_owner' || role === 'branch_staff') {
+    assigned = sessionBranchIds;
+  }
+  if (!assigned.every((id) => typeof id === 'string' && id.length > 0 && id.trim() === id)) {
+    return { global: false, branchIds: [] };
+  }
+  const ids = [...new Set(assigned as readonly string[])];
+  return { global: false, branchIds: selected ? ids.filter((id) => id === selected) : ids };
+}
+
+export function chunkOrderBranchIds(branchIds: readonly string[]): string[][] {
+  const chunks: string[][] = [];
+  for (let index = 0; index < branchIds.length; index += FIRESTORE_IN_LIMIT) {
+    chunks.push(branchIds.slice(index, index + FIRESTORE_IN_LIMIT));
+  }
+  return chunks;
+}
+
 export function isScopeTruncated(branchIds?: string[] | null): boolean {
   return (branchIds?.length ?? 0) > FIRESTORE_IN_LIMIT;
 }

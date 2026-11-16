@@ -60,6 +60,21 @@ vi.mock('@/config/firebase', () => ({
   auth: { currentUser: null },
 }));
 
+// Scoped roles now read through a live Firestore listener (useScopedOrderFeed).
+// This suite pins only the mutation hop, so that read boundary is inert here,
+// exactly as the one-shot query boundary above already is.
+vi.mock('firebase/firestore', () => ({
+  collection: vi.fn(() => ({})),
+  doc: vi.fn(() => ({})),
+  query: vi.fn(() => ({})),
+  where: vi.fn(() => ({})),
+  orderBy: vi.fn(() => ({})),
+  limit: vi.fn(() => ({})),
+  getDocs: vi.fn(async () => ({ docs: [] })),
+  onSnapshot: vi.fn(() => () => undefined),
+  Timestamp: { now: () => ({}) },
+}));
+
 vi.mock('@/services/partnerFunctionsApi', () => ({
   partnerFunctionsApi: { bumpOrderStatus: vi.fn(async () => ({ ok: true })) },
 }));
