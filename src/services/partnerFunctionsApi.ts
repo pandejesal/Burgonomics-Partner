@@ -213,6 +213,29 @@ const RETRYABLE_STATUSES = new Set([502, 503, 504]);
  * Other routes simply have no extras, so every caller that only reads
  * `.message` keeps working.
  */
+export interface PricingBreakdown {
+  foodSubtotal: number; packagingFee: number; deliveryFee: number;
+  gst: number; cgst: number; sgst: number; discount: number; loyaltyDiscount: number;
+  grandTotal: number; pricingDegraded: boolean;
+  split: { courierFeePaise: number; branchTransferPaise: number; totalAmountPaise: number };
+}
+
+export interface WalkInReceipt {
+  orderId: string;
+  replayed: boolean;
+  status: { code: 'PLACED'; label: string; kind: 'upcoming'; terminal: false };
+  paymentStatus: 'pending';
+  totals: PricingBreakdown;
+  settlementAvailable: false;
+}
+
+export interface CreateWalkInRequest {
+  requestId: string; branchId: string; orderType: 'takeaway' | 'dinein';
+  items: Array<{ productId: string; quantity: number }>;
+  expectedTotalPaise: number;
+  tableNumber?: string; notes?: string; customerName?: string; customerPhone?: string;
+}
+
 export class ApiRequestError extends Error {
   readonly status: number;
   readonly code?: string;
@@ -220,6 +243,7 @@ export class ApiRequestError extends Error {
   readonly pendingCancel?: PendingDispatchCancelSummary;
   readonly attempts?: unknown;
   readonly providers?: unknown;
+  readonly totals?: PricingBreakdown;
 
   constructor(status: number, body: Record<string, any>, fallback: string) {
     super(typeof body.error === 'string' && body.error ? body.error : fallback);
@@ -234,6 +258,7 @@ export class ApiRequestError extends Error {
     }
     if (body.attempts !== undefined) this.attempts = body.attempts;
     if (body.providers !== undefined) this.providers = body.providers;
+    if (body.totals && typeof body.totals === 'object') this.totals = body.totals as PricingBreakdown;
   }
 }
 
@@ -386,6 +411,16 @@ async function apiRequest<T>(
 }
 
 export const partnerFunctionsApi = {
+  async createWalkInOrder(request: CreateWalkInRequest): Promise<WalkInReceipt> {
+    const { requestId, branchId, orderType, items, expectedTotalPaise, tableNumber, notes, customerName, customerPhone } = request;
+    return apiRequest('/orders/createWalkIn', {
+      requestId, branchId, orderType, tender: 'cash', items, expectedTotalPaise,
+      ...(tableNumber !== undefined ? { tableNumber } : {}),
+      ...(notes !== undefined ? { notes } : {}),
+      ...(customerName !== undefined ? { customerName } : {}),
+      ...(customerPhone !== undefined ? { customerPhone } : {}),
+    }, { idempotencyKey: requestId });
+  },
   /**
    * Pushes order KOT to Petpooja POS API
    */

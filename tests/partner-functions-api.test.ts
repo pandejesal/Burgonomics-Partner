@@ -23,6 +23,47 @@ describe('partnerFunctionsApi gateway (real client, mocked transport)', () => {
     vi.unstubAllEnvs();
   });
 
+  it('posts the strict cash walk-in contract and binds its request id to the header', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      orderId: 'order_1', replayed: false,
+      status: { code: 'PLACED', label: 'Order placed', kind: 'upcoming', terminal: false },
+      paymentStatus: 'pending', settlementAvailable: false,
+      totals: { foodSubtotal: 100, packagingFee: 15, deliveryFee: 0, gst: 4.76, cgst: 2.38, sgst: 2.38, discount: 0, loyaltyDiscount: 0, grandTotal: 115, pricingDegraded: false, split: { courierFeePaise: 0, branchTransferPaise: 11500, totalAmountPaise: 11500 } },
+    }), { status: 201, headers: { 'Content-Type': 'application/json' } }));
+    globalThis.fetch = fetchMock;
+    const receipt = await partnerFunctionsApi.createWalkInOrder({
+      requestId: 'walkin-request-1', branchId: 'branch_1', orderType: 'takeaway',
+      items: [{ productId: 'product_1', quantity: 1 }], expectedTotalPaise: 11500,
+    });
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('https://example.invalid/api/orders/createWalkIn');
+    expect(init.method).toBe('POST');
+    expect(new Headers(init.headers).get('X-Idempotency-Key')).toBe('walkin-request-1');
+    expect(JSON.parse(String(init.body))).toEqual({ requestId: 'walkin-request-1', branchId: 'branch_1', orderType: 'takeaway', tender: 'cash', items: [{ productId: 'product_1', quantity: 1 }], expectedTotalPaise: 11500 });
+    expect(receipt.paymentStatus).toBe('pending');
+    expect(receipt.totals.split.totalAmountPaise).toBe(11500);
+  });
+
+  it('reuses the walk-in id and body on a transient retry', async () => {
+    const calls: RequestInit[] = [];
+    globalThis.fetch = async (_url, init) => {
+      calls.push(init ?? {});
+      return calls.length === 1
+        ? new Response(JSON.stringify({ error: 'try again' }), { status: 503 })
+        : new Response(JSON.stringify({ orderId: 'order_1', paymentStatus: 'pending' }), { status: 201 });
+    };
+    await partnerFunctionsApi.createWalkInOrder({ requestId: 'walkin-retry-1', branchId: 'branch_1', orderType: 'takeaway', items: [{ productId: 'p1', quantity: 1 }], expectedTotalPaise: 10000 });
+    expect(calls).toHaveLength(2);
+    expect(calls[0].body).toBe(calls[1].body);
+    expect(calls.map(call => new Headers(call.headers).get('X-Idempotency-Key'))).toEqual(['walkin-retry-1', 'walkin-retry-1']);
+  });
+
+  it('retains typed PRICE_CHANGED server totals and message', async () => {
+    const totals = { foodSubtotal: 120, packagingFee: 15, deliveryFee: 0, gst: 5.71, cgst: 2.86, sgst: 2.85, discount: 0, loyaltyDiscount: 0, grandTotal: 135, pricingDegraded: false, split: { courierFeePaise: 0, branchTransferPaise: 13500, totalAmountPaise: 13500 } };
+    globalThis.fetch = async () => new Response(JSON.stringify({ code: 'PRICE_CHANGED', error: 'Price changed', totals }), { status: 409 });
+    await expect(partnerFunctionsApi.createWalkInOrder({ requestId: 'walkin-price-1', branchId: 'branch_1', orderType: 'takeaway', items: [{ productId: 'p1', quantity: 1 }], expectedTotalPaise: 11500 })).rejects.toMatchObject({ code: 'PRICE_CHANGED', message: 'Price changed', totals });
+  });
+
   it('POSTs coin adjustments with customerId/delta/reason/notes', async () => {
     const seen: { url?: string; init?: RequestInit } = {};
     globalThis.fetch = (async (url: any, init: any) => {

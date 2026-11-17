@@ -38,8 +38,9 @@ const { syncMock, authRole } = vi.hoisted(() => ({
   authRole: { current: 'branch_owner' as string },
 }));
 
-vi.mock('@/services/petpoojaSync', () => ({
-  syncPetpoojaMenuForBranch: syncMock,
+vi.mock('@/hooks/useMenu', () => ({
+  useGuardedManualMenuSync: () => ({ mutateAsync: syncMock }),
+  isManualMenuSyncCurrent: (outcome: { status: string }) => outcome.status === 'ok',
 }));
 
 vi.mock('@/stores/authStore', () => ({
@@ -123,7 +124,7 @@ function syncButton(chip: HTMLElement): HTMLButtonElement | null {
 beforeEach(() => {
   authRole.current = 'branch_owner';
   syncMock.mockReset();
-  syncMock.mockResolvedValue({ categoriesSynced: 13, itemsSynced: 63, syncedAt: new Date() });
+  syncMock.mockResolvedValue({ status: 'ok', branchId: 'branch_surat_01' });
 });
 
 afterEach(async () => {
@@ -198,7 +199,7 @@ describe('Petpooja badge on a phone-width header', () => {
     });
 
     expect(syncMock).toHaveBeenCalledTimes(1);
-    expect(syncMock).toHaveBeenCalledWith('branch_surat_01');
+    expect(syncMock).toHaveBeenCalledWith();
     expect(visibleText(chip)).toMatch(/\blive\b/i);
     expect(chip.textContent ?? '').toMatch(/\d{1,2}:\d{2}/);
   });

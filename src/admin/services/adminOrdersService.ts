@@ -1,6 +1,8 @@
 import { db } from "@/core/config/firebase";
 import {
   collection,
+  doc,
+  getDoc,
   query,
   where,
   orderBy,
@@ -8,7 +10,7 @@ import {
   getDocs,
   onSnapshot,
 } from "firebase/firestore";
-import { RichOrder, INITIAL_RICH_ORDERS } from "../pages/ordersData";
+import type { RichOrder } from "../pages/ordersData";
 import type {
   CartLine,
   CartTotals,
@@ -20,11 +22,10 @@ import type {
 import type { PaymentMethod } from "@/features/payments/models";
 import type { Fulfillment } from "@/features/stores/models/Store";
 import { useAuthStore } from "@/stores/authStore";
-import { useAppStore } from "@/stores/appStore";
 import {
-  isGlobalRole,
-  resolveScopedBranchIds,
-  FIRESTORE_IN_LIMIT,
+  chunkOrderBranchIds,
+  resolveOrderReadScope,
+  type OrderReadScope,
 } from "@/utils/branchScope";
 import {
   normalizeOrderDoc,
@@ -39,16 +40,93 @@ import { logger } from "@/core/logging/logger";
 import { orderStatusWriteErrorMessage } from "@/utils/orderErrors";
 import type { QueryConstraint, QuerySnapshot } from "firebase/firestore";
 
+/** A caller identity as the store exposes it (never a token fallback). */
+type SessionUser = ReturnType<typeof useAuthStore.getState>["user"];
+
+function orderSessionKey(user: SessionUser | null | undefined): string {
+  const scoped = user?.role === "branch_owner" || user?.role === "branch_staff";
+  return JSON.stringify([
+    user?.id ?? null,
+    user?.role ?? null,
+    scoped && Array.isArray(user?.branchIds) ? [...user.branchIds].sort() : [],
+  ]);
+}
+
+function orderScopeKey(scope: OrderReadScope): string {
+  return JSON.stringify([scope.global, [...scope.branchIds].sort()]);
+}
+
 /**
- * Brand-wide reads are reserved for global roles (brand_owner, developer,
- * support, regional_manager). Scoped roles (branch_owner, branch_staff)
- * MUST resolve to assigned branches — an empty scope reads nothing, never
- * the global collection (product decision 2026-09-23: no cross-branch
- * PII for scoped managers).
+ * Resolve the Control Room ORDERS read policy from the caller's authoritative
+ * assignment. Orders-only: it narrows reads and never grants a write.
+ *
+ * - brand_owner / developer / support: brand-wide (`support` only through the
+ *   new orders read grant). A selected outlet narrows the read.
+ * - regional_manager: the ONLY authority is the server-confirmed
+ *   `admins/{uid}` registry (`role` + non-empty `branchIds`). Session claims,
+ *   token fallbacks, the local selection and city names grant nothing.
+ * - branch_owner / branch_staff: the session assignment.
+ *
+ * The outlet selection is INTERSECTED with the assignment — it can narrow,
+ * never add. (The old live constraint unioned the selection into the branch
+ * scope, so a forged localStorage outlet widened a scoped read.)
  */
-function globalReadAllowed(): boolean {
-  const role = useAuthStore.getState().user?.role;
-  return isGlobalRole(role);
+function resolveAdminOrderReadScope(
+  user: SessionUser | null | undefined,
+  selection: string | null,
+  regionalRegistry: unknown,
+): OrderReadScope {
+  return resolveOrderReadScope(
+    user?.role,
+    Array.isArray(user?.branchIds) ? user.branchIds : [],
+    selection,
+    regionalRegistry,
+  );
+}
+
+/** A scope authorises at least one branch, or the whole brand. */
+function scopeIsAuthorised(scope: OrderReadScope): boolean {
+  return scope.global || scope.branchIds.length > 0;
+}
+
+/**
+ * The authoritative regional registry. A cache-served snapshot cannot prove a
+ * CURRENT assignment, so it resolves to `null` (a denial) exactly like a
+ * missing document; a read error propagates so the board shows its error state
+ * instead of a phantom-empty list.
+ */
+async function readRegionalRegistry(uid: string): Promise<unknown> {
+  const snapshot = await getDoc(doc(db, "admins", uid));
+  if (snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites || !snapshot.exists()) return null;
+  return snapshot.data();
+}
+
+/**
+ * Keep only rows this scope actually owns. A chunk listener or the alias read
+ * can deliver a row outside the authorised set (a revocation racing a page);
+ * a branchless Delivery row is reachable only through a brand reader's
+ * store-selected alias read.
+ */
+function rowBelongsToScope(
+  data: Record<string, any>,
+  scope: OrderReadScope,
+  selection: string | null,
+): boolean {
+  if (scope.global && !selection) return true;
+  const branchId = typeof data.branchId === "string" ? data.branchId : null;
+  if (branchId && scope.branchIds.includes(branchId)) return true;
+  if (!scope.global) return false;
+  const storeId = typeof data.store?.id === "string" ? data.store.id : data.storeId;
+  return storeId === selection;
+}
+
+/** Newest-first merge of every page read for this scope. */
+function sortMergedDocs(
+  merged: Map<string, Record<string, any>>,
+): Array<{ id: string; data: Record<string, any> }> {
+  return [...merged.entries()]
+    .map(([id, data]) => ({ id, data }))
+    .sort((a, b) => orderDocTimeMs(b.data) - orderDocTimeMs(a.data));
 }
 
 /** Partner status → admin board status. */
@@ -439,52 +517,19 @@ function toRichOrder(id: string, raw: Record<string, any>): RichOrder {
 }
 
 /**
- * Scoped order fetch shared by live + history: branch-filtered root query
- * plus the Delivery-aliased store merge (same contract as the KDS makeline).
- * No composite indexes (single-field `in` + client-side sort/filter).
+ * Bounded scoped order fetch shared by live + history: one `branchId in` page
+ * per chunk of the authorised set (never a global fallback, never a silent
+ * truncation) plus the Delivery-aliased store merge (same contract as the KDS
+ * makeline). No composite indexes (single-field `in` + client-side sort/filter).
  */
-async function fetchScopedOrders(storeId: string | null): Promise<Array<{ id: string; data: Record<string, any> }>> {
-  const user = useAuthStore.getState().user;
-  const { selectedBranchId } = useAppStore.getState();
-  const global = globalReadAllowed();
-  // The role captured for THIS read. It is handed to the alias helper, which
-  // refuses to issue the store.id-only query for anything but a brand reader —
-  // the alias read has no branchId predicate, so no other role can prove
-  // ownership of what it returns.
-  const readRole = user?.role ?? null;
-  const scopeIds = global ? [] : resolveScopedBranchIds(user, selectedBranchId);
-  if (!global && scopeIds.length === 0) return [];
-
-  // A store filter may name a Delivery store id — resolve it to its branch
-  // as well so both shapes match.
-  const wantedBranchIds = new Set<string>();
-  if (storeId && storeId !== "all") {
-    wantedBranchIds.add(storeId);
-    const linked = branchIdForDeliveryStore(storeId);
-    if (linked) wantedBranchIds.add(linked);
-  } else if (!global) {
-    for (const b of scopeIds) wantedBranchIds.add(b);
-  }
-  const queryBranches = [...wantedBranchIds].slice(0, FIRESTORE_IN_LIMIT);
-
+async function fetchScopedOrders(
+  scope: OrderReadScope,
+  selection: string | null,
+  readRole: string | null,
+): Promise<Array<{ id: string; data: Record<string, any> }>> {
   const merged = new Map<string, Record<string, any>>();
-  if (!global || (storeId && storeId !== "all")) {
-    // Scoped (or store-filtered) read: branch match first.
-    if (queryBranches.length > 0) {
-      const snap = await getDocs(
-        query(collection(db, "orders"), where("branchId", "in", queryBranches), orderBy("createdAt", "desc"), limit(100))
-      );
-      snap.forEach((d) => merged.set(d.id, d.data() as Record<string, any>));
-    }
-    // Delivery-shaped docs carry store.id, not branchId — merge them.
-    const aliasedScope = [...wantedBranchIds];
-    if (!global && aliasedScope.length === 0) {
-      for (const b of scopeIds.slice(0, FIRESTORE_IN_LIMIT)) aliasedScope.push(b);
-    }
-    for (const doc of await fetchAliasedStoreOrders(db, aliasedScope, { role: readRole })) {
-      if (!merged.has(doc.id)) merged.set(doc.id, doc.data);
-    }
-  } else {
+
+  if (scope.global && scope.branchIds.length === 0) {
     // Both order schemas need an ordered page: Delivery docs can lack createdAt.
     const pages = await Promise.all(["createdAt", "placedAt"].map((field) =>
       getDocs(query(collection(db, "orders"), orderBy(field, "desc"), limit(100)))
@@ -493,20 +538,27 @@ async function fetchScopedOrders(storeId: string | null): Promise<Array<{ id: st
       const data = d.data() as Record<string, any>;
       if (index === 0 || data.createdAt === undefined) merged.set(d.id, data);
     });
+    return sortMergedDocs(merged);
   }
 
-  // Store filter applies to the merged set (covers both id shapes).
-  const out: Array<{ id: string; data: Record<string, any> }> = [];
-  for (const [id, data] of merged) {
-    if (storeId && storeId !== "all") {
-      const sid = typeof data.store?.id === "string" ? data.store.id : data.storeId;
-      const bid = typeof data.branchId === "string" ? data.branchId : null;
-      if (sid !== storeId && bid !== storeId && !wantedBranchIds.has(bid ?? "")) continue;
-    }
-    out.push({ id, data });
+  for (const chunk of chunkOrderBranchIds([...scope.branchIds])) {
+    const snap = await getDocs(
+      query(collection(db, "orders"), where("branchId", "in", chunk), orderBy("createdAt", "desc"), limit(100))
+    );
+    snap.forEach((d) => merged.set(d.id, d.data() as Record<string, any>));
   }
-  out.sort((a, b) => orderDocTimeMs(b.data) - orderDocTimeMs(a.data));
-  return out;
+
+  // Delivery-shaped docs carry store.id, not branchId. The helper refuses the
+  // store.id-only query for any role that cannot prove brand-wide access, so a
+  // regional operator issues no such read (no branchId-less regional alias).
+  const aliasScope = selection
+    ? [...new Set([selection, branchIdForDeliveryStore(selection)].filter((id): id is string => !!id))]
+    : [...scope.branchIds];
+  for (const aliased of await fetchAliasedStoreOrders(db, aliasScope, { role: readRole })) {
+    if (!merged.has(aliased.id)) merged.set(aliased.id, aliased.data);
+  }
+
+  return sortMergedDocs(merged).filter(({ data }) => rowBelongsToScope(data, scope, selection));
 }
 
 const LIVE_STATUSES: ReadonlySet<RichOrder["orderStatus"]> = new Set([
@@ -532,139 +584,205 @@ export const adminOrdersService = {
    * Listen for live incoming orders (normalized contract — the old
    * collectionGroup query on phantom `store.id`/`orderStatus` fields could
    * never match real docs, so this board was permanently empty).
-   * If storeId is provided, filters by storeId (for Store Managers).
+   * An outlet selection only narrows the caller's orders-only read scope.
    */
   listenLiveOrders(
     storeId: string | null,
     onUpdate: (orders: RichOrder[]) => void,
     onError: (err: Error) => void,
   ) {
-    let cancelled = false;
-    // Live snapshot on the branch query; the aliased merge refreshes
-    // alongside. Snapshot errors surface via onError (never silent-empty).
     const user = useAuthStore.getState().user;
-    const { selectedBranchId } = useAppStore.getState();
-    const global = globalReadAllowed();
-    // The role captured for THIS listener generation, passed to the privileged
-    // alias read so a non-brand operator never sends a store.id-only query.
-    const readRole = user?.role ?? null;
-    const scopeIds = global ? [] : resolveScopedBranchIds(user, selectedBranchId);
-    const storeFilter = !!storeId && storeId !== "all";
+    const selection = storeId && storeId !== "all" ? storeId : null;
+    const sessionKey = orderSessionKey(user);
+    let cancelled = false;
+    let revision = 0;
+    let scopeKey: string | null = null;
+    let orderUnsubscribers: Array<() => void> = [];
+    let unsubscribeRegistry = () => {};
+    let unsubscribeAuth = () => {};
+    const current = () => !cancelled && orderSessionKey(useAuthStore.getState().user) === sessionKey;
+    const clearListeners = () => {
+      revision++;
+      orderUnsubscribers.forEach((unsubscribe) => unsubscribe());
+      orderUnsubscribers = [];
+    };
+    const retire = () => {
+      cancelled = true;
+      clearListeners();
+      unsubscribeRegistry();
+      unsubscribeAuth();
+    };
+    unsubscribeAuth = useAuthStore.subscribe((state) => {
+      if (orderSessionKey(state.user) !== sessionKey) {
+        retire();
+        onUpdate([]);
+      }
+    });
 
-    // A scoped role with no assigned branch must never fall through to a
-    // brand-wide query. The `"all"` sentinel is not a scope grant: without an
-    // assignment there is nothing to read, so deny before any listener starts.
-    if (!global && !storeFilter && scopeIds.length === 0) {
-      logger.warn("adminOrdersService.global_read_denied", {
-        reason: "scoped_role_without_store",
-      });
-      onUpdate([]);
-      return () => {};
-    }
-
-    const constraints: QueryConstraint[] = [
-      ...(scopeIds.length > 0 || storeFilter
-        ? [where("branchId", "in", [...new Set([...scopeIds, ...(storeFilter ? [storeId as string] : [])])].slice(0, FIRESTORE_IN_LIMIT))]
-        : []),
-      orderBy("createdAt", "desc"),
-      limit(100),
-    ];
-    const pages = new Map<string, Map<string, Record<string, any>>>();
-    // The alias merge is an async read: a slower snapshot must never repaint
-    // the board after a newer snapshot already dropped a completed order.
-    const ingestionGate = createKdsIngestionGate();
-    const receivePage = (field: string) => (snapshot: QuerySnapshot) => {
+    const startScope = (registry: unknown) => {
+      if (!current()) return;
+      const scope = resolveAdminOrderReadScope(user, selection, registry);
+      const nextKey = orderScopeKey(scope);
+      if (nextKey === scopeKey) return;
+      const replacing = scopeKey !== null;
+      scopeKey = nextKey;
+      clearListeners();
+      if (replacing || !scopeIsAuthorised(scope)) onUpdate([]);
+      if (!scopeIsAuthorised(scope)) return;
+      const generation = revision;
+      const pages = new Map<string, Map<string, Record<string, any>>>();
+      const ingestionGate = createKdsIngestionGate();
+      const active = () => current() && generation === revision;
+      const fail = (error: unknown) => {
+        if (!active()) return;
+        scopeKey = null;
+        clearListeners();
+        onUpdate([]);
+        onError(error instanceof Error ? error : new Error(String(error)));
+      };
+      const receivePage = (key: string, field: string) => (snapshot: QuerySnapshot) => {
+        if (!active()) return;
+        const token = ingestionGate.next();
+        const page = new Map<string, Record<string, any>>();
+        snapshot.forEach((d) => {
+          const data = d.data() as Record<string, any>;
+          if ((field === "createdAt" || data.createdAt === undefined) && rowBelongsToScope(data, scope, selection)) page.set(d.id, data);
+        });
+        pages.set(key, page);
         void (async () => {
-          if (cancelled) return;
-          const mergeToken = ingestionGate.next();
           try {
-            const page = new Map<string, Record<string, any>>();
-            snapshot.forEach((d) => {
-              const data = d.data() as Record<string, any>;
-              // Keep primary-schema documents out of the fallback feed so a
-              // delayed duplicate cannot re-open a completed ticket.
-              if (field === "createdAt" || data.createdAt === undefined) page.set(d.id, data);
-            });
-            pages.set(field, page);
-            const aliasedScope =
-              storeFilter
-                ? [storeId as string]
-                : scopeIds.length > 0
-                  ? scopeIds
-                  : [];
-            const aliased = await fetchAliasedStoreOrders(db, aliasedScope, { role: readRole });
-            // Drop a stale generation: a newer snapshot has already started
-            // (and may have painted), so this merge must not write state.
-            if (cancelled || !ingestionGate.isCurrent(mergeToken)) return;
+            const aliasScope = selection ? [selection] : scope.branchIds;
+            const aliased = await fetchAliasedStoreOrders(db, aliasScope, { role: user?.role ?? null });
+            if (!active() || !ingestionGate.isCurrent(token)) return;
             const merged = new Map([...pages.values()].flatMap((p) => [...p.entries()]));
-            for (const doc of aliased) {
-              if (!merged.has(doc.id)) merged.set(doc.id, doc.data);
+            for (const row of aliased) {
+              if (!merged.has(row.id) && rowBelongsToScope(row.data, scope, selection)) merged.set(row.id, row.data);
             }
-            const live: RichOrder[] = [];
-            for (const [id, data] of merged) {
-              const rich = toRichOrder(id, data);
-              if (!LIVE_STATUSES.has(rich.orderStatus)) continue;
-              if (storeFilter) {
-                const sid = typeof data.store?.id === "string" ? data.store.id : data.storeId;
-                const bid = typeof data.branchId === "string" ? data.branchId : null;
-                if (sid !== storeId && bid !== storeId) continue;
-              }
-              live.push(rich);
-            }
-            live.sort(
-              (a, b) => orderDocTimeMs({ placedAt: a.placedAt }) - orderDocTimeMs({ placedAt: b.placedAt })
-            );
-            if (live.length === 0 && import.meta.env.DEV) {
-              const mockLive = INITIAL_RICH_ORDERS.filter((o) =>
-                ["New", "Preparing", "Ready", "Accepted"].includes(o.orderStatus),
-              );
-              onUpdate(mockLive);
-            } else {
-              onUpdate(live);
-            }
-          } catch (err) {
-            if (cancelled || !ingestionGate.isCurrent(mergeToken)) return;
-            onError(err instanceof Error ? err : new Error(String(err)));
+            const live = sortMergedDocs(merged).map(({ id, data }) => toRichOrder(id, data))
+              .filter((order) => LIVE_STATUSES.has(order.orderStatus))
+              .sort((a, b) => orderDocTimeMs({ placedAt: a.placedAt }) - orderDocTimeMs({ placedAt: b.placedAt }));
+            onUpdate(live);
+          } catch (error) {
+            if (ingestionGate.isCurrent(token)) fail(error);
           }
         })();
       };
-    const unsub = onSnapshot(
-      query(collection(db, "orders"), ...constraints),
-      receivePage("createdAt"),
-      (error) => onError(error),
-    );
-    const unsubDelivery = scopeIds.length === 0 && (!storeId || storeId === "all") ? onSnapshot(
-      query(collection(db, "orders"), orderBy("placedAt", "desc"), limit(100)),
-      receivePage("placedAt"),
-      (error) => onError(error),
-    ) : null;
-    return () => {
-      cancelled = true;
-      unsub();
-      unsubDelivery?.();
+      const subscribe = (key: string, field: string, predicates: QueryConstraint[]) => {
+        if (!active()) return;
+        const unsubscribe = onSnapshot(
+          query(collection(db, "orders"), ...predicates, orderBy(field, "desc"), limit(100)),
+          receivePage(key, field),
+          fail,
+        );
+        if (active()) orderUnsubscribers.push(unsubscribe);
+        else unsubscribe();
+      };
+      if (scope.global && scope.branchIds.length === 0) {
+        subscribe("createdAt", "createdAt", []);
+        subscribe("placedAt", "placedAt", []);
+      } else {
+        chunkOrderBranchIds(scope.branchIds).forEach((chunk, index) => {
+          subscribe(`branch:${index}`, "createdAt", [where("branchId", "in", chunk)]);
+        });
+      }
     };
+
+    if (user?.role === "regional_manager" && user.id) {
+      onUpdate([]);
+      unsubscribeRegistry = onSnapshot(doc(db, "admins", user.id), { includeMetadataChanges: true }, (snapshot) => {
+        startScope(snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites || !snapshot.exists() ? null : snapshot.data());
+      }, (error) => {
+        if (!current()) return;
+        clearListeners();
+        scopeKey = null;
+        onUpdate([]);
+        onError(error);
+      });
+    } else {
+      startScope(null);
+    }
+    return retire;
+  },
+
+  /**
+   * Notify whenever the caller's authoritative order-read scope changes, so a
+   * one-shot reader (history) can clear and reload.
+   *
+   * A regional scope is the server registry (`admins/{uid}`), which can be
+   * revoked or reassigned with no UI event. Cached or pending registry
+   * snapshots prove nothing and resolve as denied. Other roles' scope changes
+   * only with the session, which retires this watcher.
+   */
+  watchOrderReadScope(
+    storeId: string | null,
+    onScopeChange: () => void,
+    onError: (err: Error) => void,
+  ): () => void {
+    const user = useAuthStore.getState().user;
+    const selection = storeId && storeId !== "all" ? storeId : null;
+    const sessionKey = orderSessionKey(user);
+    let cancelled = false;
+    let scopeKey: string | null = null;
+    let unsubscribeRegistry = () => {};
+    let unsubscribeAuth = () => {};
+    const retire = () => {
+      cancelled = true;
+      unsubscribeRegistry();
+      unsubscribeAuth();
+    };
+    unsubscribeAuth = useAuthStore.subscribe((state) => {
+      if (orderSessionKey(state.user) !== sessionKey) retire();
+    });
+    const notify = (registry: unknown) => {
+      if (cancelled || orderSessionKey(useAuthStore.getState().user) !== sessionKey) return;
+      const nextKey = orderScopeKey(resolveAdminOrderReadScope(user, selection, registry));
+      if (nextKey === scopeKey) return;
+      scopeKey = nextKey;
+      onScopeChange();
+    };
+    if (user?.role === "regional_manager" && user.id) {
+      unsubscribeRegistry = onSnapshot(
+        doc(db, "admins", user.id),
+        { includeMetadataChanges: true },
+        (snapshot) => {
+          notify(snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites || !snapshot.exists() ? null : snapshot.data());
+        },
+        (error) => {
+          if (cancelled) return;
+          scopeKey = null;
+          onError(error instanceof Error ? error : new Error(String(error)));
+        },
+      );
+    } else {
+      notify(null);
+    }
+    return retire;
   },
 
   /**
    * Fetch historical orders (completed/cancelled) for the given store.
    */
   async getHistory(storeId: string | null, limitCount = 50): Promise<RichOrder[]> {
-    if (!storeId && !globalReadAllowed()) {
-      logger.warn("adminOrdersService.global_read_denied", {
-        reason: "scoped_role_without_store",
-      });
-      return [];
-    }
-
+    const user = useAuthStore.getState().user;
+    const selection = storeId && storeId !== "all" ? storeId : null;
+    const sessionKey = orderSessionKey(user);
+    let retired = false;
+    const unsubscribeAuth = useAuthStore.subscribe((state) => {
+      if (orderSessionKey(state.user) !== sessionKey) retired = true;
+    });
     try {
-      const docs = await fetchScopedOrders(storeId);
-      const history: RichOrder[] = [];
-      for (const { id, data } of docs) {
-        const rich = toRichOrder(id, data);
-        if (HISTORY_STATUSES.has(rich.orderStatus)) history.push(rich);
-        if (history.length >= limitCount) break;
+      const registry = user?.role === "regional_manager" && user.id ? await readRegionalRegistry(user.id) : null;
+      const scope = resolveAdminOrderReadScope(user, selection, registry);
+      if (retired || !scopeIsAuthorised(scope)) return [];
+      const docs = await fetchScopedOrders(scope, selection, user?.role ?? null);
+      if (retired || orderSessionKey(useAuthStore.getState().user) !== sessionKey) return [];
+      if (user?.role === "regional_manager") {
+        const latest = await readRegionalRegistry(user.id);
+        if (retired || orderScopeKey(resolveAdminOrderReadScope(user, selection, latest)) !== orderScopeKey(scope)) return [];
       }
-      return history;
+      return docs.map(({ id, data }) => toRichOrder(id, data))
+        .filter((order) => HISTORY_STATUSES.has(order.orderStatus))
+        .slice(0, Math.max(0, Math.min(100, limitCount)));
     } catch (e) {
       // Rethrow (never phantom-empty): the caller renders the error state
       // with retry. A rules denial/offline used to look like "No orders".
@@ -672,6 +790,8 @@ export const adminOrdersService = {
         message: e instanceof Error ? e.message : String(e),
       });
       throw e instanceof Error ? e : new Error(String(e));
+    } finally {
+      unsubscribeAuth();
     }
   },
 

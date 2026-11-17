@@ -213,10 +213,8 @@ export function OrdersPage() {
         <ManualOrderCreateModal
           isOpen={isCreateModalOpen}
           onClose={() => setIsCreateModalOpen(false)}
-          onOrderCreated={(order) => {
-            // Same reference the table and KDS show: the old left-truncation
-            // produced "ORD_PO" for every walk-in order.
-            toast.success(`Order #${orderRef(order)} created & KOT dispatched!`);
+          onOrderCreated={(receipt) => {
+            toast.success(`Order #${receipt.orderId} created. Payment pending.`);
           }}
         />
       )}

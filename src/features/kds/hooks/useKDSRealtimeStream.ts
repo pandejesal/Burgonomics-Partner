@@ -309,6 +309,8 @@ export function useKDSRealtimeStream() {
     error: ordersError,
     updateOrderStatus,
     ordersDataScope,
+    dataUpdatedAt = 0,
+    refetch: refetchOrders,
   } = useOrders();
 
   const [isOnline, setIsOnline] = useState<boolean>(
@@ -344,6 +346,16 @@ export function useKDSRealtimeStream() {
   // but equivalent object (same uid/role/branches) rebuilt everything below.
   const scopeUserId = user?.id ?? null;
   const scopeRole = user?.role ?? null;
+  const regional = scopeRole === 'regional_manager';
+  // Only the canonical feed can prove a regional assignment. In particular,
+  // session branchIds and the shared global-selection helper grant nothing.
+  const regionalBranchSignature = regional && ordersDataScope
+    && ordersDataScope.userId === scopeUserId
+    && ordersDataScope.role === scopeRole
+    && ordersDataScope.selectedBranchId === (selectedBranchId ?? null)
+    && !ordersError && !isLoading
+    ? JSON.stringify(ordersDataScope.resolvedBranchIds)
+    : '[]';
   // Normalise BEFORE joining: an equal effective branch set must produce the
   // same signature even when the caller reorders, duplicates or pads ids.
   // A raw join would hash [y,z] and [z,y] differently while they mean the same.
@@ -377,12 +389,14 @@ export function useKDSRealtimeStream() {
   // reordered one) yields the SAME array instance.
   const scopeBranchIds = useMemo(
     () =>
-      resolveScopedBranchIds(scopeIdentity, selectedBranchId)
+      (regional
+        ? JSON.parse(regionalBranchSignature) as string[]
+        : resolveScopedBranchIds(scopeIdentity, selectedBranchId))
         .map((id) => String(id).trim())
         .filter((id) => id.length > 0)
         .filter((id, index, all) => all.indexOf(id) === index)
         .sort(),
-    [scopeIdentity, selectedBranchId]
+    [regional, regionalBranchSignature, scopeIdentity, selectedBranchId]
   );
 
   // Full authorisation identity (uid + role + resolved branches + selection).
@@ -414,6 +428,7 @@ export function useKDSRealtimeStream() {
       }) === authScopeKey
     );
   }, [ordersDataScope, authScopeKey]);
+  const regionalFeedVerified = regional && oneShotOwnedByScope && !isLoading && !ordersError;
 
   // Latest scope for async callbacks. A captured local compared against another
   // captured local is a tautology; this ref is what a resolution must check.
@@ -433,11 +448,12 @@ export function useKDSRealtimeStream() {
   const queryClient = useQueryClient();
   const refresh = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['orders'] });
-    setListenerEpoch((epoch) => epoch + 1);
-  }, [queryClient]);
+    if (regional) void refetchOrders();
+    else setListenerEpoch((epoch) => epoch + 1);
+  }, [queryClient, regional, refetchOrders]);
 
   // Surface the live-stream error when present, else the one-shot query error.
-  const streamError = liveError ?? ordersError ?? null;
+  const streamError = regional ? ordersError ?? null : liveError ?? ordersError ?? null;
 
   // Recall stack (each entry active for 60 seconds, max 5 deep): rapid
   // successive bumps used to overwrite a single recall slot, stranding the
@@ -589,6 +605,7 @@ export function useKDSRealtimeStream() {
     // an anonymous or no-access session whose key matches a forged persisted
     // row would drain it. Checked BEFORE any storage read/write.
     if (!scopeUserId) return;
+    if (regional && (!regionalFeedVerified || scopeBranchIds.length === 0)) return;
     if (scopeBranchIds.length === 0 && !isGlobalRole(scopeRole ?? undefined)) return;
 
     // The operator this drain runs for. Anything else in the queue is foreign.
@@ -675,7 +692,7 @@ export function useKDSRealtimeStream() {
     return () => {
       cancelled = true;
     };
-  }, [isOnline, mutateAsyncFn, authScopeKey, drainRetry, scopeUserId, scopeBranchIds, scopeRole]);
+  }, [isOnline, mutateAsyncFn, authScopeKey, drainRetry, scopeUserId, scopeBranchIds, scopeRole, regional, regionalFeedVerified]);
 
   // Seed the makeline from the one-shot query only until the live stream
   // delivers its first snapshot (never clobber the stream afterward).
@@ -685,6 +702,7 @@ export function useKDSRealtimeStream() {
   // this hook had just written itself, which proved nothing about the rows — a
   // lagging A result was adopted under B.
   useEffect(() => {
+    if (regional) return; // Never retain a regional last-good copy outside the authoritative feed.
     if (!scopeUserId) return;
     if (scopeBranchIds.length === 0 && !isGlobalRole(scopeRole ?? undefined)) return;
     if (streamHydratedRef.current) return;
@@ -699,6 +717,7 @@ export function useKDSRealtimeStream() {
     scopeRole,
     authScopeKey,
     oneShotOwnedByScope,
+    regional,
   ]);
 
   // RENDER-TIME FENCE. An identity switch can render once before the effect
@@ -706,12 +725,15 @@ export function useKDSRealtimeStream() {
   // the dataset/verification actually belonging to the CURRENT scope.
   const datasetOwnedByScope = liveOrdersScope === authScopeKey;
   const verifiedForScope = datasetOwnedByScope && verifiedScope === authScopeKey;
+  const displayedOrders = regional
+    ? regionalFeedVerified ? orders : []
+    : datasetOwnedByScope ? liveOrders : [];
 
   // Filter KDS active orders for current branch. Fail-closed: an order
   // without a branchId is unroutable (normalizeOrderDoc already resolves
   // branchId via the store↔branch registry), so it must not render on
   // every branch's makeline.
-  const activeOrders = (datasetOwnedByScope ? liveOrders : []).filter((o) => {
+  const activeOrders = displayedOrders.filter((o) => {
     if (orderPaymentChannel(o) === 'unpaid') return false;
     if (selectedBranchId && o.branchId !== selectedBranchId) {
       return false;
@@ -740,7 +762,7 @@ export function useKDSRealtimeStream() {
   useEffect(() => {
     resetKDSAlarmState();
     return () => resetKDSAlarmState();
-  }, [user?.id, selectedBranchId]);
+  }, [authScopeKey]);
 
   // Audio chime alarm triggering on new pending orders
   useEffect(() => {
@@ -752,7 +774,7 @@ export function useKDSRealtimeStream() {
     // `streamHydratedRef` flips on the first snapshot even when it is empty;
     // a settled one-shot query covers listener startup failures.
     if (!scopeUserId) return;
-    const dataReady = streamHydratedRef.current || !isLoading;
+    const dataReady = regional ? regionalFeedVerified : streamHydratedRef.current || !isLoading;
     if (!dataReady) return;
 
     if (!initialLoadDoneRef.current) {
@@ -861,7 +883,7 @@ export function useKDSRealtimeStream() {
       // Precondition: the status THIS card is showing. The client sends
       // expectedStatus as containment; transaction-side lost-update
       // enforcement is owned by the backend lane.
-      const currentStatus = liveOrders.find((o) => o.id === orderId)?.status;
+      const currentStatus = displayedOrders.find((o) => o.id === orderId)?.status;
       try {
         if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
           await updateOrderStatus.mutateAsync({
@@ -870,7 +892,7 @@ export function useKDSRealtimeStream() {
             ...(currentStatus ? { expectedStatus: currentStatus } : {}),
           });
         }
-        const targetOrder = liveOrders.find((o) => o.id === orderId);
+        const targetOrder = displayedOrders.find((o) => o.id === orderId);
         // A late success from an abandoned scope must not publish a recall
         // entry into the newly mounted scope. The request itself was already
         // issued and cannot be un-sent; only this UI record is withheld.
@@ -935,7 +957,7 @@ export function useKDSRealtimeStream() {
         });
       }
     },
-    [activeOrders, liveOrders, updateOrderStatus, refresh, authScopeKey]
+    [activeOrders, displayedOrders, updateOrderStatus, refresh, authScopeKey]
   );
 
   // Recall the most recent bump within 60s (stack depth 5 — rapid
@@ -960,7 +982,7 @@ export function useKDSRealtimeStream() {
       const { order, previousStatus } = head;
       // Precondition: what the card shows right now (the status this recall
       // is undoing), not the pre-bump status stored on the stack entry.
-      const currentStatus = liveOrders.find((o) => o.id === order.id)?.status;
+      const currentStatus = displayedOrders.find((o) => o.id === order.id)?.status;
       if (updateOrderStatus && typeof updateOrderStatus.mutateAsync === 'function') {
         await updateOrderStatus.mutateAsync({
           orderId: order.id,
@@ -988,7 +1010,7 @@ export function useKDSRealtimeStream() {
       }
       return false;
     }
-  }, [recallStack, updateOrderStatus, liveOrders, refresh, authScopeKey]);
+  }, [recallStack, updateOrderStatus, displayedOrders, refresh, authScopeKey]);
 
   const canRecall = liveRecallStack.length > 0;
 
@@ -1030,6 +1052,11 @@ export function useKDSRealtimeStream() {
       // empty array here would instead emit an artificial empty frame that
       // resets the audio acknowledge latch.
     }
+
+    // Regional useOrders already owns the registry, complete query chunks and
+    // retirement fences. A second KDS subscription could expose another user's
+    // cached global rows before rules reject it, then retain them on denial.
+    if (regional) return;
 
     // Both early exits below still publish an honest, non-live state. They used
     // to return BEFORE the resets, so leaving a healthy scope for a scoped user
@@ -1281,27 +1308,27 @@ export function useKDSRealtimeStream() {
       // `user` object, so an equivalent fresh object cannot churn listeners;
       // listenerEpoch lets refresh() force one.
     };
-  }, [authScopeKey, listenerEpoch, scopeBranchIds, scopeUserId, scopeRole]);
+  }, [authScopeKey, listenerEpoch, scopeBranchIds, scopeUserId, scopeRole, regional]);
 
   // Derived feed honesty for the header/columns: what the makeline may
   // claim about liveness, and whether the data on screen was ever verified
   // by the stream or by a successful one-shot read. Both are fenced on scope
   // ownership so a pre-effect render of a new identity cannot inherit either.
   const streamStatus = deriveKdsStreamStatus({
-    streamHydrated: streamHydrated && datasetOwnedByScope,
-    listenerFailed: liveError !== null,
+    streamHydrated: regional ? regionalFeedVerified : streamHydrated && datasetOwnedByScope,
+    listenerFailed: regional ? !!ordersError : liveError !== null,
     oneShotLoading: isLoading,
     oneShotError: ordersError,
     // Verified orders still on screen mean a failed one-shot is a fallback
     // problem, not an unreadable makeline.
-    hasVerifiedLiveData: verifiedForScope,
+    hasVerifiedLiveData: regional ? regionalFeedVerified : verifiedForScope,
   });
   // Column state uses HISTORICAL verification plus a successful one-shot read.
   // Using per-generation `streamHydrated` here would flip a same-scope refresh
   // from "orders" to "error" even though the displayed dataset was verified.
   // The one-shot arm is gated on PROVENANCE too: a scope-mismatched fallback
   // must not verify a foreign dataset.
-  const dataVerified = verifiedForScope || (!isLoading && !ordersError && oneShotOwnedByScope);
+  const dataVerified = regional ? regionalFeedVerified : verifiedForScope || (!isLoading && !ordersError && oneShotOwnedByScope);
 
   return {
     isOnline,
@@ -1322,9 +1349,13 @@ export function useKDSRealtimeStream() {
     newOrderTotal: scopedNewOrderAlert?.total ?? 0,
     dismissNewOrderAlert,
     refresh,
-    lastRefreshAt,
+    // The scoped feed stamps its last complete snapshot; before one exists the
+    // mount time keeps the age label finite (columns still show unverified).
+    lastRefreshAt: regional && dataUpdatedAt > 0 ? dataUpdatedAt : lastRefreshAt,
     /** Branch scope this stream reads (F6: render truncation honestly). */
     scopeBranchIds,
+    /** Regional rows come from useOrders, which queries every ≤10-id chunk. */
+    readsCompleteScope: regional,
   };
 }
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   ShoppingBag,
   Check,
@@ -256,35 +256,6 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
     ? null
     : scopeTruncationNotice(assignedStoreIds);
 
-  // Fetch Live Orders
-  useEffect(() => {
-    if (viewMode !== "live") return;
-
-    const unsubscribe = adminOrdersService.listenLiveOrders(
-      boardStoreFilter,
-      (liveOrders) => {
-        setStreamError(null);
-        setOrders(liveOrders);
-      },
-      // A stalled stream looks exactly like a quiet kitchen — banner it.
-      (err) => setStreamError(err?.message || "Live order stream disconnected — reload the page."),
-    );
-
-    return () => unsubscribe();
-  }, [viewMode, boardStoreFilter, streamEpoch]);
-
-  // Fetch Historical Orders
-  useEffect(() => {
-    if (viewMode !== "history") return;
-
-    adminOrdersService
-      .getHistory(boardStoreFilter, 50)
-      .then(setOrders)
-      .catch((err) =>
-        setStreamError(err?.message || "Order history failed to load — retry."),
-      );
-  }, [viewMode, boardStoreFilter, streamEpoch]);
-
   // Confirm actions
   const [confirmAction, setConfirmAction] = useState<{
     type:
@@ -309,6 +280,93 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
     order: RichOrder;
     type: "KOT" | "INVOICE" | "TAX_RECEIPT";
   } | null>(null);
+
+  // Everything on this board belongs to one operator and one read scope: the
+  // rows, the open drawer and any staged confirmation, bulk cancel or receipt.
+  const ownerKey = JSON.stringify([admin?.id ?? null, selectedRole, [...assignedStoreIds].sort()]);
+  const hasAdmin = !!admin;
+  const resetOwnedView = useCallback(() => {
+    setOrders([]);
+    setSelectedOrder(null);
+    setConfirmAction(null);
+    setBulkCancelSelection(null);
+    setPrintReceiptData(null);
+  }, []);
+  const [viewOwner, setViewOwner] = useState(ownerKey);
+  if (viewOwner !== ownerKey) {
+    // Adjusted during render, not in an effect, so no frame paints the
+    // previous operator's orders under the new session.
+    setViewOwner(ownerKey);
+    resetOwnedView();
+    setStreamError(null);
+  }
+
+  // Fetch Live Orders. The service retires its own listeners on a session
+  // change; the owner key restarts them for the new operator.
+  useEffect(() => {
+    if (viewMode !== "live" || !hasAdmin) return;
+
+    const unsubscribe = adminOrdersService.listenLiveOrders(
+      boardStoreFilter,
+      (liveOrders) => {
+        setStreamError(null);
+        setOrders(liveOrders);
+      },
+      // A stalled stream looks exactly like a quiet kitchen — banner it.
+      (err) => setStreamError(err?.message || "Live order stream disconnected — reload the page."),
+    );
+
+    return () => unsubscribe();
+  }, [viewMode, boardStoreFilter, streamEpoch, ownerKey, hasAdmin]);
+
+  // Fetch Historical Orders. Each request is fenced to the effect run (owner,
+  // filter, retry) that issued it: a late answer for a retired owner or scope
+  // is discarded instead of repainting the board.
+  useEffect(() => {
+    if (viewMode !== "history" || !hasAdmin) return;
+    let active = true;
+    let request = 0;
+    const load = () => {
+      const issued = ++request;
+      adminOrdersService
+        .getHistory(boardStoreFilter, 50)
+        .then((rows) => {
+          if (active && issued === request) setOrders(rows);
+        })
+        .catch((err) => {
+          if (active && issued === request) {
+            setStreamError(err?.message || "Order history failed to load — retry.");
+          }
+        });
+    };
+    if (selectedRole !== "regional_manager") {
+      load();
+      return () => {
+        active = false;
+      };
+    }
+    // A regional scope is the server registry, which can be revoked with no UI
+    // event. Clear, then reload, on every authoritative change; an unreadable
+    // registry leaves nothing on screen.
+    const stopWatching = adminOrdersService.watchOrderReadScope(
+      boardStoreFilter,
+      () => {
+        if (!active) return;
+        resetOwnedView();
+        load();
+      },
+      (err) => {
+        if (!active) return;
+        request += 1;
+        resetOwnedView();
+        setStreamError(err?.message || "Order access could not be verified — retry.");
+      },
+    );
+    return () => {
+      active = false;
+      stopWatching();
+    };
+  }, [viewMode, boardStoreFilter, streamEpoch, ownerKey, hasAdmin, selectedRole, resetOwnedView]);
 
   // Auto-open specific order if passed as prop
   useEffect(() => {

@@ -4,6 +4,8 @@ import {
   isScopeTruncated,
   resolveBoardStoreFilter,
   scopeTruncationNotice,
+  resolveOrderReadScope,
+  chunkOrderBranchIds,
 } from './branchScope';
 
 describe('scopeTruncationNotice (F6)', () => {
@@ -20,6 +22,28 @@ describe('scopeTruncationNotice (F6)', () => {
     const notice = scopeTruncationNotice(ids);
     expect(notice).toContain(`first ${FIRESTORE_IN_LIMIT} of 12`);
     expect(notice).toMatch(/narrow the outlet filter/i);
+  });
+});
+
+describe('order read scope', () => {
+  it('treats support as global, but never regional', () => {
+    expect(resolveOrderReadScope('support', [], null, null)).toEqual({ global: true, branchIds: [] });
+    expect(resolveOrderReadScope('regional_manager', ['forged'], null, null)).toEqual({ global: false, branchIds: [] });
+  });
+
+  it('requires a valid authoritative regional registry and intersects selection', () => {
+    const registry = { role: 'regional_manager', branchIds: ['a', 'b'] };
+    expect(resolveOrderReadScope('regional_manager', ['forged'], 'b', registry)).toEqual({ global: false, branchIds: ['b'] });
+    expect(resolveOrderReadScope('regional_manager', ['forged'], 'foreign', registry)).toEqual({ global: false, branchIds: [] });
+    expect(resolveOrderReadScope('regional_manager', ['a'], null, { role: 'regional_manager', branchIds: ['a', 3] })).toEqual({ global: false, branchIds: [] });
+    expect(resolveOrderReadScope('regional_manager', ['a'], null, { role: 'support', branchIds: ['a'] })).toEqual({ global: false, branchIds: [] });
+  });
+
+  it('keeps every assigned branch in bounded query chunks', () => {
+    const ids = Array.from({ length: 23 }, (_, i) => `branch-${i}`);
+    const chunks = chunkOrderBranchIds(ids);
+    expect(chunks.map((chunk) => chunk.length)).toEqual([10, 10, 3]);
+    expect(chunks.flat()).toEqual(ids);
   });
 });
 

@@ -29,6 +29,10 @@ vi.mock('@/stores/authStore', () => ({
 }));
 
 vi.mock('@/components/layout/Header', () => ({ Header: () => null }));
+vi.mock('@/hooks/useMenu', () => ({
+  useGuardedManualMenuSync: () => ({ mutateAsync: vi.fn() }),
+  isManualMenuSyncCurrent: () => false,
+}));
 
 import { PetpoojaStatusBadge } from '../src/components/ui/PetpoojaStatusBadge';
 

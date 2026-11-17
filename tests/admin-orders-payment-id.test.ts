@@ -32,7 +32,10 @@ vi.mock('firebase/firestore', () => ({
   onSnapshot: vi.fn(),
 }));
 vi.mock('@/stores/authStore', () => ({
-  useAuthStore: { getState: () => ({ user: { role: 'brand_owner' } }) },
+  useAuthStore: {
+    getState: () => ({ user: { role: 'brand_owner' } }),
+    subscribe: vi.fn(() => vi.fn()),
+  },
 }));
 vi.mock('@/stores/appStore', () => ({
   useAppStore: { getState: () => ({ selectedBranchId: null }) },

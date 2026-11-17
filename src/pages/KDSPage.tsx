@@ -111,10 +111,12 @@ export function KDSPage() {
     refresh,
     lastRefreshAt,
     scopeBranchIds,
+    readsCompleteScope,
   } = useKDSRealtimeStream();
   // F6: the Firestore `in` cap covers only the first 10 assigned outlets —
   // state that on the header instead of silently hiding the remaining ones.
-  const scopeNotice = scopeTruncationNotice(scopeBranchIds);
+  // A feed that queries every assigned chunk has nothing to disclose.
+  const scopeNotice = readsCompleteScope ? null : scopeTruncationNotice(scopeBranchIds);
   const [nowTick, setNowTick] = useState(0);
   useEffect(() => {
     const t = window.setInterval(() => setNowTick(Date.now()), 15000);

@@ -36,6 +36,7 @@ vi.mock('@tanstack/react-query', () => ({
 vi.mock('@/stores/authStore', () => ({
   useAuthStore: Object.assign(() => ({ user: h.user }), {
     getState: () => ({ user: h.user }),
+    subscribe: vi.fn(() => vi.fn()),
   }),
 }));
 vi.mock('@/stores/appStore', () => ({
