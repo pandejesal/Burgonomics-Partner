@@ -116,4 +116,12 @@ export interface RichStore extends Omit<Store, "lat" | "lng"> {
 
   // Documents
   documents: StoreDocument[];
+
+  /**
+   * F17: true when the signed-in console role is not granted the brand-only
+   * private store document (e.g. `regional_manager`). Private fields are then
+   * empty/unknown BY ABSENCE of permission — render sites must say "unavailable
+   * for your role" instead of presenting a zero as a measured value.
+   */
+  privateDataUnavailable?: boolean;
 }

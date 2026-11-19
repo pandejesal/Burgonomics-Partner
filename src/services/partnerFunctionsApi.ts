@@ -872,6 +872,26 @@ export const partnerFunctionsApi = {
   },
 
   /**
+   * F06: the authoritative staff suspension control (POST /auth/suspendStaff).
+   * `users/{uid}.active` is server-owned and is enforced by the API middleware,
+   * Firestore rules and Storage rules, so this is the ONLY way to change it.
+   * A refusal propagates to the roster UI (UsersPage's onError toast), and the
+   * row is never optimistically flipped.
+   */
+  async suspendStaff(params: {
+    targetUid: string;
+    active: boolean;
+    reason?: string;
+  }): Promise<{
+    success: boolean;
+    targetUid: string;
+    active: boolean;
+    changed: boolean;
+  }> {
+    return await apiRequest('/auth/suspendStaff', params);
+  },
+
+  /**
    * Sends a customer broadcast server-side (POST /notifications/broadcast,
    * brand-only). Returns MEASURED counts — targeted devices, delivered,
    * failed — recorded from the actual multicast, never estimates.

@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useState, useMemo, useEffect, useRef } from "react";
+import React, { Suspense, lazy, useState, useMemo, useEffect, useLayoutEffect, useRef } from "react";
 import {
   Store as StoreIcon,
   MapPin,
@@ -55,7 +55,7 @@ import {
   WeeklySchedule,
 } from "./storesData";
 import { useAdmin } from "@/admin/hooks/useAdmin";
-import { adminStoresService } from "../services/adminStoresService";
+import { adminStoresService, storeDirectoryReadMode } from "../services/adminStoresService";
 import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
 
 type ViewTab = "list" | "grid" | "radar";
@@ -315,13 +315,20 @@ export function storeDirectoryAccess(
   return { isReadOnly: !canManageStores, canRunSync };
 }
 
-export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boolean }> = ({
+const AdminStoresContent: React.FC<{ defaultStoreId?: string; isCreate?: boolean }> = ({
   defaultStoreId,
   isCreate: initialIsCreate,
 }) => {
   // Persistence state
   const [stores, setStores] = useState<RichStore[]>([]);
   const [isLoadingStores, setIsLoadingStores] = useState(true);
+  // F17: the directory is a public/private join. A denied or failed private
+  // read must not paint as "no outlets" (that is how an operator would then
+  // save an empty roster over real data), so the load failure keeps its own
+  // state and the empty grid is replaced by the real reason plus a retry.
+  const [storesLoadError, setStoresLoadError] = useState<string | null>(null);
+  // Bumped by the Retry control: re-runs the loader without remounting the page.
+  const [reloadToken, setReloadToken] = useState(0);
 
   // Revision 1 (#29 blocker 2): the last directory state the service actually
   // CONFIRMED. The UI paints optimistically ahead of this, but rollback always
@@ -332,21 +339,116 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
   // Synchronous in-flight guard, checked BEFORE any optimistic paint: two
   // callers can never interleave optimistic writes and rollbacks.
   const saveInFlightRef = useRef(false);
+  // #r3/#r4: the identity of THIS mounted instance's session. The default
+  // export remounts on a UID/role change, but async work started under the
+  // previous session (a save, or a Petpooja sync) can still resolve after the
+  // boundary. Its completion must never start a metadata write, issue the next
+  // vendor call, paint, advance/roll back state, or claim an outcome in the new
+  // context.
+  //
+  // `useLayoutEffect` matters here: cleanup runs SYNCHRONOUSLY at commit (before
+  // the browser paints and before any pending microtask can resume), so the
+  // instance is already marked dead by the time a late `await` resolves. A
+  // passive `useEffect` cleanup is deferred and would leave a window open.
+  //
+  // #r5: the cleanup also CLOSES every loading toast this instance opened. A
+  // Sonner `toast.loading` is indefinite, and the app-level Toaster outlives
+  // this page, so without this an old spinner would stick forever whenever the
+  // context changed while the vendor promise was still pending. Only ids this
+  // instance registered are dismissed — never an id-less global dismiss, which
+  // would close another context's toast.
+  const instanceGenerationRef = useRef(0);
+  const instanceAliveRef = useRef(true);
+  const ownedLoadingToastIdsRef = useRef<Set<string | number>>(new Set());
+  useLayoutEffect(() => {
+    const mine = instanceGenerationRef.current + 1;
+    instanceGenerationRef.current = mine;
+    instanceAliveRef.current = true;
+    const owned = ownedLoadingToastIdsRef.current;
+    return () => {
+      instanceAliveRef.current = false;
+      instanceGenerationRef.current = mine + 1;
+      // Synchronous, so the old spinner is gone before the next paint even if
+      // the vendor request never settles.
+      for (const id of owned) toast.dismiss(id);
+      owned.clear();
+    };
+  }, []);
+
+  /**
+   * Open a loading toast that THIS instance owns, so its lifecycle is tied to
+   * the instance rather than to how (or whether) the vendor promise settles.
+   */
+  const openOwnedLoadingToast = (message: string): string | number => {
+    const id = toast.loading(message);
+    ownedLoadingToastIdsRef.current.add(id);
+    return id;
+  };
+
+  /** Close an owned loading toast exactly once, and forget it. */
+  const closeOwnedLoadingToast = (id: string | number) => {
+    // Delete first: only the call that actually removed the id dismisses it, so
+    // an explicit close plus the `finally` safety net cannot double-dismiss.
+    if (!ownedLoadingToastIdsRef.current.delete(id)) return;
+    toast.dismiss(id);
+  };
+
+  /**
+   * Is the instance that started `generation` still the one on screen?
+   * Used by every async completion below (save, single sync, batch sync).
+   */
+  const isStale = (generation: number): boolean =>
+    !instanceAliveRef.current || instanceGenerationRef.current !== generation;
+
+  // Single sign-in: role comes from the unified partner session. Declared
+  // BEFORE the loader below, because which half of the directory a session may
+  // read is derived from that role.
+  const { admin, role: selectedRole, isDeveloper, permissions } = useAdmin();
+  const readMode = storeDirectoryReadMode(selectedRole);
+  const sessionKey = `${admin?.id ?? ""}|${selectedRole}`;
 
   useEffect(() => {
+    let cancelled = false;
     async function loadStores() {
       setIsLoadingStores(true);
-      const res = await adminStoresService.listStores();
-      const loaded = res.success && res.data.length > 0 ? res.data : [];
+      setStoresLoadError(null);
+      // Reset first: a role/UID switch must never paint the previous session's
+      // (possibly brand-only) snapshot as if it belonged to this context.
+      setStores([]);
+      confirmedStoresRef.current = [];
+      const res = await adminStoresService.listStores({ mode: readMode });
+      if (cancelled) return;
+      if (!res.success) {
+        // Never a silent empty directory: surface the failure (a private-join
+        // denial in particular) instead of an honest-looking empty state.
+        setStoresLoadError(res.error.message);
+        setStores([]);
+        confirmedStoresRef.current = [];
+        setIsLoadingStores(false);
+        return;
+      }
+      const loaded = res.data.length > 0 ? res.data : [];
       setStores(loaded);
       // Seed the confirmed snapshot with what actually loaded.
       confirmedStoresRef.current = loaded;
       setIsLoadingStores(false);
     }
     void loadStores();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [readMode, sessionKey, reloadToken]);
 
   const saveStores = async (updated: RichStore[]): Promise<boolean> => {
+    // F17: a failed directory load (including a denied private join) means the
+    // in-memory array is NOT a trustworthy picture of what is stored. Writing it
+    // could erase a roster nobody could read, so saving is blocked outright.
+    if (storesLoadError) {
+      toast.error("Store directory could not be loaded — nothing was saved.", {
+        description: "Retry the directory before making changes.",
+      });
+      return false;
+    }
     // Reject overlapping submissions synchronously — before the optimistic
     // paint — so a second caller cannot capture this unconfirmed state. Returns
     // false and never claims success.
@@ -355,6 +457,18 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
       return false;
     }
     saveInFlightRef.current = true;
+    // Bind this save to the instance that started it. If the page's session
+    // boundary (UID/role-keyed remount) or an unmount happens BEFORE the write,
+    // the save must not start at all: no toast, no optimistic paint, no
+    // metadata write. If it happens while the write is in flight, the completion
+    // must not paint, advance the confirmed snapshot, roll anything back into
+    // the new context, or claim success. A backend write that already
+    // committed is NOT undone — this is UI truth-recovery only.
+    const generation = instanceGenerationRef.current;
+    if (isStale(generation)) {
+      saveInFlightRef.current = false;
+      return false;
+    }
     // Optimistic paint, but never a lie: on failure we restore the last
     // CONFIRMED snapshot (not the current render). NOTE: the service's
     // multi-document bulkUpsert is NOT atomic, so a partial backend write is
@@ -367,6 +481,11 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
       // Loop 6/120: return the real persist outcome so money/honesty-critical
       // callers can report truthfully; fire-and-forget callers ignore it.
       const res = await adminStoresService.bulkUpsert(updated);
+      if (isStale(generation)) {
+        // A different session/lifecycle owns the screen now: say nothing,
+        // change nothing, claim nothing.
+        return false;
+      }
       if (!res.success) {
         // Restore the confirmed snapshot, not the optimistic render.
         setStores(confirmedStoresRef.current);
@@ -382,8 +501,8 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
     }
   };
 
-  // Single sign-in: role comes from the unified partner session.
-  const { admin, role: selectedRole, isDeveloper, permissions } = useAdmin();
+  // Single sign-in: role comes from the unified partner session (declared
+  // above the loader, which depends on it).
 
   // Filter state
   const [searchQuery, setSearchQuery] = useState("");
@@ -458,6 +577,17 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
       ? (admin?.assignedStoreId ?? null)
       : null;
 
+  // #r3: console roles that may READ the brand-only private half. Petpooja
+  // metadata is written as a paired public+private document, so a public-only
+  // session (e.g. `regional_manager`, which does hold `admin.petpooja.sync`)
+  // would always fail the private write. The control is therefore gated on the
+  // READ MODE as well as the existing capability — page-level only:
+  // `storeDirectoryAccess`, the global permission table and regional private
+  // access are untouched, and no vendor/POS call is made by this flag.
+  const syncAllowed = canRunSync && readMode === "brand";
+  const syncUnavailableReason =
+    "Petpooja sync writes store metadata that is not available for your role.";
+
   // Visible stores matching filters and RBAC constraints
   const filteredStores = useMemo(() => {
     return stores.filter((store) => {
@@ -531,7 +661,11 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
     return ["All", ...Array.from(new Set(stores.map((s) => s.city)))];
   }, [stores]);
 
-  // Global KPIs based on filtered set
+  // Global KPIs based on filtered set. `privateUnavailable` marks a public-only
+  // session (non-brand role): revenue/order/sync counters come from the brand
+  // document, so they are reported as unavailable rather than as a fabricated
+  // zero.
+  const privateUnavailable = readMode === "public-only";
   const stats = useMemo(() => {
     const visible = filteredStores;
     const total = visible.length;
@@ -637,22 +771,34 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
   // real POST /petpooja/syncMenu; the server is fail-closed on unlinked
   // branches, so failures toast loud and flip no state.
   const handleSyncStore = async (storeId: string) => {
-    if (!canRunSync) {
+    if (!syncAllowed) {
       toast.error("Access denied — Petpooja sync is not permitted for your role.");
       return;
     }
+    // #r4: capture the lifecycle at ENTRY. The vendor await below can outlive
+    // this instance (remount on UID/role change, or unmount), and the OLD
+    // continuation used to start a metadata write and claim the outcome in the
+    // NEW context. Already-sent vendor requests are NOT cancelled — they
+    // cannot be — but everything after this point is suppressed when stale.
+    const generation = instanceGenerationRef.current;
     const target = stores.find((s) => s.id === storeId);
     setSyncingStoreId(storeId);
-    toast.loading("Syncing menu from Petpooja...");
+    // Own THIS toast id: dismissing must never close another context's toast
+    // (`toast.dismiss(undefined)` dismisses ALL). Registration makes the
+    // instance cleanup close it at the boundary even if the vendor never settles.
+    const loadingToastId = openOwnedLoadingToast("Syncing menu from Petpooja...");
     try {
       const result = await partnerFunctionsApi.syncPetpoojaMenu(storeId);
+      // Immediately after the await, before ANY state/metadata/claim.
+      if (isStale(generation)) return;
       const updated = markStoresSynced(
         stores,
         new Set([storeId]),
         new Date().toISOString(),
       );
       const ok = await saveStores(updated);
-      toast.dismiss();
+      if (isStale(generation)) return;
+      closeOwnedLoadingToast(loadingToastId);
       if (ok) {
         toast.success(
           `Petpooja menu synced for ${target?.name ?? storeId}: ${result.itemCount} items, ${result.categoriesCount} categories.`,
@@ -665,12 +811,17 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
         );
       }
     } catch (err: unknown) {
-      toast.dismiss();
+      // A rejection that arrives after the boundary is not this context's
+      // failure to report.
+      if (isStale(generation)) return;
       toast.error(
         `Petpooja sync failed for ${target?.name ?? storeId}: ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
-      setSyncingStoreId(null);
+      // ALWAYS close this instance's OWN loading toast, and only then release
+      // the per-store spinner state — which belongs to a live context only.
+      closeOwnedLoadingToast(loadingToastId);
+      if (!isStale(generation)) setSyncingStoreId(null);
     }
   };
 
@@ -679,49 +830,66 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
   // POST /petpooja/syncMenu and reports an honest summary; failed stores
   // keep their existing state.
   const handleSyncAllStores = async () => {
-    if (!canRunSync) {
+    if (!syncAllowed) {
       toast.error("Access denied — Petpooja sync is not permitted for your role.");
       return;
     }
+    // #r4: same lifecycle capture as the single sync. The loop below used to
+    // keep issuing the NEXT vendor call after a UID/role boundary, and then
+    // persist + toast in the new context.
+    const generation = instanceGenerationRef.current;
     const targets = stores.filter((s) => s.isOpen);
     setIsSyncingAll(true);
-    toast.loading(`Syncing menus from Petpooja for ${targets.length} stores...`);
+    const loadingToastId = openOwnedLoadingToast(
+      `Syncing menus from Petpooja for ${targets.length} stores...`,
+    );
     const syncedIds = new Set<string>();
     const failed: string[] = [];
-    for (const store of targets) {
-      try {
-        await partnerFunctionsApi.syncPetpoojaMenu(store.id);
-        syncedIds.add(store.id);
-      } catch (err: unknown) {
-        failed.push(
-          `${store.name}: ${err instanceof Error ? err.message : String(err)}`,
+    try {
+      for (const store of targets) {
+        // Before EVERY next vendor call: a stale instance stops the loop dead.
+        if (isStale(generation)) return;
+        try {
+          await partnerFunctionsApi.syncPetpoojaMenu(store.id);
+          if (isStale(generation)) return;
+          syncedIds.add(store.id);
+        } catch (err: unknown) {
+          if (isStale(generation)) return;
+          failed.push(
+            `${store.name}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+      if (isStale(generation)) return;
+      let metadataSaved = true;
+      if (syncedIds.size > 0) {
+        // saveStores returns false on failure/rejection. The remote menu syncs
+        // above may still have succeeded, so the summary below distinguishes a
+        // confirmed remote sync from a failed local metadata persistence.
+        metadataSaved = await saveStores(
+          markStoresSynced(stores, syncedIds, new Date().toISOString()),
         );
       }
-    }
-    let metadataSaved = true;
-    if (syncedIds.size > 0) {
-      // saveStores returns false on failure/rejection. The remote menu syncs
-      // above may still have succeeded, so the summary below distinguishes a
-      // confirmed remote sync from a failed local metadata persistence.
-      metadataSaved = await saveStores(
-        markStoresSynced(stores, syncedIds, new Date().toISOString()),
-      );
-    }
-    setIsSyncingAll(false);
-    toast.dismiss();
-    if (failed.length === 0 && metadataSaved) {
-      toast.success(`Petpooja menus synced for ${syncedIds.size} stores.`);
-    } else if (failed.length === 0) {
-      toast.warning(
-        `Petpooja menus synced for ${syncedIds.size} stores, but the local directory metadata could not be saved.`,
-      );
-    } else {
-      console.error("Petpooja batch sync failures:", failed);
-      toast.error(
-        `${syncedIds.size} synced, ${failed.length} failed — ${failed[0]}${
-          failed.length > 1 ? ` (+${failed.length - 1} more, see console)` : ""
-        }${metadataSaved ? "" : " (directory metadata not saved)"}`,
-      );
+      if (isStale(generation)) return;
+      setIsSyncingAll(false);
+      if (failed.length === 0 && metadataSaved) {
+        toast.success(`Petpooja menus synced for ${syncedIds.size} stores.`);
+      } else if (failed.length === 0) {
+        toast.warning(
+          `Petpooja menus synced for ${syncedIds.size} stores, but the local directory metadata could not be saved.`,
+        );
+      } else {
+        console.error("Petpooja batch sync failures:", failed);
+        toast.error(
+          `${syncedIds.size} synced, ${failed.length} failed — ${failed[0]}${
+            failed.length > 1 ? ` (+${failed.length - 1} more, see console)` : ""
+          }${metadataSaved ? "" : " (directory metadata not saved)"}`,
+        );
+      }
+    } finally {
+      // ALWAYS close this instance's OWN loading toast — including on every
+      // stale early return above, so a spinner can never outlive its context.
+      closeOwnedLoadingToast(loadingToastId);
     }
   };
 
@@ -857,27 +1025,37 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
       toast.info("No stores match the current filters — nothing to export.");
       return;
     }
+    if (privateUnavailable) {
+      // F17: webhook link state and financial counters live in the brand-only
+      // document. A public-only session must not export them as blank columns
+      // that look like measured zeroes.
+      toast.info(
+        "Directory export is limited to discovery fields for your role — private finance, staff, compliance and webhook data are unavailable.",
+      );
+    }
     const escapeCsv = (value: unknown): string => {
       const s = value == null ? "" : String(value);
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    const headers = [
-      "id",
-      "name",
-      "city",
-      "area",
-      "address",
-      "phone",
-      "isOpen",
-      "isBusy",
-      "petpoojaRestId",
-      "webhookStatus",
-      "menuVersion",
-      "todayRevenue",
-      "todayOrders",
-    ];
-    const rows = filteredStores.map((s) =>
-      [
+    const headers = privateUnavailable
+      ? ["id", "name", "city", "area", "address", "phone", "isOpen", "isBusy", "petpoojaRestId"]
+      : [
+          "id",
+          "name",
+          "city",
+          "area",
+          "address",
+          "phone",
+          "isOpen",
+          "isBusy",
+          "petpoojaRestId",
+          "webhookStatus",
+          "menuVersion",
+          "todayRevenue",
+          "todayOrders",
+        ];
+    const rows = filteredStores.map((s) => {
+      const discovery = [
         s.id,
         s.name,
         s.city,
@@ -887,14 +1065,12 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
         s.isOpen,
         s.isBusy,
         s.petpoojaRestId ?? "",
-        s.webhookStatus,
-        s.menuVersion,
-        s.todayRevenue,
-        s.todayOrders,
-      ]
+      ];
+      const privates = [s.webhookStatus, s.menuVersion, s.todayRevenue, s.todayOrders];
+      return [...discovery, ...(privateUnavailable ? [] : privates)]
         .map(escapeCsv)
-        .join(",")
-    );
+        .join(",");
+    });
     const csv = [headers.join(","), ...rows].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -949,6 +1125,39 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
     return { x, y };
   };
 
+  // F17: a failed directory load blocks create/edit/deep-link consoles. The
+  // panel is shared by the directory, create and deep-link branches so a
+  // `?store=<id>` route cannot land on a blank pane.
+  const directoryBlockedPanel = (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0 }}
+      className="mx-auto max-w-3xl"
+    >
+      <div
+        role="alert"
+        className="flex flex-col items-center justify-center gap-3 rounded-xl border border-red-200 bg-red-50 p-8 text-center"
+      >
+        <p className="text-sm font-semibold text-red-700">
+          Store directory could not be loaded.
+        </p>
+        <p className="max-w-md text-xs text-red-600">{storesLoadError}</p>
+        <p className="max-w-md text-xs text-red-600">
+          Registering, editing and console actions are blocked until the directory
+          loads — nothing is written in the meantime.
+        </p>
+        <button
+          type="button"
+          onClick={() => setReloadToken((n) => n + 1)}
+          className="rounded-xl border border-red-300 bg-white px-4 py-2 text-xs font-black text-red-700 hover:bg-red-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+        >
+          Retry
+        </button>
+      </div>
+    </motion.div>
+  );
+
   return (
     <div className="space-y-6 font-sans">
       <PageHeader
@@ -969,6 +1178,8 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
               <div className="flex h-64 items-center justify-center">
                 <RotateCw className="animate-spin text-orange-500" size={32} />
               </div>
+            ) : storesLoadError ? (
+              directoryBlockedPanel
             ) : (
               <>
                 {/* KPI STATS ROW */}
@@ -981,21 +1192,37 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                   />
                   <StatCard
                     title="Consolidated Revenue (Today)"
-                    value={`₹${stats.rev.toLocaleString()}`}
+                    value={privateUnavailable ? "Unavailable" : `₹${stats.rev.toLocaleString()}`}
                     icon={TrendingUp}
-                    subtext="Aggregated from outlet records"
+                    subtext={
+                      privateUnavailable
+                        ? "Financial totals are not available for your role"
+                        : "Aggregated from outlet records"
+                    }
                   />
                   <StatCard
                     title="Petpooja API Link Health"
-                    value={`${Math.floor((stats.healthySyncs / (stats.total || 1)) * 100)}%`}
+                    value={
+                      privateUnavailable
+                        ? "Unavailable"
+                        : `${Math.floor((stats.healthySyncs / (stats.total || 1)) * 100)}%`
+                    }
                     icon={Activity}
-                    subtext={`${stats.healthySyncs} healthy webhook links`}
+                    subtext={
+                      privateUnavailable
+                        ? "Webhook link state is not available for your role"
+                        : `${stats.healthySyncs} healthy webhook links`
+                    }
                   />
                   <StatCard
                     title="Pending Order Queues"
-                    value={stats.ords.toString()}
+                    value={privateUnavailable ? "Unavailable" : stats.ords.toString()}
                     icon={Users}
-                    subtext="Total delivery & dine-in orders"
+                    subtext={
+                      privateUnavailable
+                        ? "Queue counters are not available for your role"
+                        : "Total delivery & dine-in orders"
+                    }
                   />
                 </div>
 
@@ -1103,8 +1330,9 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                     <div className="ml-auto flex items-center gap-2">
                       <button
                         onClick={handleSyncAllStores}
-                        disabled={isSyncingAll}
-                        className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-xs font-bold hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+                        disabled={isSyncingAll || !syncAllowed}
+                        title={!syncAllowed ? syncUnavailableReason : undefined}
+                        className="flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-xs font-bold hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 text-gray-700 dark:text-gray-300 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <RotateCw size={12} className={isSyncingAll ? "animate-spin" : ""} />
                         <span>POS Batch Sync</span>
@@ -1218,7 +1446,9 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                                     Revenue (Today)
                                   </span>
                                   <span className="font-mono text-base font-black text-gray-900 dark:text-white">
-                                    ₹{(store.todayRevenue ?? 0).toLocaleString()}
+                                    {store.privateDataUnavailable
+                                      ? "Unavailable"
+                                      : `₹${(store.todayRevenue ?? 0).toLocaleString()}`}
                                   </span>
                                 </div>
                                 <div>
@@ -1226,7 +1456,9 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                                     Total POS Orders
                                   </span>
                                   <span className="font-mono text-base font-black text-gray-900 dark:text-white">
-                                    {store.todayOrders} orders
+                                    {store.privateDataUnavailable
+                                      ? "Unavailable"
+                                      : `${store.todayOrders} orders`}
                                   </span>
                                 </div>
                               </div>
@@ -1342,9 +1574,10 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                                   <div className="flex items-center justify-end gap-2">
                                     <button
                                       onClick={() => handleSyncStore(store.id)}
-                                      disabled={syncingStoreId === store.id}
-                                      className="rounded-lg p-1.5 text-gray-400 hover:text-primary"
-                                      title="Sync Menu"
+                                      disabled={syncingStoreId === store.id || !syncAllowed}
+                                      title={syncAllowed ? "Sync Menu" : syncUnavailableReason}
+                                      aria-label={`Sync Menu for ${store.name}`}
+                                      className="rounded-lg p-1.5 text-gray-400 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                       <RotateCw
                                         size={14}
@@ -1609,6 +1842,8 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
               </>
             )}
           </motion.div>
+        ) : isCreating && storesLoadError ? (
+          directoryBlockedPanel
         ) : isCreating ? (
           /* CREATE STORE COMPONENT */
           <motion.div
@@ -1760,6 +1995,8 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
               </div>
             </form>
           </motion.div>
+        ) : storesLoadError ? (
+          directoryBlockedPanel
         ) : (
           /* DEEP DIVE STORE CONSOLE (SPLIT LAYOUT) */
           activeStore && (
@@ -1789,7 +2026,9 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                   <div className="h-4 w-[1px] bg-gray-200 dark:bg-gray-800" />
                   <button
                     onClick={() => handleSyncStore(activeStore.id)}
-                    className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-black hover:bg-gray-50 dark:bg-gray-800 dark:border-gray-700"
+                    disabled={syncingStoreId === activeStore.id || !syncAllowed}
+                    title={!syncAllowed ? syncUnavailableReason : undefined}
+                    className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-black hover:bg-gray-50 dark:bg-gray-800 dark:border-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <RotateCw
                       size={12}
@@ -2206,8 +2445,9 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
                     <div className="mt-4 flex flex-wrap gap-2">
                       <button
                         onClick={() => handleSyncStore(activeStore.id)}
-                        disabled={syncingStoreId === activeStore.id || !canRunSync}
-                        className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-primary text-white py-2 text-xs font-black hover:bg-[#082E17] disabled:bg-gray-100 disabled:text-gray-400"
+                        disabled={syncingStoreId === activeStore.id || !syncAllowed}
+                        title={!syncAllowed ? syncUnavailableReason : undefined}
+                        className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-primary text-white py-2 text-xs font-black hover:bg-[#082E17] disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed"
                       >
                         <RotateCw
                           size={12}
@@ -2669,4 +2909,29 @@ export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boo
       )}
     </div>
   );
+};
+
+/**
+ * #r3 context boundary.
+ *
+ * The route and layout are NOT keyed by UID or role, so a brand session that
+ * becomes `regional_manager` (or a different user taking over the same tab)
+ * kept the SAME mounted component. Clearing local state in a passive effect
+ * left one painted frame holding the previous session's private per-row values,
+ * and an in-flight save from that session could still advance the shared
+ * `confirmedStoresRef`, which a later failure would roll back into the
+ * public-only view.
+ *
+ * This wrapper makes the context itself the React key: a UID or role change
+ * unmounts the old content BEFORE paint, so every array, ref, filter and modal
+ * dies with the instance that owned it. The stateful component is unchanged in
+ * shape; only this thin boundary is new. Routes keep using this same named
+ * export.
+ */
+export const AdminStoresPage: React.FC<{ defaultStoreId?: string; isCreate?: boolean }> = (
+  props,
+) => {
+  const { admin, role } = useAdmin();
+  const sessionKey = `${admin?.id ?? ""}|${role}`;
+  return <AdminStoresContent key={sessionKey} {...props} />;
 };
