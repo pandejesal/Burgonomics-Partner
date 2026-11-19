@@ -379,14 +379,25 @@ export function useUsers() {
     },
   });
 
+  // F06: "Suspend" used to be a direct `users/{uid}.active` write, which the
+  // API middleware, Firestore rules and Storage rules now treat as an
+  // authorization input (and the rules no longer accept from a client).
+  // Suspension is a server-owned, audited act: POST /auth/suspendStaff.
+  // Failures propagate to UsersPage's onError toast, and the roster row is not
+  // optimistically flipped, so a refused suspension never looks suspended.
   const toggleUserStatus = useMutation({
-    mutationFn: async ({ userId, active }: { userId: string; active: boolean }) => {
-      const userRef = doc(db, 'users', userId);
-      await updateDoc(userRef, {
+    mutationFn: async ({
+      userId,
+      active,
+      reason,
+    }: { userId: string; active: boolean; reason?: string }) => {
+      const { partnerFunctionsApi } = await import(
+        '@/services/partnerFunctionsApi'
+      );
+      return await partnerFunctionsApi.suspendStaff({
+        targetUid: userId,
         active,
-        updatedAt: Timestamp.now(),
-      }).catch(async () => {
-        await setDoc(userRef, { active, updatedAt: Timestamp.now() }, { merge: true });
+        reason,
       });
     },
     onSuccess: () => {
