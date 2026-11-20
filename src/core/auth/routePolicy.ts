@@ -26,6 +26,11 @@ export function canAccessRoute(role: UserRole | undefined, pathname: string): bo
   // and customer PII. firestore.rules gates the customers collection on
   // `isUser(customerId) || isAdmin()` (brand_owner/developer only), so a
   // branch owner reaching /customers only ever got a permission-denied page.
+  //
+  // /settlements is NOT restricted for a branch owner: it reads its own
+  // branch's month-end statement (the server scopes the read and the
+  // `branch_settlements` rules admit ownsBranch). Generating a month and
+  // recording a payment stay brand-only, and the screen hides those actions.
   if (role === 'branch_owner') {
     const restricted = ['/branches', '/users', '/admin', '/customers'];
     return !restricted.some((prefix) => path.startsWith(prefix));
@@ -33,15 +38,19 @@ export function canAccessRoute(role: UserRole | undefined, pathname: string): bo
 
   // Support: tickets, no admin portal, no app settings and no customer PII
   // (the same brand-admin-only rules gate as branch owners).
+  //
+  // /settlements is denied to support and regional managers: the settlement
+  // read scope admits the owner, brand roles and a branch's own owner only, so
+  // offering the screen would only produce a server refusal.
   if (role === 'support') {
-    const restricted = ['/admin', '/settings', '/customers'];
+    const restricted = ['/admin', '/settings', '/customers', '/settlements'];
     return !restricted.some((prefix) => path.startsWith(prefix));
   }
 
   // Regional managers: console-wide reporting, but customer PII stays behind
   // the brand-admin rules gate — the UI must not offer /customers here.
   if (role === 'regional_manager') {
-    const restricted = ['/customers'];
+    const restricted = ['/customers', '/settlements'];
     return !restricted.some((prefix) => path.startsWith(prefix));
   }
 
