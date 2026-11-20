@@ -12,6 +12,7 @@ import {
   UtensilsCrossed,
   Building2,
   BarChart3,
+  Receipt,
   UserCheck,
   Settings,
   ShieldCheck,
@@ -86,6 +87,14 @@ const navBaseItems: NavBaseItem[] = [
     label: 'Analytics',
     icon: BarChart3,
     path: '/analytics',
+  },
+  {
+    // Month-end statement per branch (owner decision 2026-11-20). Visibility is
+    // derived from routePolicy: owner/brand see every branch, a branch owner
+    // only its own; support and regional manager are denied.
+    label: 'Settlements',
+    icon: Receipt,
+    path: '/settlements',
   },
   {
     label: 'Team & Staff',

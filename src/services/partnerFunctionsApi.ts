@@ -5,6 +5,9 @@
 import { auth } from '@/config/firebase';
 import { orderStatusWriteErrorMessage } from '@/utils/orderErrors';
 import { validateRefundRequestId } from '@/utils/refundRequestIdentity';
+// Type-only: the stored statement shape lives with the settlements feature, so
+// the API layer and the screen can never drift apart. No runtime import cycle.
+import type { SettlementStatement } from '@/features/settlements';
 
 export interface ApiRequestOptions {
   /** Timeout in ms (default 20 000 for general, 30 000 for porter book/rebook). */
@@ -13,6 +16,12 @@ export interface ApiRequestOptions {
   retries?: number;
   /** Stable idempotency key; auto-generated per call when omitted. */
   idempotencyKey?: string;
+  /**
+   * `text` reads the success body as a string and returns `{ text, filename }`
+   * instead of parsing JSON. Used by the settlement CSV download, whose 200
+   * body is a text/csv attachment — parsing it as JSON would fail on a success.
+   */
+  responseFormat?: 'json' | 'text';
 }
 
 /** Options exposed to public callers (book/rebook). Timeout defaults to 30 000. */
@@ -236,6 +245,9 @@ export interface CreateWalkInRequest {
   tableNumber?: string; notes?: string; customerName?: string; customerPhone?: string;
 }
 
+/** Stored settlement statement (`branch_settlements/{branch}_{month}_v00N`). */
+export type SettlementStatementRecord = SettlementStatement;
+
 export class ApiRequestError extends Error {
   readonly status: number;
   readonly code?: string;
@@ -373,6 +385,15 @@ async function apiRequest<T>(
         }
         lastError = new Error(msg);
         continue;
+      }
+
+      if (options?.responseFormat === 'text') {
+        // A text/csv success body must never be run through res.json(): the
+        // parse failure would turn a real 200 into an error.
+        const text = await res.text();
+        const disposition = res.headers?.get?.('content-disposition') ?? null;
+        const filenameMatch = disposition ? /filename="?([^";]+)"?/i.exec(disposition) : null;
+        return { text, filename: filenameMatch?.[1] ?? null } as T;
       }
 
       return (await res.json()) as T;
@@ -1058,5 +1079,61 @@ export const partnerFunctionsApi = {
       // must take instead of a raw code; unknown failures keep their message.
       throw new Error(orderStatusWriteErrorMessage(error));
     }
+  },
+
+  // ── Franchise settlement (owner decision 2026-11-20) ─────────────────────
+  //
+  // POST /settlements/generate   (brand_owner, developer) 201 statement
+  // POST /settlements/list       (any console role; the server scopes the read)
+  // POST /settlements/csv        (same scope, 200 text/csv attachment)
+  // POST /settlements/markPaid   (brand_owner, developer) 200 { statement, reused }
+  //
+  // The app moves no money: markPaid records a reference and a date only.
+
+  /** Generates (or regenerates) one branch's statement for a closed month. */
+  async generateSettlementStatement(params: {
+    branchId: string;
+    monthKey: string;
+  }): Promise<SettlementStatementRecord> {
+    return await apiRequest('/settlements/generate', params);
+  },
+
+  /**
+   * Statements for a month. The newest version per branch is returned unless
+   * `allVersions` is set. Scope is the caller's: a branch owner sees only its
+   * own branch, and the server enforces it.
+   */
+  async listSettlements(params: {
+    monthKey: string;
+    branchId?: string;
+    allVersions?: boolean;
+  }): Promise<{ monthKey: string; statements: SettlementStatementRecord[] }> {
+    return await apiRequest('/settlements/list', params);
+  },
+
+  /** Records that the brand paid the branch (evidence only, no transfer). */
+  async markSettlementPaid(params: {
+    statementId: string;
+    reference: string;
+    paidOn: string;
+    note?: string;
+  }): Promise<{ statement: SettlementStatementRecord; reused: boolean }> {
+    // Not retried: a replay could append a duplicate payment line.
+    return await apiRequest('/settlements/markPaid', params, { retries: 0 });
+  },
+
+  /**
+   * Downloads the month's statements as CSV text. The 200 body is a text/csv
+   * attachment, so it is read as text (see `responseFormat`).
+   */
+  async exportSettlementsCsv(params: {
+    monthKey: string;
+    branchId?: string;
+  }): Promise<{ text: string; filename: string | null }> {
+    return await apiRequest(
+      '/settlements/csv',
+      params,
+      { responseFormat: 'text', retries: 0 },
+    );
   },
 };

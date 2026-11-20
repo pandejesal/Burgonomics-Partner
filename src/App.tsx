@@ -13,6 +13,7 @@ import { TicketsPage } from '@/pages/TicketsPage';
 import { TicketDetailPage } from '@/pages/TicketDetailPage';
 import { MenuPage } from '@/pages/MenuPage';
 import { AnalyticsPage } from '@/pages/AnalyticsPage';
+import { SettlementsPage } from '@/pages/SettlementsPage';
 import { BranchesPage } from '@/pages/BranchesPage';
 import { UsersPage } from '@/pages/UsersPage';
 import { NotificationsPage } from '@/pages/NotificationsPage';
@@ -142,6 +143,16 @@ function App() {
                     ]}
                   >
                     <AnalyticsPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/settlements"
+                element={
+                  <ProtectedRoute
+                    allowedRoles={['brand_owner', 'developer', 'branch_owner']}
+                  >
+                    <SettlementsPage />
                   </ProtectedRoute>
                 }
               />
