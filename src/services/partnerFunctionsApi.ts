@@ -236,6 +236,13 @@ export interface WalkInReceipt {
   paymentStatus: 'pending';
   totals: PricingBreakdown;
   settlementAvailable: false;
+  /**
+   * The REAL outlet the server booked this order to (read from
+   * `branches/{id}`), plus its id. Optional only for an older backend that
+   * predates the field — the till never invents a name in that case.
+   */
+  branchId?: string;
+  branchName?: string;
 }
 
 export interface CreateWalkInRequest {

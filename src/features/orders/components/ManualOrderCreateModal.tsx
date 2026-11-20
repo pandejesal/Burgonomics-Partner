@@ -1,7 +1,9 @@
 import React, { useRef, useState } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { useAppStore } from '@/stores/appStore';
+import { useBranches } from '@/hooks/useBranches';
 import { useStrictWalkInMenu, type WalkInIneligibilityReason } from '@/hooks/useMenu';
+import { resolveWalkInBranchName } from '@/utils/walkInBranch';
 import { useWalkInPackagingFee } from '@/features/orders/hooks/useWalkInPackagingFee';
 import { ApiRequestError, partnerFunctionsApi, type WalkInReceipt } from '@/services/partnerFunctionsApi';
 
@@ -27,6 +29,13 @@ export function ManualOrderCreateModal({ isOpen, onClose, onOrderCreated }: Manu
   const { selectedBranchId } = useAppStore();
   const branchId = selectedBranchId || user?.branchIds?.[0];
   const menu = useStrictWalkInMenu(branchId);
+  const { branches } = useBranches();
+  // The outlet this sale is booked to. Read from the branch registry, never
+  // guessed from the id: the old modal derived the name from a two-value
+  // ternary, which filed 15 of 17 outlets' counter revenue under the wrong
+  // store. The server stamps the same name on the order; this is only the
+  // pre-submit confirmation for the cashier.
+  const branchName = resolveWalkInBranchName(branches, branchId);
   const [orderType, setOrderType] = useState<'takeaway' | 'dinein'>('takeaway');
   const [tableNumber, setTableNumber] = useState('');
   const [customerName, setCustomerName] = useState('Walk-in Customer');
@@ -104,6 +113,9 @@ export function ManualOrderCreateModal({ isOpen, onClose, onOrderCreated }: Manu
     <div className="bg-neutral-950 text-white border border-neutral-700 rounded-2xl w-full max-w-2xl max-h-full overflow-y-auto p-5">
       <div className="flex justify-between items-center"><h2 className="text-lg font-bold">New walk-in order</h2><button type="button" onClick={onClose} aria-label="Close">Close</button></div>
       <p className="text-sm text-neutral-300">Cash tender · Payment pending</p>
+      <p className="text-sm text-neutral-400" data-testid="walk-in-branch">
+        Booking to: <strong>{branchName ?? branchId ?? 'no branch selected'}</strong>
+      </p>
       <form onSubmit={submit} className="space-y-4 mt-4">
         <fieldset><legend>Fulfillment mode</legend><div className="flex gap-2">
           <button type="button" aria-pressed={orderType === 'takeaway'} onClick={() => setOrderType('takeaway')}>Takeaway</button>
