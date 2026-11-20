@@ -57,6 +57,10 @@ import {
 import { useAdmin } from "@/admin/hooks/useAdmin";
 import { adminStoresService, storeDirectoryReadMode } from "../services/adminStoresService";
 import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
+import {
+  applyStaffStoreStatus,
+  storeBranchIdFor,
+} from "@/features/stores/services/storeOperatingStatus";
 
 type ViewTab = "list" | "grid" | "radar";
 
@@ -298,6 +302,17 @@ export const DOCUMENTS_EMPTY_STATE =
 export const CDN_PURGE_UNAVAILABLE_REASON =
   "No CDN provider is wired to this console — cache purge is unavailable.";
 
+// Fix wave 2026-11-20 (partner-ops): the four "POS Webhook Toggles & Settings"
+// switches (auto-accept, KDS link, online payments, cash on delivery) write
+// directory flags that NO ordering or payment path consults. Saving them was
+// itself the fake success: an operator turned "Cash on Delivery" off, the row
+// persisted, and customers kept paying cash at the door. While an outlet is
+// linked, Petpooja owns order acceptance and the payment methods are decided by
+// checkout, so these are shown disabled with this reason instead of pretending
+// to control anything.
+export const STORE_SETTINGS_NOT_WIRED_REASON =
+  "Not wired: no ordering or payment path reads these switches. Petpooja owns order acceptance and checkout decides payment methods — changing them here would not change behaviour.";
+
 // Finding 12: store-directory RBAC derives from the real session roles
 // (brand_owner / developer / regional_manager), not the retired portal role
 // names, which matched no live session. Fail-closed: an empty role name
@@ -516,7 +531,6 @@ const AdminStoresContent: React.FC<{ defaultStoreId?: string; isCreate?: boolean
   const [isCreating, setIsCreating] = useState(!!initialIsCreate);
 
   // Edit store settings form state
-  const [isEditMode, setIsEditMode] = useState(false);
   const [editingPetpoojaId, setEditingPetpoojaId] = useState<string>("");
 
   // Active sync states
@@ -702,39 +716,71 @@ const AdminStoresContent: React.FC<{ defaultStoreId?: string; isCreate?: boolean
     }
   };
 
-  // #29: the open/close flip awaited nothing — a failed persist still toasted
-  // success. Revision 1 (blocker 1): this handler is only ever invoked by the
-  // page-local dialog below, which does NOT close itself on submit. The dialog
-  // stays open while pending and on failure (retry surface); success is claimed
-  // only when the directory actually saved.
+  // #29 / rule C (fix wave 2026-11-20): an open/close is the CUSTOMER GATE, not
+  // a directory field. The gate is `stores|admin_stores .isOpen`, and a staff
+  // close must outrank a later Petpooja "open" until staff reopen. Firestore
+  // rules deny branch roles that write, so this goes through the server route
+  // (`setStaffStoreStatus`), which resolves the storefront, stamps the override
+  // and keeps the branch flag in step. Success is claimed only after the server
+  // confirms; a row with no branch link is refused locally instead of saving a
+  // flag that stops nobody. Revision 1 (blocker 1) stands: the dialog does not
+  // close itself on submit, so a refusal stays on screen for retry.
   const handleConfirmToggleStoreState = async () => {
     if (!confirmToggleStore) return;
     // Block repeat submissions while a write is pending (the dialog also
     // disables its buttons, this guards races).
     if (isTogglingStore) return;
     const { id, name, isOpen } = confirmToggleStore;
-    const updated = stores.map((s) => {
-      if (s.id === id) {
-        const nextOpen = !s.isOpen;
-        // P0-3: flipping open/closed used to also stamp webhookStatus
-        // active/failed, a circuit-breaker state and a fresh lastSyncTime —
-        // all fabricated, none of them measured by this action. Only the
-        // operator-controlled flags change here.
-        return {
-          ...s,
-          isOpen: nextOpen,
-          isBusy: nextOpen ? s.isBusy : false,
-        };
-      }
-      return s;
-    });
+    const branchId = storeBranchIdFor(confirmToggleStore);
+    if (!branchId) {
+      // No branch link: this row cannot gate ordering at all. Flipping a
+      // directory flag here would be the exact fake success this wave removes.
+      toast.error(
+        `"${name}" is not linked to an outlet — customers cannot be stopped or reopened from here.`,
+        {
+          description: "A brand admin must set the outlet's branch link first.",
+        },
+      );
+      return;
+    }
+
+    const nextStatus = !isOpen;
+    // Bind this write to the instance that started it (same discipline as
+    // `saveStores`): a session/role remount while the request is in flight must
+    // not paint the old context's state into the new one or claim its success.
+    const generation = instanceGenerationRef.current;
     setIsTogglingStore(true);
     try {
-      // Close ONLY on a confirmed persist; on failure the dialog stays open
-      // with the saveStores error for retry.
-      if (!(await saveStores(updated))) return;
-      toast.success(`Store "${name}" is now ${!isOpen ? "OPEN" : "CLOSED"}`);
+      await applyStaffStoreStatus({
+        branchId,
+        status: nextStatus ? "open" : "closed",
+      });
+      if (isStale(generation)) return;
+      // The gate moved server-side; mirror the confirmed state in the page's
+      // own directory copy so the pill matches what customers are served.
+      const updated = stores.map((s) => {
+        if (s.id === id) {
+          // P0-3: flipping open/closed used to also stamp webhookStatus
+          // active/failed, a circuit-breaker state and a fresh lastSyncTime —
+          // all fabricated, none of them measured by this action.
+          return { ...s, isOpen: nextStatus, isBusy: nextStatus ? s.isBusy : false };
+        }
+        return s;
+      });
+      setStores(updated);
+      confirmedStoresRef.current = updated;
+      toast.success(
+        nextStatus
+          ? `Store "${name}" is now OPEN — customers can order again, and Petpooja owns open/closed from here.`
+          : `Store "${name}" is now CLOSED — customers can no longer order, and Petpooja cannot reopen it.`,
+      );
       setConfirmToggleStore(null);
+    } catch (err) {
+      if (isStale(generation)) return;
+      const message = (err as Error)?.message || "the server refused the change";
+      toast.error(`Store "${name}" status NOT changed — ${message}`, {
+        description: "The previous status is still in force.",
+      });
     } finally {
       // Always release, every exit path.
       setIsTogglingStore(false);
@@ -893,23 +939,10 @@ const AdminStoresContent: React.FC<{ defaultStoreId?: string; isCreate?: boolean
     }
   };
 
-  // Edit / Save Store Settings Form
-  // Loop 6/120 honest persist: the toggles only touch local state — flush to
-  // Firestore here and report the real outcome instead of a blind success.
-  const handleUpdateStoreSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (isReadOnly) {
-      toast.error(
-        "Access denied — store directory management is limited to brand owners and developers.",
-      );
-      return;
-    }
-    // saveStores toasts loud on failure and returns false — only claim
-    // success when the directory actually persisted.
-    if (!(await saveStores(stores))) return;
-    setIsEditMode(false);
-    toast.success("Store configurations updated successfully!");
-  };
+  // Fix wave 2026-11-20 (partner-ops): the settings form and its submit handler
+  // were removed. The form had no submit control, so the handler could never
+  // run — and the four switches it would have "saved" write flags that no
+  // ordering or payment path reads (see STORE_SETTINGS_NOT_WIRED_REASON).
 
   // Create Store
   // Loop 6/120: no fabricated contact data — a store ships with the real
@@ -2570,109 +2603,63 @@ const AdminStoresContent: React.FC<{ defaultStoreId?: string; isCreate?: boolean
                       <Settings size={16} className="text-gray-400" />
                     </div>
 
-                    <form onSubmit={handleUpdateStoreSettings} className="space-y-4">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-semibold">
-                        <div className="flex items-center justify-between rounded-xl bg-gray-50 p-2.5 dark:bg-gray-900/30">
+                    {/* Fix wave 2026-11-20: these four switches used to persist a
+                        directory flag (`saveStores`) that no ordering or payment
+                        path reads — the persist itself was the fake success. They
+                        are shown disabled, with the real reason, so a brand admin
+                        sees the wiring instead of silently toggling nothing. */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-semibold">
+                      {(
+                        [
+                          {
+                            key: "autoAcceptOrders",
+                            label: "Auto Accept Orders",
+                            hint: "Petpooja POS order acceptance",
+                          },
+                          {
+                            key: "kitchenDisplayEnabled",
+                            label: "Kitchen Display Link",
+                            hint: "KDS screen syncing",
+                          },
+                          {
+                            key: "onlinePaymentEnabled",
+                            label: "Online Payments",
+                            hint: "Card, UPI, Netbanking",
+                          },
+                          {
+                            key: "cashOnDeliveryEnabled",
+                            label: "Cash on Delivery",
+                            hint: "Pay at doorstep",
+                          },
+                        ] as const
+                      ).map((toggle) => (
+                        <div
+                          key={toggle.key}
+                          className="flex items-center justify-between rounded-xl bg-gray-50 p-2.5 dark:bg-gray-900/30"
+                        >
                           <div>
                             <span className="block text-gray-700 dark:text-gray-300">
-                              Auto Accept Orders
+                              {toggle.label}
                             </span>
                             <span className="block text-[8px] text-gray-400 font-bold">
-                              POS bypass mode
+                              {toggle.hint}
                             </span>
                           </div>
                           <input
                             type="checkbox"
-                            disabled={isReadOnly}
-                            checked={activeStore.autoAcceptOrders}
-                            onChange={() => {
-                              const updated = stores.map((s) => {
-                                if (s.id === activeStore.id)
-                                  return { ...s, autoAcceptOrders: !s.autoAcceptOrders };
-                                return s;
-                              });
-                              saveStores(updated);
-                            }}
-                            className="h-4 w-4 text-primary"
+                            disabled
+                            aria-disabled="true"
+                            readOnly
+                            title={STORE_SETTINGS_NOT_WIRED_REASON}
+                            checked={!!activeStore[toggle.key]}
+                            className="h-4 w-4 text-primary disabled:cursor-not-allowed"
                           />
                         </div>
-
-                        <div className="flex items-center justify-between rounded-xl bg-gray-50 p-2.5 dark:bg-gray-900/30">
-                          <div>
-                            <span className="block text-gray-700 dark:text-gray-300">
-                              Kitchen Display Link
-                            </span>
-                            <span className="block text-[8px] text-gray-400 font-bold">
-                              KDS screen syncing
-                            </span>
-                          </div>
-                          <input
-                            type="checkbox"
-                            disabled={isReadOnly}
-                            checked={activeStore.kitchenDisplayEnabled}
-                            onChange={() => {
-                              const updated = stores.map((s) => {
-                                if (s.id === activeStore.id)
-                                  return { ...s, kitchenDisplayEnabled: !s.kitchenDisplayEnabled };
-                                return s;
-                              });
-                              saveStores(updated);
-                            }}
-                            className="h-4 w-4 text-primary"
-                          />
-                        </div>
-
-                        <div className="flex items-center justify-between rounded-xl bg-gray-50 p-2.5 dark:bg-gray-900/30">
-                          <div>
-                            <span className="block text-gray-700 dark:text-gray-300">
-                              Online Payments
-                            </span>
-                            <span className="block text-[8px] text-gray-400 font-bold">
-                              Card, UPI, Netbanking
-                            </span>
-                          </div>
-                          <input
-                            type="checkbox"
-                            disabled={isReadOnly}
-                            checked={activeStore.onlinePaymentEnabled}
-                            onChange={() => {
-                              const updated = stores.map((s) => {
-                                if (s.id === activeStore.id)
-                                  return { ...s, onlinePaymentEnabled: !s.onlinePaymentEnabled };
-                                return s;
-                              });
-                              saveStores(updated);
-                            }}
-                            className="h-4 w-4 text-primary"
-                          />
-                        </div>
-
-                        <div className="flex items-center justify-between rounded-xl bg-gray-50 p-2.5 dark:bg-gray-900/30">
-                          <div>
-                            <span className="block text-gray-700 dark:text-gray-300">
-                              Cash on Delivery
-                            </span>
-                            <span className="block text-[8px] text-gray-400 font-bold">
-                              Allow pay-at-doorstep
-                            </span>
-                          </div>
-                          <input
-                            type="checkbox"
-                            disabled={isReadOnly}
-                            checked={activeStore.cashOnDeliveryEnabled}
-                            onChange={() => {
-                              const updated = stores.map((s) => {
-                                if (s.id === activeStore.id)
-                                  return { ...s, cashOnDeliveryEnabled: !s.cashOnDeliveryEnabled };
-                                return s;
-                              });
-                              saveStores(updated);
-                            }}
-                            className="h-4 w-4 text-primary"
-                          />
-                        </div>
-                      </div>
-                    </form>
+                      ))}
+                    </div>
+                    <p className="text-[10px] font-bold text-gray-600 dark:text-gray-400">
+                      {STORE_SETTINGS_NOT_WIRED_REASON}
+                    </p>
                   </div>
                 </div>
               </div>

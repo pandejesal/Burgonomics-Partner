@@ -10,6 +10,10 @@ import {
   Flame,
 } from 'lucide-react';
 import { useBranches } from '@/hooks/useBranches';
+import {
+  applyStaffStoreStatus,
+  refreshBranchCache,
+} from '@/features/stores/services/storeOperatingStatus';
 import { toast } from 'sonner';
 import type { Branch, AcceptingOrdersStatus } from '@/types';
 
@@ -62,6 +66,8 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
     }
   };
 
+  const prevStatus = branch?.acceptingOrdersStatus || (branch?.active ? 'open' : 'closed');
+
   const handleUpdateStatus = async (
     newStatus: AcceptingOrdersStatus,
     reasonText?: string,
@@ -73,30 +79,68 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
       setPrepTime(bufferMins);
     }
 
-    if (branch?.id) {
-      try {
-        await updateBranchSettings.mutateAsync({
-          branchId: branch.id,
-          settings: {
-            acceptingOrdersStatus: newStatus,
-            active: newStatus !== 'closed',
-            prepTimeMinutes: bufferMins || prepTime,
-          },
-        });
-        toast.success(`Store operations status updated: ${newStatus.toUpperCase()}`);
-      } catch (err) {
-        setStatus(branch?.acceptingOrdersStatus || (branch?.active ? 'open' : 'closed'));
-        if (bufferMins) {
-          setPrepTime(branch?.prepTimeMinutes || 20);
-        }
-        toast.error(
-          'Failed to update branch operating status — the previous status is still active.'
-        );
-      }
-    } else {
+    if (!branch?.id) {
       // No branch id: there is nothing to write to — fail loud instead of
       // pretending component state was persisted.
       toast.error('No branch linked — status was not saved.');
+      return;
+    }
+
+    // Rule C (owner decision 2026-11-20): open/closed is the CUSTOMER GATE.
+    // `acceptingOrdersStatus` alone stops nobody — the customer app reads
+    // `stores|admin_stores .isOpen` — so open/closed must go through the
+    // server route, which also stamps the staff override a Petpooja "open"
+    // cannot clear. "busy" is a surge control (branch flag + prep buffer) and
+    // deliberately keeps the outlet open.
+    if (newStatus !== 'busy') {
+      try {
+        await applyStaffStoreStatus({
+          branchId: branch.id,
+          status: newStatus,
+          ...(reasonText ? { reason: reasonText } : {}),
+        });
+        // The server wrote the gate; drop the cached branch rows so the outlet
+        // cards re-read the flag the route kept in step. Routed through the
+        // service (never `useQueryClient`) so this component stays renderable
+        // outside a provider — the reflow suite renders it standalone.
+        void refreshBranchCache();
+        toast.success(
+          newStatus === 'closed'
+            ? 'Outlet CLOSED — customers can no longer order, and Petpooja cannot reopen it.'
+            : 'Outlet OPEN — customers can order again; Petpooja owns open/closed from here.',
+        );
+      } catch (err) {
+        setStatus(prevStatus);
+        if (bufferMins) {
+          setPrepTime(branch.prepTimeMinutes ?? 20);
+        }
+        setEmergencyReason(null);
+        const message = (err as Error)?.message || 'the server refused the change';
+        toast.error(`Store status NOT changed — ${message}`, {
+          description: 'The previous status is still in force.',
+        });
+      }
+      return;
+    }
+
+    try {
+      await updateBranchSettings.mutateAsync({
+        branchId: branch.id,
+        settings: {
+          acceptingOrdersStatus: newStatus,
+          active: true,
+          prepTimeMinutes: bufferMins || prepTime,
+        },
+      });
+      toast.success(`Store operations status updated: ${newStatus.toUpperCase()}`);
+    } catch {
+      setStatus(prevStatus);
+      if (bufferMins) {
+        setPrepTime(branch.prepTimeMinutes ?? 20);
+      }
+      toast.error(
+        'Failed to update branch operating status — the previous status is still active.'
+      );
     }
   };
 

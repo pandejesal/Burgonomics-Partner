@@ -46,16 +46,29 @@ export function BranchSwitcher({
     try {
       const nextStatus = !isAccepting;
       if (onToggleStoreStatus) {
+        // Rule C (fix wave 2026-11-20): the caller routes this to the server
+        // gate, so a failure THROWS and the success toast below never runs. The
+        // old handler was fire-and-forget over a branch flag that no ordering
+        // path reads.
         await onToggleStoreStatus(selectedBranch.id, nextStatus);
+        toast.success(
+          nextStatus
+            ? `${selectedBranch.name} is now LIVE & Accepting Orders!`
+            : `${selectedBranch.name} is now PAUSED — customers stop ordering, and Petpooja cannot reopen it.`
+        );
+        setShowConfirmModal(false);
+      } else {
+        // No handler wired means the switch cannot stop orders. Say so instead
+        // of claiming a status change that did not happen.
+        toast.error(
+          'This outlet switch is not wired to the store gate — nothing was changed.'
+        );
       }
-      toast.success(
-        nextStatus
-          ? `${selectedBranch.name} is now LIVE & Accepting Orders!`
-          : `${selectedBranch.name} is now PAUSED (Kitchen Offline)`
-      );
-      setShowConfirmModal(false);
     } catch (err) {
-      toast.error('Failed to update store operational status');
+      const message = (err as Error)?.message || 'the server refused the change';
+      toast.error(`Store status NOT changed — ${message}`, {
+        description: `${selectedBranch.name} keeps its previous status.`,
+      });
     } finally {
       setIsToggling(false);
     }

@@ -13,6 +13,7 @@ import {
 import { RecentOrders } from '@/components/dashboard/RecentOrders';
 import { Spinner } from '@/components/ui/Spinner';
 import { summarizeIstDaySales } from '@/utils/analyticsMath';
+import { applyStaffStoreStatus } from '@/features/stores/services/storeOperatingStatus';
 import { AlertTriangle } from 'lucide-react';
 
 function ageLabel(fromMs: number): string {
@@ -33,7 +34,6 @@ export function DashboardPage() {
   const {
     branches = [],
     isLoading: isBranchesLoading,
-    updateBranchSettings,
   } = useBranches();
 
   const isSuperadmin = user?.role === 'brand_owner' || user?.role === 'developer';
@@ -152,9 +152,17 @@ export function DashboardPage() {
           setSelectedBranchId(id);
         }}
         onToggleStoreStatus={async (branchId, isAccepting) => {
-          await updateBranchSettings.mutateAsync({
+          // Rule C (fix wave 2026-11-20): the dashboard master switch is the
+          // second open/close entry point, so it takes the SAME server gate as
+          // Settings — `acceptingOrdersStatus` alone stops nobody, and a staff
+          // close must outrank a later Petpooja "open". A refusal throws, so
+          // the switcher cannot toast success on it.
+          if (branchId === 'all') {
+            throw new Error('Select a single outlet before changing its status.');
+          }
+          await applyStaffStoreStatus({
             branchId,
-            settings: { acceptingOrdersStatus: isAccepting ? 'open' : 'closed' },
+            status: isAccepting ? 'open' : 'closed',
           });
         }}
       />

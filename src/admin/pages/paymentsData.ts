@@ -1,7 +1,7 @@
 // Comprehensive High-Fidelity Payment Data Center for BURGONOMICS Admin Portal
 import { toast } from "sonner";
 import { addDays, subDays } from "date-fns";
-import { generateSecureId } from "@/shared/utils/cryptoUtils";
+// `generateSecureId` was only used by the removed demo refund mutators.
 
 export interface TransactionDetails {
   id: string;
@@ -931,186 +931,26 @@ class PaymentDataStorage {
     return this.duplicates;
   }
 
-  // State manipulation methods
-  retryVerification(paymentId: string) {
-    const txn = this.txns.find((t) => t.id === paymentId);
-    if (!txn) {
-      toast.error("Transaction not found.");
-      return false;
-    }
-
-    txn.verificationStatus = "VERIFIED";
-    txn.timeline.push({
-      status: "authorized",
-      title: "Signature Verified Manually",
-      description: "Admin signature sync verification completed successfully.",
-      time: new Date().toISOString().slice(0, 19).replace("T", " "),
-    });
-    txn.auditLogs.push({
-      id: `aud_${Date.now()}`,
-      admin: "Jesal Pande (pandejesal@gmail.com)",
-      action: "MANUAL_SIGN_VERIFY",
-      timestamp: new Date().toISOString().slice(0, 19).replace("T", " "),
-      oldValue: "UNVERIFIED",
-      newValue: "VERIFIED",
-      ipAddress: "157.34.82.112",
-      device: "Chrome 126 / macOS",
-    });
-
-    toast.success(`Verification re-attempted and verified for ${paymentId}`);
-    this.notify();
-    return true;
-  }
-
-  issueRefund(paymentId: string, amountPaise: number, reason: string, isPartial = false) {
-    const txn = this.txns.find((t) => t.id === paymentId);
-    if (!txn) {
-      toast.error("Transaction not found.");
-      return false;
-    }
-
-    const refundId = `rfnd_R${generateSecureId(12)}`;
-
-    // Add to transaction refunds list
-    txn.refunds.push({
-      id: refundId,
-      amountPaise,
-      reason,
-      status: "COMPLETED",
-      createdAt: new Date().toISOString().slice(0, 19).replace("T", " "),
-    });
-
-    // Update transaction status
-    const previousStatus = txn.status;
-    txn.status = isPartial ? "PARTIALLY_REFUNDED" : "REFUNDED";
-
-    txn.timeline.push({
-      status: "refunded",
-      title: isPartial ? "Partial Refund Dispatched" : "Full Refund Settled",
-      description: `₹${(amountPaise / 100).toFixed(2)} refunded. Reason: ${reason}`,
-      time: new Date().toISOString().slice(0, 19).replace("T", " "),
-    });
-
-    txn.auditLogs.push({
-      id: `aud_${Date.now()}`,
-      admin: "Jesal Pande (pandejesal@gmail.com)",
-      action: isPartial ? "INITIATE_PARTIAL_REFUND" : "INITIATE_REFUND",
-      timestamp: new Date().toISOString().slice(0, 19).replace("T", " "),
-      oldValue: previousStatus,
-      newValue: txn.status,
-      ipAddress: "157.34.82.112",
-      device: "Chrome 126 / macOS",
-    });
-
-    // Add to global refunds panel directory
-    this.refunds.unshift({
-      id: refundId,
-      paymentId,
-      orderId: txn.orderId,
-      customerName: txn.customer.name,
-      storeName: txn.store.name,
-      amountPaise,
-      reason,
-      status: "COMPLETED",
-      processedBy: "Jesal Pande (pandejesal@gmail.com)",
-      gatewayStatus: "processed",
-      createdAt: new Date().toISOString().slice(0, 19).replace("T", " "),
-      completedAt: new Date().toISOString().slice(0, 19).replace("T", " "),
-    });
-
-    toast.success(`Refund of ₹${(amountPaise / 100).toFixed(2)} completed successfully!`);
-    this.notify();
-    return true;
-  }
-
-  approveRefundRelease(refundId: string) {
-    const r = this.refunds.find((ref) => ref.id === refundId);
-    if (!r) return false;
-
-    r.status = "COMPLETED";
-    r.gatewayStatus = "processed";
-    r.completedAt = new Date().toISOString().slice(0, 19).replace("T", " ");
-    r.processedBy = "Jesal Pande (pandejesal@gmail.com)";
-
-    // Update associated transaction
-    const txn = this.txns.find((t) => t.id === r.paymentId);
-    if (txn) {
-      txn.status = "REFUNDED";
-      const trf = txn.refunds.find((rf) => rf.id === refundId);
-      if (trf) trf.status = "COMPLETED";
-
-      txn.timeline.push({
-        status: "refunded",
-        title: "Refund Approved by Manager",
-        description: `${r.amountPaise != null ? `₹${(r.amountPaise / 100).toFixed(2)}` : "Amount unspecified"} settled. Reason: ${r.reason}`,
-        time: new Date().toISOString().slice(0, 19).replace("T", " "),
-      });
-    }
-
-    toast.success(`Refund payout release authorized successfully.`);
-    this.notify();
-    return true;
-  }
-
-  rejectRefundRelease(refundId: string, reason: string) {
-    const r = this.refunds.find((ref) => ref.id === refundId);
-    if (!r) return false;
-
-    r.status = "FAILED";
-    r.gatewayStatus = "rejected";
-    r.processedBy = `Rejected: ${reason}`;
-
-    const txn = this.txns.find((t) => t.id === r.paymentId);
-    if (txn) {
-      txn.status = "CAPTURED";
-      const trf = txn.refunds.find((rf) => rf.id === refundId);
-      if (trf) trf.status = "FAILED";
-
-      txn.timeline.push({
-        status: "captured",
-        title: "Refund Request Rejected",
-        description: `Rejected. Reason: ${reason}`,
-        time: new Date().toISOString().slice(0, 19).replace("T", " "),
-      });
-    }
-
-    toast.info(`Refund request rejected.`);
-    this.notify();
-    return true;
-  }
-
-  retryRefundRelease(refundId: string) {
-    const r = this.refunds.find((ref) => ref.id === refundId);
-    if (!r) return false;
-
-    r.status = "PENDING";
-    r.gatewayStatus = "re-queued";
-
-    toast.success(`Refund process re-queued in Razorpay payouts engine.`);
-    this.notify();
-    return true;
-  }
-
-  resolveDiscrepancy(id: string, action: "resolve" | "retry") {
-    const d = this.discrepancies.find((disc) => disc.id === id);
-    if (!d) return false;
-
-    if (action === "resolve") {
-      d.status = "RESOLVED";
-      d.resolvedAt = new Date().toISOString().slice(0, 19).replace("T", " ");
-      d.resolvedBy = "Jesal Pande (pandejesal@gmail.com)";
-      toast.success(`Discrepancy resolved and marked settled.`);
-    } else {
-      toast.info(`Initiating reconciliation recheck on Razorpay backend...`);
-      setTimeout(() => {
-        toast.success(`Verification logs synced. No further gateway drift detected.`);
-      }, 1000);
-    }
-
-    this.notify();
-    return true;
-  }
-
+  /**
+   * Fix wave 2026-11-20 (partner-ops): the demo money mutators are gone.
+   *
+   * This module is the console's DEMO ledger (its own screens label it that
+   * way: no live transactions/refunds source is wired). It used to carry
+   * `issueRefund`, `approveRefundRelease`, `rejectRefundRelease`,
+   * `retryRefundRelease`, `retryVerification` and `resolveDiscrepancy`, which
+   * "completed" a refund or "verified" a payment by editing local rows and
+   * toasting success with a fabricated admin identity, IP and device — a refund
+   * that never touched Razorpay.
+   *
+   * They had no caller, so they were safe only by accident: the next button
+   * wired to one of them would ship a fake money action. The real paths are
+   * `releaseRefundThroughApi` (services/refundRelease.ts),
+   * `adminRefundsService`/`adminPaymentsService` (Firestore + Cloud Functions)
+   * and `partnerFunctionsApi.resolveDiscrepancy`. Use those.
+   *
+   * `resolveDuplicate` stays: the reconciliation screen still calls it, and its
+   * duplicate list is visibly labelled a local demo queue.
+   */
   resolveDuplicate(orderId: string, action: "merge" | "ignore" | "investigate") {
     const dup = this.duplicates.find((d) => d.orderId === orderId);
     if (!dup) return false;

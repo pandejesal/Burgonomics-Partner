@@ -5,6 +5,10 @@ import { useAuthStore } from '@/stores/authStore';
 import { canReadFranchiseLeads, canPublishBranchAnnouncement, isBrandRole } from '@/core/auth/routePolicy';
 import { BranchConfigModal } from '@/features/branches/components/BranchConfigModal';
 import { BranchSettingsModal } from '@/components/stores/BranchSettingsModal';
+import {
+  applyStaffStoreStatus,
+  splitOperatingStatusChange,
+} from '@/features/stores/services/storeOperatingStatus';
 import { FranchiseLeadsPipeline } from '@/components/stores/FranchiseLeadsPipeline';
 import { LaunchBroadcastModal } from '@/components/stores/LaunchBroadcastModal';
 import {
@@ -89,7 +93,75 @@ export function BranchesPage() {
   };
 
   const handleSaveBranchSettings = async (branchId: string, settings: Partial<Branch>) => {
-    await updateBranchSettings.mutateAsync({ branchId, settings });
+    // Rule C (fix wave 2026-11-20): this modal's name/phone/hours save also
+    // carried `acceptingOrdersStatus`, so a "close" here wrote a branch flag no
+    // ordering path reads. Split it: an open/closed CHANGE goes to the server
+    // gate (which also owns `active` and the POS override); "busy" and every
+    // other field stay a branch save.
+    const target = branches.find((b) => b.id === branchId) ?? editingBranch;
+    const split = splitOperatingStatusChange({
+      current: {
+        acceptingOrdersStatus: target?.acceptingOrdersStatus,
+        active: target?.active,
+      },
+      settings: settings as Record<string, unknown>,
+    });
+
+    if (split.gate) {
+      await applyStaffStoreStatus({ branchId, status: split.gate.status });
+    }
+    if (Object.keys(split.branchSettings).length > 0) {
+      await updateBranchSettings.mutateAsync({
+        branchId,
+        settings: split.branchSettings as Partial<Branch>,
+      });
+    }
+  };
+
+  /**
+   * Go Offline / Go Live on a branch card.
+   *
+   * Rule C (fix wave 2026-11-20): this used to call `toggleBranchStatus` only,
+   * which writes `branches/{id}.active` + `.status` — lifecycle metadata no
+   * ordering path reads. "Go Offline" therefore left customers ordering, while
+   * the card said the outlet was down.
+   *
+   * Now the CUSTOMER GATE moves first (server route, staff close outranks a POS
+   * "open"), and only then do the lifecycle fields follow. A refused gate stops
+   * the whole action: writing `active: false` would claim the outlet went
+   * offline while customers keep ordering.
+   */
+  const handleToggleBranchOperatingStatus = async (branch: Branch) => {
+    const closing = branch.active !== false;
+    try {
+      await applyStaffStoreStatus({
+        branchId: branch.id,
+        status: closing ? 'closed' : 'open',
+      });
+      // The lifecycle write is fire-and-forget metadata: `toggleBranchStatus`
+      // derives `status: active ? 'active' : 'inactive'` itself.
+      toggleBranchStatus.mutate(
+        { branchId: branch.id, active: !closing },
+        {
+          // A rejected lifecycle write still leaves the gate moved — say what
+          // is true rather than pretending nothing happened.
+          onError: () =>
+            toast.error(
+              `Could not update ${branch.name}. The outlet itself is now ${closing ? 'CLOSED' : 'OPEN'} — only the lifecycle fields failed to save.`
+            ),
+        }
+      );
+      toast.success(
+        closing
+          ? `${branch.name} is now CLOSED — customers stop ordering, and Petpooja cannot reopen it.`
+          : `${branch.name} is now OPEN — customers can order again; Petpooja owns open/closed from here.`
+      );
+    } catch (err) {
+      const message = (err as Error)?.message || 'the server refused the change';
+      toast.error(`Could not update ${branch.name}. The outlet status is unchanged.`, {
+        description: message,
+      });
+    }
   };
 
   const handleActivateStoreConfirm = async () => {
@@ -365,22 +437,7 @@ export function BranchesPage() {
 
                       {userCanEdit && !isComingSoon && (
                         <button
-                          onClick={() =>
-                            toggleBranchStatus.mutate(
-                              {
-                                branchId: branch.id,
-                                active: !branch.active,
-                              },
-                              {
-                                // A rejected write leaves the outlet in its old
-                                // state — say so instead of failing silently.
-                                onError: () =>
-                                  toast.error(
-                                    `Could not update ${branch.name}. The outlet status is unchanged.`
-                                  ),
-                              }
-                            )
-                          }
+                          onClick={() => handleToggleBranchOperatingStatus(branch)}
                           className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors flex items-center gap-1.5 cursor-pointer ${
                             branch.active
                               ? 'bg-amber-950/40 text-amber-300 border-amber-800/60 hover:bg-amber-900/60'

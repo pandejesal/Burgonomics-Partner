@@ -6,27 +6,47 @@ import { generateASCIIReceipt } from '@/features/orders/services/thermalPrinterS
 export interface PrinterConfig {
   paperSize: '80mm' | '58mm';
   connectionType: 'usb' | 'network' | 'bluetooth';
-  autoPrintKOT: boolean;
   copies: number;
 }
 
 const DEFAULT_CONFIG: PrinterConfig = {
   paperSize: '80mm',
   connectionType: 'usb',
-  autoPrintKOT: true,
   copies: 1,
 };
 
+/**
+ * Only the keys this screen actually uses survive. A stored config written by
+ * an older build may carry the retired auto-print flag, which nothing ever
+ * consumed (Petpooja prints the kitchen tickets while an outlet is linked).
+ * Picking fields explicitly means a legacy blob can never resurrect a control
+ * that does nothing.
+ */
 export function getStoredPrinterConfig(): PrinterConfig {
+  return readStoredConfig();
+}
+
+function readStoredConfig(): PrinterConfig {
   try {
     if (typeof localStorage !== 'undefined') {
       const raw = localStorage.getItem('burgonomics_printer_config');
-      if (raw) return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        const paperSize = parsed.paperSize === '58mm' ? '58mm' : '80mm';
+        const connectionType =
+          parsed.connectionType === 'network'
+            ? 'network'
+            : parsed.connectionType === 'bluetooth'
+              ? 'bluetooth'
+              : 'usb';
+        const copies = parsed.copies === 2 ? 2 : 1;
+        return { paperSize, connectionType, copies };
+      }
     }
   } catch (e) {
     console.warn('Failed to parse printer config:', e);
   }
-  return DEFAULT_CONFIG;
+  return { ...DEFAULT_CONFIG };
 }
 
 export function savePrinterConfig(config: PrinterConfig): void {
@@ -102,7 +122,7 @@ export function ThermalPrinterSettings() {
               </span>
             </h2>
             <p className="text-xs text-neutral-400 min-w-0 break-words">
-              Configure 80mm/58mm thermal receipts, auto-print triggers, and interface connections
+              Configure 80mm/58mm thermal receipts and interface connections
             </p>
           </div>
         </div>
@@ -207,26 +227,12 @@ export function ThermalPrinterSettings() {
         </div>
       </div>
 
-      {/* Auto-print & Copy toggles */}
+      {/* Copies per order. The card that used to sit beside this also carried
+          an automatic kitchen-slip switch: nothing read its flag, and Petpooja
+          prints the kitchen ticket for a linked outlet, so it was removed
+          rather than left as a control that controls nothing. */}
       <div className="pt-2 border-t border-neutral-800/80 grid grid-cols-1 md:grid-cols-2 gap-4">
-        <label className="flex items-start gap-3 p-3 rounded-2xl bg-neutral-900/60 border border-neutral-800 cursor-pointer min-w-0">
-          <input
-            type="checkbox"
-            checked={config.autoPrintKOT}
-            onChange={(e) => setConfig((prev) => ({ ...prev, autoPrintKOT: e.target.checked }))}
-            className="mt-0.5 rounded border-neutral-700 text-[#0E4825] focus:ring-0 cursor-pointer shrink-0"
-          />
-          <div className="min-w-0">
-            <span className="font-bold text-white text-xs block break-words">
-              Auto-Print KOT on Incoming Online Orders
-            </span>
-            <span className="text-[11px] text-neutral-400 break-words">
-              Instantly prints kitchen slip when order lands on Makeline stream
-            </span>
-          </div>
-        </label>
-
-        <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-2xl bg-neutral-900/60 border border-neutral-800 min-w-0">
+        <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-2xl bg-neutral-900/60 border border-neutral-800 min-w-0 md:col-span-2">
           <div className="min-w-0">
             <span className="font-bold text-white text-xs block break-words">Print Copies per Order</span>
             <span className="text-[11px] text-neutral-400 break-words">1x Kitchen only, 2x Kitchen + Customer</span>

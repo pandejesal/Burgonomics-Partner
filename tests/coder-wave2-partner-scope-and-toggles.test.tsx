@@ -152,6 +152,32 @@ vi.mock('@/features/branches/components/BranchConfigModal', () => ({
 vi.mock('@/components/stores/BranchSettingsModal', () => ({ BranchSettingsModal: () => null }));
 vi.mock('@/components/stores/LaunchBroadcastModal', () => ({ LaunchBroadcastModal: () => null }));
 
+// Rule C (fix wave 2026-11-20): the "Go Offline" pill now moves the CUSTOMER
+// GATE first (server route) and only then writes the lifecycle fields. The L4
+// assertion below is about the LIFECYCLE write's rejection surfacing a toast,
+// so the gate is stubbed as accepted here; the gate's own refusals are pinned
+// in tests/branches-page-go-offline-rule-c.test.tsx.
+vi.mock('@/features/stores/services/storeOperatingStatus', () => ({
+  applyStaffStoreStatus: vi.fn(async (input: any) => ({
+    branchId: input.branchId,
+    status: input.status,
+    storeId: 'str_1',
+    storeStatusOverride: input.status === 'closed',
+  })),
+  splitOperatingStatusChange: (input: any) => {
+    const next = input?.settings?.acceptingOrdersStatus;
+    const branchSettings: Record<string, unknown> = { ...(input?.settings ?? {}) };
+    delete branchSettings.acceptingOrdersStatus;
+    delete branchSettings.active;
+    const current =
+      input?.current?.acceptingOrdersStatus ??
+      (input?.current?.active === false ? 'closed' : 'open');
+    const gate =
+      next === 'busy' || next === undefined || next === current ? null : { status: next };
+    return { gate, branchSettings };
+  },
+}));
+
 import { useTickets } from '@/hooks/useTickets';
 import { useAnalytics } from '@/hooks/useAnalytics';
 import { BranchesPage } from '@/pages/BranchesPage';
@@ -476,7 +502,11 @@ describe('L1 — branch cards show configured values or say they are unset', () 
 });
 
 describe('L4 — branch and lead toggles surface a failed write', () => {
-  it('raises a toast when the outlet status write is rejected', () => {
+  it('raises a toast when the outlet status write is rejected', async () => {
+    // Rule C (fix wave 2026-11-20): the pill now awaits the customer-gate route
+    // before the lifecycle write, so its onClick is async and the lifecycle
+    // call lands on a later microtask. The ASSERTION is unchanged: a rejected
+    // lifecycle write must surface a toast naming the outlet.
     state.branches = [branch()];
     const tree = BranchesPage({});
 
@@ -486,7 +516,9 @@ describe('L4 — branch and lead toggles surface a failed write', () => {
     );
     expect(toggle).toBeDefined();
 
-    toggle!.props.onClick();
+    await toggle!.props.onClick();
+    // One extra turn: the lifecycle `.mutate` runs after the gate resolves.
+    await Promise.resolve();
 
     expect(state.toggleCalls).toEqual([{ branchId: 'branch_nashik_01', active: false }]);
     expect(state.toastErrors.some((m) => /Could not update Nashik Outlet/.test(m))).toBe(true);

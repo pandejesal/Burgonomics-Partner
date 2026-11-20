@@ -32,18 +32,21 @@ describe('Prompt 23: Settings, Hardware Printers & Audio Notifications Suite', (
   });
 
   describe('1. Thermal Printer Configuration Persistence', () => {
-    it('retrieves default 80mm ESC/POS printer settings when storage is empty', () => {
+    it('retrieves default 80mm printer settings when storage is empty', () => {
       const config = getStoredPrinterConfig();
       expect(config.paperSize).toBe('80mm');
-      expect(config.autoPrintKOT).toBe(true);
+      expect(config.connectionType).toBe('usb');
       expect(config.copies).toBe(1);
+      // Fix wave 2026-11-20: the dead `autoPrintKOT` switch was removed, so the
+      // config no longer carries the key at all (a legacy stored value cannot
+      // resurrect it — see tests/partner-kot-dead-code-removal.test.ts).
+      expect('autoPrintKOT' in config).toBe(false);
     });
 
     it('persists modified paper size and copies to localStorage', () => {
       const customConfig: PrinterConfig = {
         paperSize: '58mm',
         connectionType: 'bluetooth',
-        autoPrintKOT: false,
         copies: 2,
       };
 
@@ -52,7 +55,6 @@ describe('Prompt 23: Settings, Hardware Printers & Audio Notifications Suite', (
 
       expect(loaded.paperSize).toBe('58mm');
       expect(loaded.connectionType).toBe('bluetooth');
-      expect(loaded.autoPrintKOT).toBe(false);
       expect(loaded.copies).toBe(2);
     });
   });

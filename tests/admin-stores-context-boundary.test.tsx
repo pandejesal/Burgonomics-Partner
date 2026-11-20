@@ -105,7 +105,23 @@ const apiSpy = vi.hoisted(() => {
       },
     );
   });
-  return { syncPetpoojaMenu, state };
+  // Rule C (fix wave 2026-11-20): open/close is now a SERVER gate write, so the
+  // session-boundary suite parks the same deferred gate on this call instead of
+  // on a Firestore batch commit. `sdk.state.gate` is set by `deferredGate()`.
+  const setStoreOperatingStatus = vi.fn(
+    async (params: { branchId: string; status: "open" | "closed" }) => {
+      const gate = (globalThis as any).__storeGate?.();
+      if (gate) await gate;
+      return {
+        success: true,
+        branchId: params.branchId,
+        status: params.status,
+        storeId: "str_alpha",
+        storeStatusOverride: params.status === "closed",
+      };
+    },
+  );
+  return { syncPetpoojaMenu, setStoreOperatingStatus, state };
 });
 
 vi.mock("sonner", () => ({ toast: toastSpy }));
@@ -202,6 +218,9 @@ const publicRow = {
     phone: "+919820011223",
     isOpen: true,
     isBusy: false,
+    // Rule C: the open/close is a server gate write for the linked outlet, so
+    // the fixture carries the link the console reads (`storeBranchIdFor`).
+    partnerBranchId: "branch_adajan",
     supports: { delivery: true, takeaway: true, dineIn: true },
     hours: { open: "10:00", close: "23:00" },
     // Legacy pre-split PII sitting in the anonymously readable document.
@@ -283,6 +302,12 @@ function deferredGate() {
   // as an unhandled rejection before the component awaits it.
   promise.catch(() => undefined);
   sdk.state.gate = { promise, resolve: () => resolve(), reject: () => reject(new Error("write failed")) };
+  // The gate is consumed by the mocked status route (see `apiSpy`). Read it
+  // through a function so the mock sees the gate created AFTER its own call.
+  (globalThis as any).__storeGate = () => {
+    const gate = sdk.state.gate;
+    return gate ? gate.promise : null;
+  };
   return sdk.state.gate as { promise: Promise<void>; resolve: () => void; reject: () => void };
 }
 

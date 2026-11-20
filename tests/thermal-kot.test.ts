@@ -3,12 +3,17 @@ import { describe, it, expect } from 'vitest';
 // These tests import the REAL receipt formatter. The previous file defined a
 // local format80mmThermalKot with different headers/totals layout — a GST or
 // total regression in production could never fail it.
-import {
-  formatOrderForKOT,
-  generateASCIIReceipt,
-  generateESCPOSBuffer,
-  generateQRCodeBlock,
-} from '../src/features/orders/services/thermalPrinterService';
+//
+// 2026-11-20 (fix wave, partner-ops): the binary ESC/POS builder
+// (`generateESCPOSBuffer`) and its QR block (`generateQRCodeBlock`) were
+// removed. Nothing ever sent those bytes to a printer — the Partner app prints
+// through the OS dialog from the ASCII slip, and Petpooja prints the kitchen
+// ticket for a linked outlet. The assertions those cases made about slip
+// CONTENT (headers, totals, 32/48-column reflow) are kept below and are now
+// made against `generateASCIIReceipt`, which is the string that actually
+// reaches paper; a case that only exercised the deleted encoder was replaced
+// by one that pins its ABSENCE, so re-adding a dead encoder fails the suite.
+import { formatOrderForKOT, generateASCIIReceipt } from '../src/features/orders/services/thermalPrinterService';
 import type { Order } from '../src/types';
 
 const sampleOrder = {
@@ -100,20 +105,20 @@ describe('Partner POS — 80mm Thermal KOT Printing Suite (real formatter)', () 
     expect(slip).toContain('*** KITCHEN COPY ***');
   });
 
-  it('builds a non-empty ESC/POS buffer with the standard command bytes', () => {
-    const buffer = generateESCPOSBuffer(formatOrderForKOT(sampleOrder));
+  it('prints the full 80mm slip content on the 48-column grid (ESC/POS encoder removed)', () => {
+    // Same assertions the deleted ESC/POS-buffer case made about CONTENT, now
+    // against the string that is actually printed.
+    const slip = generateASCIIReceipt(formatOrderForKOT(sampleOrder));
 
-    expect(buffer).toBeInstanceOf(Uint8Array);
-    expect(buffer.length).toBeGreaterThan(0);
-
-    expect(Array.from(buffer.slice(0, 2))).toEqual([0x1b, 0x40]); // ESC @
-    expect(Array.from(buffer.slice(2, 5))).toEqual([0x1b, 0x61, 0x01]); // ESC a 1
-    expect(Array.from(buffer.slice(-4))).toEqual([0x1d, 0x56, 0x41, 0x00]); // GS V 65 0
-
-    const payload = new TextDecoder().decode(buffer);
-    expect(payload).toContain('BURGONOMICS KOT');
-    expect(payload).toContain('Total Amount: ₹784');
-    expect(payload).toContain('*** KITCHEN COPY ***');
+    expect(slip.length).toBeGreaterThan(0);
+    expect(slip.split('\n')[0]).toBe('='.repeat(48));
+    expect(slip).toContain('BURGONOMICS KOT');
+    expect(slip).toContain('Total Amount: ₹784');
+    expect(slip).toContain('*** KITCHEN COPY ***');
+    // The binary encoder must stay gone: no ESC @ / GS V command bytes in the
+    // printable text.
+    expect(slip).not.toContain('\u001b');
+    expect(slip).not.toContain('\u001d');
   });
 
   it('formats 48 columns by default and 32 columns for 58mm', () => {
@@ -124,13 +129,10 @@ describe('Partner POS — 80mm Thermal KOT Printing Suite (real formatter)', () 
     expect(slip32.split('\n')[0]).toBe('='.repeat(32));
   });
 
-  it('generates binary ESC/POS command buffer', () => {
-    const buf = generateESCPOSBuffer(formatOrderForKOT(sampleOrder));
-
-    expect(buf).toBeInstanceOf(Uint8Array);
-    expect(buf.length).toBeGreaterThan(50);
-    expect(buf[0]).toBe(0x1b); // ESC
-    expect(buf[1]).toBe(0x40); // @
+  it('no longer exposes a binary ESC/POS builder or QR block (dead path removed)', async () => {
+    const service = await import('../src/features/orders/services/thermalPrinterService');
+    expect('generateESCPOSBuffer' in service).toBe(false);
+    expect('generateQRCodeBlock' in service).toBe(false);
   });
 });
 
@@ -197,7 +199,8 @@ describe('80mm Thermal KOT — hardening (footer, reflow, crash-proofing, QR)', 
     expect(kot.orderType).toBe('PICKUP');
     expect(kot.items).toEqual([]);
     expect(() => generateASCIIReceipt(kot)).not.toThrow();
-    expect(() => generateESCPOSBuffer(kot)).not.toThrow();
+    // Nothing binary left to throw from — and no ESC/GS bytes in the slip.
+    expect(generateASCIIReceipt(kot)).not.toContain('\u001b');
   });
 
   it('falls back to `fulfillment` when orderType is absent (Delivery docs)', () => {
@@ -205,40 +208,15 @@ describe('80mm Thermal KOT — hardening (footer, reflow, crash-proofing, QR)', 
     expect(formatOrderForKOT(aliased).orderType).toBe('DELIVERY');
   });
 
-  it('appends a scannable QR block before the cut, and honours includeQR=false', () => {
+  it('prints the slip complete with customer contact and total (QR block removed)', () => {
     const kot = formatOrderForKOT(sampleOrder);
-    const withQR = generateESCPOSBuffer(kot);
-    const payload = new TextDecoder().decode(withQR);
-    expect(payload).toContain('BURGONOMICS KOT');
-    // GS ( k QR preamble (function 165: model 2) present, cut still last
-    expect(Array.from(withQR.slice(-4))).toEqual([0x1d, 0x56, 0x41, 0x00]);
-    const qrIdx = Array.from(withQR).findIndex(
-      (_b, i) =>
-        withQR[i] === 0x1d && withQR[i + 1] === 0x28 && withQR[i + 2] === 0x6b && withQR[i + 5] === 0x31
-    );
-    expect(qrIdx).toBeGreaterThan(-1);
-
-    const noQR = generateESCPOSBuffer(kot, 48, false);
-    expect(Array.from(noQR.slice(-4))).toEqual([0x1d, 0x56, 0x41, 0x00]);
-    expect(noQR.length).toBeLessThan(withQR.length);
-  });
-
-  it('builds a standalone QR block for an order id and degrades safely on junk', () => {
-    const block = generateQRCodeBlock('ord_detail_8841');
-    expect(block).toBeInstanceOf(Uint8Array);
-    expect(block.length).toBeGreaterThan(0);
-    // Empty/oversized payloads produce NO block instead of a malformed one
-    expect(generateQRCodeBlock('').length).toBe(0);
-    expect(generateQRCodeBlock('x'.repeat(8000)).length).toBe(0);
-  });
-
-  it('keeps the 58mm ESC/POS buffer printable at 32 columns', () => {
-    const kot = formatOrderForKOT(sampleOrder);
-    const buf58 = generateESCPOSBuffer(kot, 32);
-    expect(Array.from(buf58.slice(0, 2))).toEqual([0x1b, 0x40]);
-    expect(Array.from(buf58.slice(-4))).toEqual([0x1d, 0x56, 0x41, 0x00]);
-    const text = new TextDecoder().decode(buf58);
-    expect(text).toContain('='.repeat(32));
+    const slip = generateASCIIReceipt(kot);
+    expect(slip).toContain('BURGONOMICS KOT');
+    expect(slip).toContain('Total Amount: ₹784');
+    expect(slip).toContain('*** KITCHEN COPY ***');
+    // The QR/ESC-POS encoder never reached paper: a printable slip carries no
+    // binary command bytes at all.
+    expect(slip).not.toContain('\u001d');
   });
 });
 
@@ -271,7 +249,8 @@ describe('KOT — modifier shapes from either app never break the slip', () => {
     const slip = generateASCIIReceipt(kot);
     expect(slip).toContain('- Extra Cheese Slice');
     expect(slip).not.toContain('[object Object]');
-    expect(() => generateESCPOSBuffer(kot)).not.toThrow();
+    // And the whole slip stays printable text (no encoder, no command bytes).
+    expect(slip).not.toContain('\u001b');
   });
 
   it('skips unlabelled add-on entries rather than printing junk lines', () => {

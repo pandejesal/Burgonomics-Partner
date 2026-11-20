@@ -645,6 +645,34 @@ export const partnerFunctionsApi = {
   },
 
   /**
+   * Staff open/close for an outlet (owner rule C), server-first.
+   *
+   * POST /stores/setOperatingStatus, body { branchId, status, reason? }.
+   * The route writes the customer gate (`stores|admin_stores .isOpen`), stamps
+   * `storeStatusOverride` so a Petpooja "open" cannot undo a staff close until
+   * staff reopen, and keeps the branch flag in step. It is the ONLY path that
+   * can move that gate: Firestore rules deny branch roles the write.
+   *
+   * The client never decides whether it worked — a refusal throws with the
+   * server's own reason, so no caller can toast success on a failed close.
+   * Not retried: a duplicate close/reopen is harmless server-side (idempotent),
+   * but a silent replay would hide a refusal the operator needs to see.
+   */
+  async setStoreOperatingStatus(params: {
+    branchId: string;
+    status: 'open' | 'closed';
+    reason?: string;
+  }): Promise<{
+    success: boolean;
+    branchId: string;
+    status: 'open' | 'closed';
+    storeId: string;
+    storeStatusOverride: boolean;
+  }> {
+    return await apiRequest('/stores/setOperatingStatus', params, { retries: 0 });
+  },
+
+  /**
      * Re-books cancelled Porter rider.
      * Same idempotency semantics as bookPorterRider.
      */
