@@ -21,6 +21,7 @@ const ROUTE_TITLES: ReadonlyArray<readonly [RegExp, string]> = [
   [/^\/settings(\/|$)/, 'Settings'],
   [/^\/branches(\/|$)/, 'Branches'],
   [/^\/analytics(\/|$)/, 'Analytics'],
+  [/^\/settlements(\/|$)/, 'Settlements'],
   [/^\/users(\/|$)/, 'Users'],
   [/^\/admin(\/|$)/, 'Control Room'],
 ];
