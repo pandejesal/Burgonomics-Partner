@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
-import { motion, AnimatePresence } from "motion/react";
+import { motion } from "motion/react";
 import {
   ArrowLeft,
   User,
@@ -19,8 +19,6 @@ import {
   AlertTriangle,
   FileText,
   Save,
-  Send,
-  Plus,
   Ban,
   CheckCircle,
   ExternalLink,
@@ -40,6 +38,7 @@ import { AdminButton } from "../components/Buttons";
 import { StatusBadge } from "../components/Badges";
 import { ConfirmDialog } from "../components/Utilities";
 import { customerStorage, CustomerProfile, AddressSnapshot } from "./customersData";
+import { partnerFunctionsApi } from "../../services/partnerFunctionsApi";
 import { actorLabelFor } from "./AdminCustomersPage";
 import { useAdmin } from "../hooks/useAdmin";
 import { toast } from "sonner";
@@ -83,26 +82,13 @@ export const AdminCustomerProfilePage: React.FC = () => {
   const [pointsAmount, setPointsAmount] = useState(100);
   const [pointsReason, setPointsReason] = useState("");
 
-  // Forced tier adjust form state
-  const [selectedTier, setSelectedTier] = useState<
-    "Bronze" | "Silver" | "Gold" | "Platinum" | "VIP"
-  >("Bronze");
-  useEffect(() => {
-    if (profile) {
-      setSelectedTier(profile.loyaltyTier);
-    }
-  }, [profile]);
+  // Tier-change and direct-message state was removed with those actions (audit 2026-11-20).
 
-  // Direct Message Modal State
-  const [showMessageModal, setShowMessageModal] = useState(false);
-  const [msgGateway, setMsgGateway] = useState<"SMS" | "Push" | "WhatsApp" | "Email">("WhatsApp");
-  const [msgTitle, setMsgTitle] = useState("");
-  const [msgBody, setMsgBody] = useState("");
-
-  // Coupon issue form state
-  const [couponCode, setCouponCode] = useState("");
-  const [couponDiscount, setCouponDiscount] = useState("₹150 FLAT OFF");
-  const [couponSource, setCouponSource] = useState("Campaign");
+  // Coupon issue form state. The coupon is created SERVER-SIDE by POST /coupons/issue and scoped to this customer; the old form collected a free-text discount string nothing parsed.
+  const [couponCode, setCouponCode] = useState('');
+  const [couponType, setCouponType] = useState<'percent' | 'flat'>('flat');
+  const [couponValue, setCouponValue] = useState(150);
+  const [couponIssuing, setCouponIssuing] = useState(false);
 
   // Block Dialog State
   const [showBlockDialog, setShowBlockDialog] = useState(false);
@@ -181,39 +167,46 @@ export const AdminCustomerProfilePage: React.FC = () => {
     setPointsAmount(100);
   };
 
-  const handleForcedTierSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    customerStorage.adjustLoyaltyTier(profile.id, selectedTier, actorLabel);
-  };
-
-  const handleIssueCouponSubmit = (e: React.FormEvent) => {
+  /**
+   * Issues a REAL coupon: POST /coupons/issue stores a coupon document scoped
+   * to this customer (plus a `coupon_issues` audit row), so the code works at
+   * their checkout and only from their account. This replaces the in-memory
+   * "Issued promotional coupon" toast that wrote nothing (audit §1.7).
+   */
+  const handleIssueCouponSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!couponCode.trim()) {
       toast.error("Coupon code cannot be empty.");
       return;
     }
-    customerStorage.issueCoupon(
-      profile.id,
-      { code: couponCode, discount: couponDiscount, source: couponSource },
-      actorLabel,
-    );
-    setCouponCode("");
-  };
-
-  const handleSendMessageSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!msgTitle.trim() || !msgBody.trim()) {
-      toast.error("Subject and body fields are required.");
+    if (!Number.isFinite(couponValue) || couponValue <= 0) {
+      toast.error("Enter a discount value greater than zero.");
       return;
     }
-    customerStorage.sendDirectNotification(
-      profile.id,
-      { type: msgGateway, title: msgTitle, body: msgBody },
-      actorLabel,
-    );
-    setShowMessageModal(false);
-    setMsgTitle("");
-    setMsgBody("");
+    if (couponType === "percent" && couponValue > 100) {
+      toast.error("A percentage coupon cannot exceed 100%.");
+      return;
+    }
+    setCouponIssuing(true);
+    try {
+      const result = await partnerFunctionsApi.issueCouponToCustomer({
+        code: couponCode.trim().toUpperCase(),
+        customerId: profile.id,
+        discountType: couponType,
+        value: couponValue,
+        perCustomerLimit: 1,
+      });
+      toast.success(
+        `Coupon ${result.issued.code} issued to ${profile.fullName} — it is now usable at their checkout.`,
+      );
+      setCouponCode("");
+    } catch (err: any) {
+      // The server's own message (code already used, invalid value, role not
+      // allowed) is the useful one — never a generic success.
+      toast.error(err?.message || "Could not issue the coupon. Please try again.");
+    } finally {
+      setCouponIssuing(false);
+    }
   };
 
   const handleToggleBlock = () => {
@@ -241,10 +234,12 @@ export const AdminCustomerProfilePage: React.FC = () => {
               <span>Back to Directory</span>
             </AdminButton>
           </Link>
-          <AdminButton variant="outline" size="sm" onClick={() => setShowMessageModal(true)}>
-            <Send size={13} className="mr-1.5 text-[#FF6600]" />
-            <span>Send Message</span>
-          </AdminButton>
+          {/* "Send Message" was REMOVED (audit 2026-11-20 §1.7). It toasted
+              "Direct message pushed over WhatsApp gateway" and delivered
+              nothing: there is no SMS, WhatsApp or email provider in the
+              backend, and the FCM key is unset. No button beats a false
+              delivery claim. The honest replacement is a real channel, which
+              does not exist yet. */}
           <AdminButton
             variant={profile.status === "Active" ? "outline" : "primary"}
             size="sm"
@@ -650,40 +645,10 @@ export const AdminCustomerProfilePage: React.FC = () => {
                     </AdminButton>
                   </form>
 
-                  {/* Tier Override */}
-                  <form onSubmit={handleForcedTierSubmit} className="space-y-3.5">
-                    <h4 className="text-[10px] font-black font-mono text-gray-900 uppercase dark:text-white border-l-2 border-l-[#0E4825] pl-2">
-                      Tier Level Overrides
-                    </h4>
-                    <div>
-                      <label className="text-[8px] font-bold text-gray-400 uppercase tracking-widest font-mono">
-                        Loyalty Tier Rank
-                      </label>
-                      <select
-                        value={selectedTier}
-                        onChange={(e) => setSelectedTier(e.target.value as any)}
-                        className="w-full bg-gray-50 border border-gray-150 p-1.5 rounded-lg focus:outline-none text-xs font-bold dark:bg-gray-900 dark:border-gray-800 dark:text-white"
-                      >
-                        <option value="Bronze">Bronze (Baseline)</option>
-                        <option value="Silver">Silver (500 pts)</option>
-                        <option value="Gold">Gold (1500 pts)</option>
-                        <option value="Platinum">Platinum (3000 pts)</option>
-                        <option value="VIP">VIP Elite (5000 pts)</option>
-                      </select>
-                    </div>
-                    <span className="block text-[9px] text-gray-400 font-medium">
-                      Forcing manual tier upgrades will override current baseline point thresholds
-                      and instantly generate high-cashback codes for customer account.
-                    </span>
-                    <AdminButton
-                      type="submit"
-                      variant="outline"
-                      size="sm"
-                      className="w-full mt-1.5"
-                    >
-                      Forcibly Set Tier
-                    </AdminButton>
-                  </form>
+                {/* Loyalty tier CHANGES were removed (audit 2026-11-20 §1.7):
+                    "Forcibly Set Tier" toasted "Successfully updated customer
+                    loyalty tier" and wrote nothing outside the browser. Loyalty
+                    is not part of the launch, so there is no tier to force. */}
                 </div>
 
                 {/* Loyalty History table */}
@@ -982,72 +947,74 @@ export const AdminCustomerProfilePage: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Coupon issuer */}
+
+                  {/* Coupon issuer — REAL (audit 2026-11-20 §1.7). The server
+                      creates the coupon scoped to this customer. */}
                   <form
                     onSubmit={handleIssueCouponSubmit}
                     className="space-y-4 border-l border-gray-50 dark:border-gray-800/40 pl-6"
                   >
                     <h3 className="text-[10px] font-black font-mono text-gray-900 uppercase dark:text-white flex items-center gap-1">
                       <Gift size={12} className="text-[#FF6600]" />
-                      <span>Issue Custom Coupon Promo</span>
+                      <span>Issue a coupon to this customer</span>
                     </h3>
                     <p className="text-[10px] text-gray-400 leading-normal">
-                      Manually issue direct discount promotions applicable onto checkout carts
-                      instantly.
+                      Creates a real coupon that only this account can use. It is stored on the
+                      server and validated at their checkout.
                     </p>
 
                     <div className="space-y-1">
                       <label className="text-[8px] font-bold text-gray-400 uppercase tracking-widest font-mono">
-                        Unique Promo Code
+                        Coupon code
                       </label>
                       <input
                         type="text"
                         required
                         placeholder="E.g. SORRY200, ARJUNVIP"
                         value={couponCode}
-                        onChange={(e) => setCouponCode(e.target.value)}
+                        onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
                         className="w-full bg-gray-50 border border-gray-150 p-2 rounded-lg font-mono font-bold focus:outline-none dark:bg-gray-900 dark:border-gray-800 dark:text-white uppercase"
                       />
                     </div>
 
-                    <div className="space-y-1">
-                      <label className="text-[8px] font-bold text-gray-400 uppercase tracking-widest font-mono">
-                        Discount Structure Value
-                      </label>
-                      <select
-                        value={couponDiscount}
-                        onChange={(e) => setCouponDiscount(e.target.value)}
-                        className="w-full bg-gray-50 border border-gray-150 p-2 rounded-lg focus:outline-none text-xs font-bold dark:bg-gray-900 dark:border-gray-800 dark:text-white"
-                      >
-                        <option value="₹150 FLAT OFF">₹150 Flat Off (Cart min ₹350)</option>
-                        <option value="20% FLAT OFF">20% Flat Discount (Max cap ₹100)</option>
-                        <option value="100% OFF (FREE MEAL)">
-                          100% Coupon (Free burger reward)
-                        </option>
-                        <option value="FREE SHIPPING">Free Shipping (Fulfillment rebate)</option>
-                      </select>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="text-[8px] font-bold text-gray-400 uppercase tracking-widest font-mono">
+                          Type
+                        </label>
+                        <select
+                          value={couponType}
+                          onChange={(e) => setCouponType(e.target.value as "percent" | "flat")}
+                          className="w-full bg-gray-50 border border-gray-150 p-2 rounded-lg focus:outline-none text-xs font-bold dark:bg-gray-900 dark:border-gray-800 dark:text-white"
+                        >
+                          <option value="flat">Flat amount</option>
+                          <option value="percent">Percent</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[8px] font-bold text-gray-400 uppercase tracking-widest font-mono">
+                          {couponType === "percent" ? "Percent off" : "Rupees off"}
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={couponType === "percent" ? 100 : 100000}
+                          required
+                          value={couponValue}
+                          onChange={(e) => setCouponValue(parseInt(e.target.value) || 0)}
+                          className="w-full bg-gray-50 border border-gray-150 p-2 rounded-lg focus:outline-none text-xs font-bold dark:bg-gray-900 dark:border-gray-800 dark:text-white"
+                        />
+                      </div>
                     </div>
 
-                    <div className="space-y-1">
-                      <label className="text-[8px] font-bold text-gray-400 uppercase tracking-widest font-mono">
-                        Distribution source tagging
-                      </label>
-                      <select
-                        value={couponSource}
-                        onChange={(e) => setCouponSource(e.target.value)}
-                        className="w-full bg-gray-50 border border-gray-150 p-2 rounded-lg focus:outline-none text-xs font-bold dark:bg-gray-900 dark:border-gray-800 dark:text-white"
-                      >
-                        <option value="Service Recovery">
-                          Service Recovery (Manual intervention)
-                        </option>
-                        <option value="Loyalty Reward">Loyalty reward override</option>
-                        <option value="Birthday Gift">Birthday hospitality offering</option>
-                        <option value="Referral reward">Referral campaign incentive</option>
-                      </select>
-                    </div>
-
-                    <AdminButton type="submit" variant="primary" size="sm" className="w-full">
-                      Issue Coupon Code
+                    <AdminButton
+                      type="submit"
+                      variant="primary"
+                      size="sm"
+                      className="w-full"
+                      disabled={couponIssuing}
+                    >
+                      {couponIssuing ? "Issuing…" : "Issue coupon code"}
                     </AdminButton>
                   </form>
                 </div>
@@ -1231,90 +1198,7 @@ export const AdminCustomerProfilePage: React.FC = () => {
         </div>
       </div>
 
-      {/* Message Compose Modal */}
-      <AnimatePresence>
-        {showMessageModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-[2px]">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white dark:bg-[#1A1A1A] w-full max-w-sm rounded-[20px] p-6 shadow-2xl border border-gray-100 dark:border-gray-800"
-            >
-              <div className="flex items-center justify-between border-b border-gray-50 dark:border-gray-800/60 pb-3 mb-4">
-                <div className="space-y-0.5">
-                  <h3 className="text-xs font-black text-gray-900 dark:text-white uppercase tracking-tight">
-                    Direct Client Notification
-                  </h3>
-                  <p className="text-[10px] text-gray-400">
-                    Trigger message push to {profile.fullName}
-                  </p>
-                </div>
-              </div>
-
-              <form onSubmit={handleSendMessageSubmit} className="space-y-4">
-                <div className="grid grid-cols-4 gap-1 bg-gray-50 dark:bg-gray-900 p-0.5 rounded-lg">
-                  {(["SMS", "Push", "WhatsApp", "Email"] as const).map((gw) => (
-                    <button
-                      key={gw}
-                      type="button"
-                      onClick={() => setMsgGateway(gw)}
-                      className={`py-1 rounded text-[8.5px] font-black uppercase font-mono ${
-                        msgGateway === gw
-                          ? "bg-[#0E4825] text-white"
-                          : "text-gray-400 hover:text-gray-900"
-                      }`}
-                    >
-                      {gw}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[8px] font-bold text-gray-400 uppercase tracking-widest font-mono">
-                    Message Heading
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="E.g. Table reservation confirmation, VIP offer update"
-                    value={msgTitle}
-                    onChange={(e) => setMsgTitle(e.target.value)}
-                    className="w-full bg-gray-50 border border-gray-150 p-2 rounded-lg focus:outline-none text-xs font-bold dark:bg-gray-900 dark:border-gray-800 dark:text-white"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[8px] font-bold text-gray-400 uppercase tracking-widest font-mono">
-                    Body Content
-                  </label>
-                  <textarea
-                    required
-                    rows={4}
-                    placeholder="Hi there! Your loyalty tier Gold has been adjusted manually by admin..."
-                    value={msgBody}
-                    onChange={(e) => setMsgBody(e.target.value)}
-                    className="w-full bg-gray-50 border border-gray-150 p-2 rounded-lg focus:outline-none text-xs font-semibold placeholder-gray-400 dark:bg-gray-900 dark:border-gray-800 dark:text-white leading-relaxed"
-                  />
-                </div>
-
-                <div className="flex gap-2 pt-3 border-t border-gray-50 dark:border-gray-800/60">
-                  <button
-                    type="button"
-                    onClick={() => setShowMessageModal(false)}
-                    className="flex-1 py-2 text-center font-bold border border-gray-100 dark:border-gray-850 rounded-xl hover:bg-gray-50 text-gray-400"
-                  >
-                    Cancel
-                  </button>
-                  <AdminButton type="submit" variant="primary" className="flex-1 py-2 rounded-xl">
-                    Dispatch Msg
-                  </AdminButton>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {/* The Direct Client Notification modal was REMOVED (audit 2026-11-20 1.7). It toasted a gateway delivery for a message no provider ever sent. */}
 
       {/* Account Block confirmation dialog */}
       {showBlockDialog && (

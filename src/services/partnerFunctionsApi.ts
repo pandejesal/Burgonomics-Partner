@@ -410,7 +410,138 @@ async function apiRequest<T>(
   throw lastError ?? new Error('Request failed after retries');
 }
 
+export interface PartnerCoupon {
+  code: string;
+  title: string;
+  active: boolean;
+  discountType: 'percent' | 'flat';
+  value: number;
+  maxDiscount: number | null;
+  minOrder: number;
+  validFromMs: number | null;
+  validToMs: number | null;
+  perCustomerLimit: number | null;
+  totalCap: number | null;
+  branchScope: 'all' | string[];
+  customerScope: string | null;
+  committed: number;
+  reserved: number;
+  totalUsed: number;
+}
+
+export interface PartnerCouponUsage {
+  code: string;
+  committed: number;
+  reserved: number;
+  rows: Array<{
+    orderId: string;
+    customerId: string;
+    branchId: string | null;
+    discount: number;
+    status: string;
+    reservedAtMs: number;
+    committedAtMs?: number;
+    releasedAtMs?: number;
+    releaseReason?: string;
+  }>;
+}
+
+export interface CreateCouponRequest {
+  code: string;
+  title?: string;
+  discountType: 'percent' | 'flat';
+  value: number;
+  maxDiscount?: number | null;
+  minOrder?: number;
+  validFromMs?: number | null;
+  validToMs?: number | null;
+  perCustomerLimit?: number | null;
+  totalCap?: number | null;
+  branchScope?: 'all' | string[];
+  active?: boolean;
+}
+
+export interface IssueCouponRequest {
+  code: string;
+  customerId: string;
+  title?: string;
+  discountType: 'percent' | 'flat';
+  value: number;
+  maxDiscount?: number | null;
+  minOrder?: number;
+  validToMs?: number | null;
+  perCustomerLimit?: number;
+}
+
+/** GET with the same auth/attestation headers as `apiRequest`. */
+async function apiGet<T>(endpoint: string): Promise<T> {
+  const baseUrl = getFunctionsBaseUrl();
+  const targetUrl = `${baseUrl}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  try {
+    const { getAppCheckToken } = await import('@/config/firebase');
+    const appCheckToken = await getAppCheckToken();
+    if (appCheckToken) headers['X-Firebase-AppCheck'] = appCheckToken;
+  } catch {
+    // Attestation unavailable — server runs monitor mode until enforced.
+  }
+  const currentUser = auth.currentUser;
+  if (currentUser) {
+    try {
+      const token = await currentUser.getIdToken();
+      if (token) headers.Authorization = `Bearer ${token}`;
+    } catch {
+      // A missing token surfaces as a 401 from the server, not a silent success.
+    }
+  }
+  const res = await fetch(targetUrl, { method: 'GET', headers });
+  const text = await res.text().catch(() => '');
+  let payload: any = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = null;
+    }
+  }
+  if (!res.ok) {
+    const message =
+      payload?.error || `Request failed (${res.status}). Please try again.`;
+    const err: any = new Error(message);
+    err.status = res.status;
+    err.code = payload?.code;
+    throw err;
+  }
+  return payload as T;
+}
+
 export const partnerFunctionsApi = {
+  /**
+   * Coupons: the server-side authority (audit 2026-11-20 §1.7). The Partner app
+   * never computes a discount and never writes a coupon document directly —
+   * Firestore rules deny client writes to `coupons` and `coupon_redemptions`.
+   */
+  async listCoupons(): Promise<{ coupons: PartnerCoupon[] }> {
+    return apiGet<{ coupons: PartnerCoupon[] }>('/coupons/list');
+  },
+  async couponUsage(code: string): Promise<PartnerCouponUsage> {
+    return apiGet<PartnerCouponUsage>(`/coupons/usage?code=${encodeURIComponent(code)}`);
+  },
+  async createCoupon(input: CreateCouponRequest): Promise<{ coupon: PartnerCoupon }> {
+    return apiRequest<{ coupon: PartnerCoupon }>('/coupons/create', input);
+  },
+  async setCouponActive(code: string, active: boolean): Promise<{ code: string; active: boolean }> {
+    return apiRequest<{ code: string; active: boolean }>('/coupons/active', { code, active });
+  },
+  async issueCouponToCustomer(
+    input: IssueCouponRequest,
+  ): Promise<{ issued: { code: string; customerId: string; title: string } }> {
+    return apiRequest<{ issued: { code: string; customerId: string; title: string } }>(
+      '/coupons/issue',
+      input,
+    );
+  },
+
   async createWalkInOrder(request: CreateWalkInRequest): Promise<WalkInReceipt> {
     const { requestId, branchId, orderType, items, expectedTotalPaise, tableNumber, notes, customerName, customerPhone } = request;
     return apiRequest('/orders/createWalkIn', {
