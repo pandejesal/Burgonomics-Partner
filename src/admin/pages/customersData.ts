@@ -290,107 +290,17 @@ class CustomerDataStorage {
     return true;
   }
 
-  adjustLoyaltyTier(
-    id: string,
-    tier: "Bronze" | "Silver" | "Gold" | "Platinum" | "VIP",
-    operator: string,
-  ) {
-    const cust = this.customers.find((c) => c.id === id);
-    if (!cust) return false;
-
-    const oldTier = cust.loyaltyTier;
-    cust.loyaltyTier = tier;
-
-    // Auto-align lifetime points to lower-bound if forced upgrade
-    const tierBaselines = { Bronze: 0, Silver: 500, Gold: 1500, Platinum: 3000, VIP: 5000 };
-    if (cust.loyalty.lifetimePoints < tierBaselines[tier]) {
-      cust.loyalty.lifetimePoints = tierBaselines[tier];
-    }
-    cust.loyalty.tierProgress = 100; // Stabilize progression metric
-
-    cust.loyalty.history.unshift({
-      id: `L-${Date.now().toString().slice(-4)}`,
-      date: new Date().toISOString().slice(0, 10),
-      action: "TIER_ADJUST",
-      points: 0,
-      description: `Manual override of loyalty tier from ${oldTier} to ${tier}`,
-      operator,
-    });
-
-    cust.auditLogs.unshift({
-      id: `AUD-${Date.now().toString().slice(-4)}`,
-      date: new Date().toISOString().slice(0, 19).replace("T", " "),
-      action: `Forced loyalty tier upgrade/adjustment to ${tier}`,
-      operator,
-      ipAddress: "local",
-      device: "Admin Panel / Chrome",
-    });
-
-    toast.success(`Successfully updated customer loyalty tier to ${tier}.`);
-    this.notify();
-    return true;
-  }
-
-  issueCoupon(
-    id: string,
-    coupon: { code: string; discount: string; source: string },
-    operator: string,
-  ) {
-    const cust = this.customers.find((c) => c.id === id);
-    if (!cust) return false;
-
-    cust.coupons.unshift({
-      code: coupon.code.toUpperCase(),
-      discount: coupon.discount,
-      status: "Available",
-      source: coupon.source,
-    });
-
-    cust.auditLogs.unshift({
-      id: `AUD-${Date.now().toString().slice(-4)}`,
-      date: new Date().toISOString().slice(0, 19).replace("T", " "),
-      action: `Issued Coupon: ${coupon.code} (${coupon.discount})`,
-      operator,
-      ipAddress: "local",
-      device: "Admin Panel / Chrome",
-    });
-
-    toast.success(`Issued promotional coupon ${coupon.code} to customer.`);
-    this.notify();
-    return true;
-  }
-
-  sendDirectNotification(
-    id: string,
-    notification: { type: "SMS" | "Push" | "WhatsApp" | "Email"; title: string; body: string },
-    operator: string,
-  ) {
-    const cust = this.customers.find((c) => c.id === id);
-    if (!cust) return false;
-
-    const notifId = `N-${Date.now().toString().slice(-4)}`;
-    cust.notifications.unshift({
-      id: notifId,
-      type: notification.type,
-      title: notification.title,
-      body: notification.body,
-      sentAt: new Date().toISOString().slice(0, 19).replace("T", " "),
-      status: "Delivered",
-    });
-
-    cust.auditLogs.unshift({
-      id: `AUD-${Date.now().toString().slice(-4)}`,
-      date: new Date().toISOString().slice(0, 19).replace("T", " "),
-      action: `Sent custom direct notification (${notification.type}): ${notification.title}`,
-      operator,
-      ipAddress: "local",
-      device: "Admin Panel / Chrome",
-    });
-
-    toast.success(`Direct message pushed over ${notification.type} gateway.`);
-    this.notify();
-    return true;
-  }
+  // REMOVED (audit 2026-11-20 §1.7): `adjustLoyaltyTier`, `issueCoupon` and
+  // `sendDirectNotification` used to push into the in-memory array and toast a
+  // confirmation — "Issued promotional coupon X", "Successfully updated customer
+  // loyalty tier", "Direct message pushed over SMS gateway". None of those
+  // writes left the browser, so staff were told work had happened that did not.
+  //
+  //   * issuing a coupon is now real: AdminCustomerProfilePage calls
+  //     POST /coupons/issue, which stores a coupon scoped to that customer;
+  //   * tier changes are gone (loyalty is not part of the launch);
+  //   * "send message" is gone: there is no SMS/WhatsApp/email provider in the
+  //     backend, so the app offers no button instead of a false delivery claim.
 
   createCustomSegment(segment: SavedSegment) {
     this.segments.push(segment);
