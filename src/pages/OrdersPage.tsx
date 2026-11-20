@@ -214,7 +214,14 @@ export function OrdersPage() {
           isOpen={isCreateModalOpen}
           onClose={() => setIsCreateModalOpen(false)}
           onOrderCreated={(receipt) => {
-            toast.success(`Order #${receipt.orderId} created. Payment pending.`);
+            // Name the REAL outlet the server booked the sale to. An older
+            // backend may omit it; the id is still honest, a guess is not.
+            const where = receipt.branchName || receipt.branchId;
+            toast.success(
+              where
+                ? `Order #${receipt.orderId} created for ${where}. Payment pending.`
+                : `Order #${receipt.orderId} created. Payment pending.`,
+            );
           }}
         />
       )}

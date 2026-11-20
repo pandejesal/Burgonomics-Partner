@@ -279,6 +279,10 @@ export function billableOrders<T extends OrderRevenueShape>(orders: readonly T[]
  */
 export function orderPaymentChannel(order: OrderRevenueShape): PaymentStream {
   if (order?.paymentChannel === 'razorpay') return 'razorpay';
+  // Server-stamped cash marker (COD created by `orders/createCashOrder`,
+  // 2026-11-20). Read BEFORE the tender fallbacks so a server cash order can
+  // never be misread as online or unpaid.
+  if (order?.paymentChannel === 'cash') return 'cash';
   if (order?.customerId === WALK_IN_CUSTOMER_ID) return 'cash';
   if (order?.paymentMethod === 'cod') return 'cash';
   return 'unpaid';
