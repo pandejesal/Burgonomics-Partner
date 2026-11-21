@@ -1,11 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { X, CheckCircle2, Coins, RefreshCw, MessageSquare, AlertCircle, ShieldCheck } from 'lucide-react';
+import { X, CheckCircle2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Ticket } from '@/types';
 
+/**
+ * Loyalty retirement (owner decision 2026-11-20: loyalty is off).
+ * The `CREDIT_GRILL_COINS` action was the modal's default and posted the
+ * retired coin-credit action to `POST /tickets/resolve`, which now refuses it
+ * with `LOYALTY_RETIRED` (409). The action code, its coin picker and its
+ * payload field are gone rather than hidden, so no caller can offer a path
+ * whose only outcome is a refusal. Money still moves only through
+ * `REFUND_ORDER` (server refund), and `REMAKE_BURGER` / `EXPLAINED_TO_CUSTOMER`
+ * stay as recorded non-money resolutions.
+ */
 export type ResolutionActionCode =
   | 'REFUND_ORDER'
-  | 'CREDIT_GRILL_COINS'
   | 'REMAKE_BURGER'
   | 'EXPLAINED_TO_CUSTOMER';
 
@@ -13,7 +22,6 @@ export interface TicketResolutionPayload {
   ticketId: string;
   action: ResolutionActionCode;
   notes: string;
-  grillCoinsAmount?: number;
   refundAmount?: number;
   isInternalOnly?: boolean;
 }
@@ -26,12 +34,6 @@ interface TicketResolutionModalProps {
 }
 
 const ACTION_OPTIONS: { code: ResolutionActionCode; label: string; icon: string; description: string }[] = [
-  {
-    code: 'CREDIT_GRILL_COINS',
-    label: 'Apology Grill Coins Credit',
-    icon: '🪙',
-    description: 'Instantly reward customer loyalty wallet with apology points',
-  },
   {
     code: 'REFUND_ORDER',
     label: 'Order Refund via Razorpay',
@@ -58,9 +60,8 @@ export function TicketResolutionModal({
   onClose,
   onConfirmResolution,
 }: TicketResolutionModalProps) {
-  const [action, setAction] = useState<ResolutionActionCode>('CREDIT_GRILL_COINS');
+  const [action, setAction] = useState<ResolutionActionCode>('REFUND_ORDER');
   const [notes, setNotes] = useState('');
-  const [coins, setCoins] = useState<number>(100);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -89,7 +90,6 @@ export function TicketResolutionModal({
         ticketId: ticket.id,
         action,
         notes: notes.trim(),
-        grillCoinsAmount: action === 'CREDIT_GRILL_COINS' ? coins : undefined,
       });
       toast.success(`Ticket #${shortCode} successfully resolved`);
       onClose();
@@ -157,35 +157,6 @@ export function TicketResolutionModal({
             </div>
           </div>
 
-          {/* Grill Coins Options if selected */}
-          {action === 'CREDIT_GRILL_COINS' && (
-            <div className="p-3.5 rounded-2xl bg-neutral-950 border border-neutral-800 space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold uppercase text-amber-400 flex items-center gap-1">
-                  <Coins className="w-3.5 h-3.5" />
-                  <span>Apology Grill Coins to Credit</span>
-                </label>
-                <span className="font-mono font-black text-sm text-white">{coins} 🪙</span>
-              </div>
-              <div className="flex items-center gap-2">
-                {[50, 100, 150, 200, 500].map((val) => (
-                  <button
-                    key={val}
-                    type="button"
-                    onClick={() => setCoins(val)}
-                    className={`px-3 py-1 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
-                      coins === val
-                        ? 'bg-amber-950 border-amber-500 text-amber-300'
-                        : 'bg-neutral-900 border-neutral-700 text-neutral-300 hover:text-white'
-                    }`}
-                  >
-                    +{val}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* Resolution Notes */}
           <div className="space-y-1.5">
             <label className="block text-xs font-bold uppercase text-neutral-400">
@@ -195,7 +166,7 @@ export function TicketResolutionModal({
               rows={3}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. Apologized for the delay and credited 100 Grill Coins to wallet. Customer satisfied."
+              placeholder="e.g. Apologized for the delay and issued a refund. Customer satisfied."
               className="w-full px-3 py-2 rounded-2xl bg-neutral-900 border border-neutral-700 text-white text-xs placeholder-neutral-500 focus:outline-none focus:border-[#FF6600]"
               required
             />

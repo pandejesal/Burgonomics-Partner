@@ -7,7 +7,6 @@ import {
   Users,
   TrendingUp,
   MapPin,
-  Award,
   DollarSign,
   Calendar,
   Trash2,
@@ -44,7 +43,6 @@ export const AdminSegmentsPage: React.FC = () => {
   const [filterMinSpend, setFilterMinSpend] = useState<number | "">("");
   const [filterMinOrders, setFilterMinOrders] = useState<number | "">("");
   const [filterLastOrderDays, setFilterLastOrderDays] = useState<number | "">("");
-  const [filterTier, setFilterTier] = useState("");
 
   // Options
   const uniqueCities = useMemo(() => {
@@ -57,11 +55,10 @@ export const AdminSegmentsPage: React.FC = () => {
 
     segments.forEach((seg) => {
       const matchCount = customers.filter((c) => {
-        const { city, minSpend, minOrders, lastOrderDays, loyaltyTier } = seg.filters;
+        const { city, minSpend, minOrders, lastOrderDays } = seg.filters;
         if (city && c.city !== city) return false;
         if (minSpend && c.totalSpent < minSpend) return false;
         if (minOrders && c.ordersCount < minOrders) return false;
-        if (loyaltyTier && c.loyaltyTier !== loyaltyTier) return false;
 
         if (lastOrderDays) {
           const lastDate = new Date(c.lastOrderDate);
@@ -85,7 +82,6 @@ export const AdminSegmentsPage: React.FC = () => {
       if (filterCity && c.city !== filterCity) return false;
       if (filterMinSpend !== "" && c.totalSpent < (filterMinSpend as number)) return false;
       if (filterMinOrders !== "" && c.ordersCount < (filterMinOrders as number)) return false;
-      if (filterTier && c.loyaltyTier !== filterTier) return false;
 
       if (filterLastOrderDays !== "") {
         const lastDate = new Date(c.lastOrderDate);
@@ -95,7 +91,7 @@ export const AdminSegmentsPage: React.FC = () => {
       }
       return true;
     }).length;
-  }, [customers, filterCity, filterMinSpend, filterMinOrders, filterLastOrderDays, filterTier]);
+  }, [customers, filterCity, filterMinSpend, filterMinOrders, filterLastOrderDays]);
 
   const handleSaveSegment = (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,7 +109,6 @@ export const AdminSegmentsPage: React.FC = () => {
         ...(filterMinSpend !== "" && { minSpend: filterMinSpend as number }),
         ...(filterMinOrders !== "" && { minOrders: filterMinOrders as number }),
         ...(filterLastOrderDays !== "" && { lastOrderDays: filterLastOrderDays as number }),
-        ...(filterTier && { loyaltyTier: filterTier }),
       },
       isCustom: true,
     };
@@ -127,7 +122,6 @@ export const AdminSegmentsPage: React.FC = () => {
     setFilterMinSpend("");
     setFilterMinOrders("");
     setFilterLastOrderDays("");
-    setFilterTier("");
   };
 
   const handleDeleteSeg = (id: string) => {
@@ -209,11 +203,6 @@ export const AdminSegmentsPage: React.FC = () => {
                         {seg.filters.minOrders && (
                           <span className="bg-gray-100 dark:bg-gray-900 px-2 py-0.5 rounded">
                             Orders ≥ {seg.filters.minOrders}
-                          </span>
-                        )}
-                        {seg.filters.loyaltyTier && (
-                          <span className="bg-gray-100 dark:bg-gray-900 px-2 py-0.5 rounded">
-                            Tier = {seg.filters.loyaltyTier}
                           </span>
                         )}
                         {seg.filters.lastOrderDays && (
@@ -307,7 +296,7 @@ export const AdminSegmentsPage: React.FC = () => {
                   required
                   value={segmentDesc}
                   onChange={(e) => setSegmentDesc(e.target.value)}
-                  placeholder="E.g. VIP profiles from Ahmedabad with 10+ orders and ₹5,000 spend..."
+                  placeholder="E.g. Returning profiles from Ahmedabad with 10+ orders and ₹5,000 spend..."
                   className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-150 dark:border-gray-800 rounded-xl py-2 px-3 focus:outline-none placeholder-gray-400 font-semibold"
                 />
               </div>
@@ -319,7 +308,7 @@ export const AdminSegmentsPage: React.FC = () => {
                 </span>
 
                 {/* City */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3">
                   <div>
                     <label className="block text-[8px] font-bold text-gray-400 uppercase mb-1 font-mono">
                       Location City
@@ -335,24 +324,6 @@ export const AdminSegmentsPage: React.FC = () => {
                           {city}
                         </option>
                       ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-[8px] font-bold text-gray-400 uppercase mb-1 font-mono">
-                      Loyalty Tier Rank
-                    </label>
-                    <select
-                      value={filterTier}
-                      onChange={(e) => setFilterTier(e.target.value)}
-                      className="w-full bg-white dark:bg-gray-900 border border-gray-150 dark:border-gray-800 rounded-lg py-1 px-2 text-[11px] font-semibold"
-                    >
-                      <option value="">Any Tier</option>
-                      <option value="Bronze">Bronze</option>
-                      <option value="Silver">Silver</option>
-                      <option value="Gold">Gold</option>
-                      <option value="Platinum">Platinum</option>
-                      <option value="VIP">VIP</option>
                     </select>
                   </div>
                 </div>

@@ -4,6 +4,23 @@ import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+/**
+ * CHANGED FOR F4 (staging 2026-11-21, Test 7).
+ *
+ * This file used to pin the walk-in modal's SEPARATELY FETCHED packaging fee:
+ * it mocked `/checkout/fees` returning `{packagingFee: 20}` and asserted the
+ * modal added that to its own food+GST arithmetic (₹298 + ₹20 = ₹318) while
+ * never showing the hard-coded ₹15/₹313.
+ *
+ * That mechanism is exactly what broke staging: the till computed the bill and
+ * confirmed its own number, so HL Road's ₹15 packaging went missing from the
+ * preview while the booking charged it. There is now ONE server quote
+ * (`/orders/walkInQuote`), priced by the same builder the create route uses.
+ * The assertions below therefore pin the SERVER bill: the modal must not fetch
+ * a separate packaging fee, must not add up money itself, must show the quote's
+ * total (packaging included), must block while the quote is unknown, and must
+ * surface a quote failure with a retry instead of inventing a number.
+ */
 const user = { id: 'operator', role: 'branch_staff', branchIds: ['branch_1'] };
 vi.mock('@/stores/authStore', () => ({ useAuthStore: Object.assign(() => ({ user }), { getState: () => ({ user }), subscribe: vi.fn(() => () => {}) }) }));
 vi.mock('@/stores/appStore', () => ({ useAppStore: Object.assign(() => ({ selectedBranchId: 'branch_1' }), { getState: () => ({ selectedBranchId: 'branch_1' }), subscribe: vi.fn(() => () => {}) }) }));
@@ -19,14 +36,33 @@ vi.mock('firebase/firestore', () => ({
 }));
 import { ManualOrderCreateModal } from '@/features/orders/components/ManualOrderCreateModal';
 
-describe('server-owned walk-in packaging fee', () => {
+const json = (value: unknown, status = 200) =>
+  new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
+
+/** The SERVER's bill for burger(199) + fries(99) at a branch charging ₹20 packaging. */
+const serverQuote = (packagingFee: number) => {
+  const foodSubtotal = 298;
+  const grandTotal = foodSubtotal + packagingFee;
+  const totalAmountPaise = grandTotal * 100;
+  return {
+    branchId: 'branch_1',
+    branchName: 'Burgonomics - HL Road',
+    totals: {
+      foodSubtotal, packagingFee, deliveryFee: 0, gst: 14.19, cgst: 7.1, sgst: 7.09,
+      discount: 0, loyaltyDiscount: 0, grandTotal, pricingDegraded: false,
+      split: { courierFeePaise: 0, branchTransferPaise: totalAmountPaise, totalAmountPaise },
+    },
+  };
+};
+
+describe('server-owned walk-in bill (F4)', () => {
   let root: Root;
   let container: HTMLDivElement;
   let fetchMock: ReturnType<typeof vi.fn>;
   beforeEach(() => {
     vi.stubEnv('VITE_FUNCTIONS_API_URL', 'https://example.invalid/api');
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-    fetchMock = vi.fn(async () => new Response(JSON.stringify({ packagingFee: 20 }), { status: 200 }));
+    fetchMock = vi.fn(async () => json(serverQuote(20)));
     vi.stubGlobal('fetch', fetchMock);
     container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   });
@@ -42,33 +78,47 @@ describe('server-owned walk-in packaging fee', () => {
   }
   const submit = () => container.querySelector<HTMLButtonElement>('button[type="submit"]')!;
 
-  it('uses the server fee instead of a hard-coded 15', async () => {
+  it('shows the server total, packaging included, instead of its own arithmetic', async () => {
     await render();
-    await vi.waitFor(() => expect(container.textContent).toContain('₹318'));
-    expect(container.textContent).toContain('₹20');
+    await vi.waitFor(() => expect(container.textContent).toContain('Total ₹318'));
+    expect(container.textContent).toContain('Store Packaging ₹20');
+    expect(container.textContent).toContain('Subtotal ₹298');
+    // The old hard-coded ₹15 bill (₹313) must never appear.
     expect(container.textContent).not.toContain('₹313');
+    // A single money call: the quote. No separate packaging-fee endpoint.
+    const urls = fetchMock.mock.calls.map(call => String(call[0]));
+    expect(urls.every(url => url.includes('/orders/walkInQuote'))).toBe(true);
+    expect(urls.some(url => url.includes('/checkout/fees'))).toBe(false);
+    expect(submit().disabled).toBe(false);
   });
-  it('disables create while the fee loads and does not guess a fee', async () => {
+
+  it('disables create while the server bill is unknown and does not guess a total', async () => {
     fetchMock.mockImplementation(() => new Promise<Response>(() => {}));
     await render();
-    expect(container.textContent).toContain('Loading from server');
+    expect(container.textContent).toContain('pricing on the server');
     expect(container.textContent).not.toContain('₹318');
     expect(container.textContent).not.toContain('₹313');
     expect(submit().disabled).toBe(true);
+    // Nothing may be submitted while the bill is unknown.
+    await act(async () => { container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+    expect(fetchMock.mock.calls.filter(call => String(call[0]).includes('/orders/createWalkIn'))).toHaveLength(0);
   });
-  it('shows the fee error, keeps create disabled without a guessed fee, and offers retry', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: 'server down' }), { status: 500 }));
+
+  it('shows the bill error, keeps create disabled without a guessed total, and offers retry', async () => {
+    fetchMock.mockImplementation(async () => json({ code: 'ITEM_UNAVAILABLE', error: 'server down' }, 503));
     await render();
-    await vi.waitFor(() => expect(container.textContent).toContain('Could not load the packaging fee'));
+    await vi.waitFor(() => expect(container.textContent).toContain('server down'));
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
     expect(submit().disabled).toBe(true);
     expect(container.textContent).not.toContain('₹313');
-    const retry = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Retry packaging fee'));
+    const retry = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Retry bill'));
     expect(retry).toBeDefined();
+    fetchMock.mockImplementation(async () => json(serverQuote(20)));
     await act(async () => { retry!.click(); });
-    await vi.waitFor(() => expect(container.textContent).toContain('₹318'));
+    await vi.waitFor(() => expect(container.textContent).toContain('Total ₹318'));
     expect(submit().disabled).toBe(false);
   });
+
   it('offers only cash and no delivery option', async () => {
     await render();
     expect(container.textContent).toContain('Cash');

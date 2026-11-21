@@ -1,34 +1,22 @@
-import React, { useMemo, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import React, { useMemo } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useCustomer } from '@/hooks/useCustomer';
-import { useAdjustGrillCoins } from '@/hooks/useAdjustGrillCoins';
-import {
-  CustomerOrderHistoryCard,
-  GrillCoinsLedgerModal,
-  type WalletAdjustmentPayload,
-} from '@/features/customers';
-import {
-  ArrowLeft,
-  Mail,
-  Phone,
-  MapPin,
-  Coins,
-  TrendingUp,
-  ShoppingBag,
-  Ticket,
-  Sparkles,
-  ExternalLink,
-  ChevronRight,
-} from 'lucide-react';
-import type { Customer, Order } from '@/types';
+import { CustomerOrderHistoryCard } from '@/features/customers';
+import { ArrowLeft, Phone, ShoppingBag } from 'lucide-react';
 
+/**
+ * Customer 360 profile.
+ *
+ * Loyalty is NOT part of the launch (owner decision 2026-11-20: "Loyalty no:
+ * hide coins, tiers and points everywhere"). The "Grill Coins Balance" KPI and
+ * the "Adjust Grill Coins" action/modal are gone, and the server stopped
+ * minting in the same change. What stays is the commercial profile a branch
+ * actually works with: contact details, addresses and the order stream.
+ */
 export function CustomerDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { data: customer, isLoading } = useCustomer(id || '');
-
-  const [isCoinsModalOpen, setIsCoinsModalOpen] = useState(false);
-  const adjustCoins = useAdjustGrillCoins();
 
   // Scoped orders come from useCustomer (customerId == id, server-filtered).
   // The old code re-downloaded the ENTIRE orders collection via useOrders()
@@ -60,19 +48,11 @@ export function CustomerDetailPage() {
     );
   }
 
-  // Server truth (see CustomersPage): the modal toasts success only after the
-  // mutation resolves; failures surface the server reason instead.
-  const displayCoins = customer.loyaltyPoints || 0;
-
   const totalSpend = customer.totalSpend || customerOrders.reduce((sum, o) => sum + (o.total || 0), 0);
   const totalOrdersCount = customer.totalOrders || customerOrders.length;
   const aov =
     customer.averageOrderValue ||
     (totalOrdersCount > 0 ? Math.round(totalSpend / totalOrdersCount) : 0);
-
-  const handleConfirmAdjustment = async (payload: WalletAdjustmentPayload) => {
-    await adjustCoins.mutateAsync(payload);
-  };
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-16 select-none">
@@ -90,25 +70,16 @@ export function CustomerDetailPage() {
             <h1 className="text-2xl font-black text-white flex items-center gap-2">
               <span>{customer.name}</span>
               <span className="text-xs px-2.5 py-0.5 rounded-full bg-amber-950 border border-amber-500/40 text-amber-300 font-bold">
-                {customer.segment || 'VIP Member'}
+                {customer.segment || 'Regular'}
               </span>
             </h1>
             <p className="text-xs text-neutral-400">Customer 360 profile & transaction history</p>
           </div>
         </div>
-
-        <button
-          type="button"
-          onClick={() => setIsCoinsModalOpen(true)}
-          className="px-4 py-2.5 rounded-xl bg-[#0E4825] hover:bg-[#135d30] border border-emerald-500/40 text-emerald-300 font-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-md transition-all active:scale-95 cursor-pointer"
-        >
-          <Coins className="w-4 h-4 text-amber-400" />
-          <span>Adjust Grill Coins</span>
-        </button>
       </div>
 
       {/* Customer 360 KPIs */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="p-4 rounded-3xl bg-[#090909] border border-neutral-800 space-y-1">
           <span className="text-[10px] font-bold text-neutral-400 uppercase block">Lifetime Spend</span>
           <p className="font-mono text-xl font-black text-emerald-400">₹{totalSpend.toLocaleString('en-IN')}</p>
@@ -125,12 +96,6 @@ export function CustomerDetailPage() {
           <span className="text-[10px] font-bold text-neutral-400 uppercase block">Avg Order Value (AOV)</span>
           <p className="font-mono text-xl font-black text-white">₹{aov.toLocaleString('en-IN')}</p>
           <span className="text-[10px] text-neutral-500">Spend per order</span>
-        </div>
-
-        <div className="p-4 rounded-3xl bg-[#090909] border border-neutral-800 space-y-1">
-          <span className="text-[10px] font-bold text-neutral-400 uppercase block">Grill Coins Balance</span>
-          <p className="font-mono text-xl font-black text-amber-400">{displayCoins} 🪙</p>
-          <span className="text-[10px] text-neutral-500">Available to redeem</span>
         </div>
       </div>
 
@@ -189,7 +154,7 @@ export function CustomerDetailPage() {
           )}
         </div>
 
-        {/* Right Column: Order History Stream & Support Tickets */}
+        {/* Right Column: Order History Stream */}
         <div className="lg:col-span-2 space-y-4">
           <div className="p-5 rounded-3xl bg-[#090909] border border-neutral-800 space-y-4">
             <div className="flex items-center justify-between border-b border-neutral-800 pb-3">
@@ -213,14 +178,6 @@ export function CustomerDetailPage() {
           </div>
         </div>
       </div>
-
-      {/* Adjust Grill Coins Modal */}
-      <GrillCoinsLedgerModal
-        customer={customer}
-        isOpen={isCoinsModalOpen}
-        onClose={() => setIsCoinsModalOpen(false)}
-        onConfirmAdjustment={handleConfirmAdjustment}
-      />
     </div>
   );
 }

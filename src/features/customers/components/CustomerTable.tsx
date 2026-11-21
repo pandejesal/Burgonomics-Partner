@@ -1,23 +1,24 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import {
-  Users,
-  Coins,
-  Phone,
-  Mail,
-  ChevronRight,
-  TrendingUp,
-  ShoppingBag,
-  Sparkles,
-} from 'lucide-react';
+import { Users, Phone, ChevronRight } from 'lucide-react';
 import type { Customer } from '@/types';
 
+/**
+ * Customer directory table.
+ *
+ * Loyalty is NOT part of the launch (owner decision 2026-11-20: "Loyalty no:
+ * hide coins, tiers and points everywhere"). The "Loyalty Tier" column, the
+ * "Grill Coins" balance and the "Adjust Coins" action are gone with the
+ * programme; the server stopped minting them in the same change, so leaving
+ * them on screen would dangle a control over a ledger that can no longer grow.
+ * Those values remain on the customer document — this is a display retirement,
+ * not a data deletion.
+ */
 interface CustomerTableProps {
   customers: Customer[];
-  onOpenCoinsModal: (customer: Customer) => void;
 }
 
-export function CustomerTable({ customers, onOpenCoinsModal }: CustomerTableProps) {
+export function CustomerTable({ customers }: CustomerTableProps) {
   if (customers.length === 0) {
     return (
       <div className="text-center py-16 bg-neutral-900/40 rounded-3xl border border-dashed border-neutral-800 p-8">
@@ -39,21 +40,17 @@ export function CustomerTable({ customers, onOpenCoinsModal }: CustomerTableProp
           <thead className="bg-neutral-900/80 border-b border-neutral-800 text-neutral-400 font-bold uppercase tracking-wider text-[10px]">
             <tr>
               <th className="py-3.5 px-4">Customer Details</th>
-              <th className="py-3.5 px-4">Loyalty Tier</th>
               <th className="py-3.5 px-4 text-right">Lifetime Spend</th>
               <th className="py-3.5 px-4 text-right">Total Orders</th>
               <th className="py-3.5 px-4 text-right">Avg Order Value</th>
-              <th className="py-3.5 px-4 text-center">Grill Coins</th>
               <th className="py-3.5 px-4 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-850">
             {customers.map((c) => {
-              const segment = c.segment || 'Regular';
               const ltv = c.totalSpend || 0;
               const ordersCount = c.totalOrders || 0;
               const aov = c.averageOrderValue || (ordersCount > 0 ? Math.round(ltv / ordersCount) : 0);
-              const coins = c.loyaltyPoints || 0;
 
               return (
                 <tr key={c.id} className="hover:bg-neutral-900/50 transition-colors">
@@ -81,21 +78,6 @@ export function CustomerTable({ customers, onOpenCoinsModal }: CustomerTableProp
                     </div>
                   </td>
 
-                  {/* Loyalty Segment */}
-                  <td className="py-3 px-4">
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
-                        segment === 'VIP'
-                          ? 'bg-amber-950/80 text-amber-300 border-amber-500/40'
-                          : segment === 'New'
-                          ? 'bg-cyan-950/80 text-cyan-300 border-cyan-500/40'
-                          : 'bg-neutral-800 text-neutral-300 border-neutral-700'
-                      }`}
-                    >
-                      {segment}
-                    </span>
-                  </td>
-
                   {/* Lifetime Value */}
                   <td className="py-3 px-4 text-right font-mono font-black text-white text-xs">
                     ₹{ltv.toLocaleString('en-IN')}
@@ -111,26 +93,9 @@ export function CustomerTable({ customers, onOpenCoinsModal }: CustomerTableProp
                     ₹{aov.toLocaleString('en-IN')}
                   </td>
 
-                  {/* Grill Coins */}
-                  <td className="py-3 px-4 text-center">
-                    <span className="inline-flex items-center gap-1 font-mono font-black text-amber-400 text-xs bg-amber-950/40 px-2.5 py-1 rounded-xl border border-amber-500/30">
-                      <Coins className="w-3 h-3" />
-                      <span>{coins}</span>
-                    </span>
-                  </td>
-
                   {/* Action Buttons */}
                   <td className="py-3 px-4 text-right">
                     <div className="flex items-center justify-end gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => onOpenCoinsModal(c)}
-                        className="px-2.5 py-1 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-amber-300 hover:text-amber-200 text-[11px] font-bold transition-colors cursor-pointer"
-                        title="Adjust Grill Coins"
-                      >
-                        Adjust Coins
-                      </button>
-
                       <Link
                         to={`/customers/${c.id}`}
                         className="p-1.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-400 hover:text-white transition-colors"

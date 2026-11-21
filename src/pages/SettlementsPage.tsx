@@ -87,6 +87,11 @@ export function SettlementsPage({
   const [monthKey, setMonthKey] = useState<string>(initialMonthKey || months[0]?.monthKey || '');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [paidTarget, setPaidTarget] = useState<SettlementStatement | null>(null);
+  // N1: a statement that is already paid refuses a second payment unless the
+  // operator states this is an ADDITIONAL payment. Two UTRs on one statement is
+  // a real accounting event, so the escape hatch exists — but it is a decision,
+  // never a silent double tap.
+  const [additionalPayment, setAdditionalPayment] = useState(false);
   const [reference, setReference] = useState('');
   const [paidOn, setPaidOn] = useState(todayIso());
   const [note, setNote] = useState('');
@@ -162,11 +167,13 @@ export function SettlementsPage({
         reference: trimmed,
         paidOn,
         ...(note.trim() ? { note: note.trim() } : {}),
+        ...(additionalPayment ? { additionalPayment: true } : {}),
       });
       toast.success('Payment recorded. No money was moved by this app.');
       setPaidTarget(null);
       setReference('');
       setNote('');
+      setAdditionalPayment(false);
     } catch (err) {
       toast.error('Payment NOT recorded — the statement is unchanged.', {
         description: settlementErrorMessage(err),
@@ -352,6 +359,7 @@ export function SettlementsPage({
                               type="button"
                               onClick={() => {
                                 setPaidTarget(statement);
+                                setAdditionalPayment(false);
                                 setReference('');
                                 setPaidOn(todayIso());
                                 setNote('');
@@ -359,6 +367,24 @@ export function SettlementsPage({
                               className="min-h-11 px-3 py-2 rounded-lg bg-accent text-white font-bold"
                             >
                               Mark as paid
+                            </button>
+                          )}
+                          {canMarkPaid && statement.paidStatus === 'paid' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPaidTarget(statement);
+                                // A second payment on a settled statement is an
+                                // explicit decision: the form starts with the
+                                // additional-payment box ticked.
+                                setAdditionalPayment(true);
+                                setReference('');
+                                setPaidOn(todayIso());
+                                setNote('');
+                              }}
+                              className="min-h-11 px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-700 text-zinc-200 font-bold"
+                            >
+                              Record additional payment
                             </button>
                           )}
                         </div>
@@ -552,6 +578,21 @@ export function SettlementsPage({
               />
             </label>
           </div>
+          {paidTarget.paidStatus === 'paid' && (
+            <label className="flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-950/30 p-3">
+              <input
+                type="checkbox"
+                checked={additionalPayment}
+                onChange={(e) => setAdditionalPayment(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0"
+              />
+              <span className="text-xs text-amber-200">
+                This is an <strong>additional</strong> payment on a statement that is already
+                marked paid. Leave it unticked unless you are recording a second payout — an
+                unticked second payment is refused.
+              </span>
+            </label>
+          )}
           <div className="flex flex-wrap gap-2">
             <button
               type="button"

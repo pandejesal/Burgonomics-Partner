@@ -51,7 +51,6 @@ export function TicketDetailPage() {
 
   const [refundType, setRefundType] = useState<'full' | 'partial'>('full');
   const [refundAmountInput, setRefundAmountInput] = useState('99');
-  const [goodwillType, setGoodwillType] = useState<'coupon' | 'coins'>('coupon');
   const [resolutionNotes, setResolutionNotes] = useState('');
   const [replyText, setReplyText] = useState('');
   const [copiedPayload, setCopiedPayload] = useState(false);
@@ -217,31 +216,18 @@ export function TicketDetailPage() {
     } else if (activeActionTab === 'goodwill') {
       setIsResolving(true);
       try {
-        if (goodwillType === 'coins') {
-          // Server mints only when the ticket carries a customerId; guest
-          // tickets fail LOUD here instead of a fake "issued" banner.
-          if (!ticket?.customerId) {
-            throw new Error('Guest ticket has no customer profile — credit Grill Coins via the dashboard, ticket left open.');
-          }
-          await partnerFunctionsApi.resolveTicket({
-            ticketId: id || '',
-            action: 'loyalty_credit',
-            amount: 100,
-            notes,
-          });
-          await refreshTicket();
-          setSuccessMessage('100 Grill Coins credited server-side. Ticket resolved.');
-        } else {
-          // No coupon-mint endpoint exists server-side (resolve records the
-          // request only) — record honestly, never claim a voucher was issued.
-          await partnerFunctionsApi.resolveTicket({
-            ticketId: id || '',
-            action: 'discount_coupon',
-            notes: `Coupon request (₹100 goodwill): ${notes}`,
-          });
-          await refreshTicket();
-          setSuccessMessage('Coupon request recorded on the ticket — voucher NOT auto-minted (no issuance endpoint yet). Issue manually via dashboard.');
-        }
+        // Loyalty retirement (owner decision 2026-11-20): the coin-credit
+        // branch is gone. `POST /tickets/resolve` now refuses the retired
+        // coin-credit action with `LOYALTY_RETIRED` (409), so offering it could
+        // only ever fail. Coupon requests are still recorded honestly (no issue
+        // endpoint exists), never claimed as issued.
+        await partnerFunctionsApi.resolveTicket({
+          ticketId: id || '',
+          action: 'discount_coupon',
+          notes: `Coupon request (₹100 goodwill): ${notes}`,
+        });
+        await refreshTicket();
+        setSuccessMessage('Coupon request recorded on the ticket — voucher NOT auto-minted (no issuance endpoint yet). Issue manually via dashboard.');
         setResolutionNotes(''); // clear only on success — retries keep the notes
       } catch (err) {
         setActionError(
@@ -667,32 +653,14 @@ export function TicketDetailPage() {
               </div>
             )}
 
-            {/* Tab 2: Goodwill Voucher */}
+            {/* Tab 2: Goodwill Voucher — the coin-credit option is retired
+                (loyalty is off and the server refuses the retired coin
+                action). */}
             {activeActionTab === 'goodwill' && (
               <div className="bg-[#112415] p-4 rounded-xl border border-border space-y-3">
-                <div className="flex items-center gap-4 text-xs">
-                  <label className="flex items-center gap-1.5 cursor-pointer text-white font-bold">
-                    <input
-                      type="radio"
-                      name="goodwillType"
-                      checked={goodwillType === 'coupon'}
-                      onChange={() => setGoodwillType('coupon')}
-                      className="accent-[#D95D0F]"
-                    />
-                    <span>Issue ₹100 Flat Goodwill Promo Code</span>
-                  </label>
-
-                  <label className="flex items-center gap-1.5 cursor-pointer text-white font-bold">
-                    <input
-                      type="radio"
-                      name="goodwillType"
-                      checked={goodwillType === 'coins'}
-                      onChange={() => setGoodwillType('coins')}
-                      className="accent-[#D95D0F]"
-                    />
-                    <span>Credit 100 Global Grill Coins</span>
-                  </label>
-                </div>
+                <p className="text-[11px] text-zinc-400">
+                  Goodwill is recorded as a coupon REQUEST on the ticket. No voucher is minted automatically.
+                </p>
               </div>
             )}
 

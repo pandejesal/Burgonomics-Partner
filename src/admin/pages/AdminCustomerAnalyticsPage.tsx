@@ -12,8 +12,6 @@ import {
   Bar,
   Cell,
   Legend,
-  PieChart,
-  Pie,
 } from "recharts";
 import {
   DollarSign,
@@ -104,22 +102,6 @@ export const AdminCustomerAnalyticsPage: React.FC = () => {
       cumulative += count;
       return { week: key, newCustomers: count, cumulative };
     });
-  }, [customers]);
-
-  // Chart Data 2: Loyalty Tier Distribution
-  const tierDistributionData = useMemo(() => {
-    const counts = { Bronze: 0, Silver: 0, Gold: 0, Platinum: 0, VIP: 0 };
-    customers.forEach((c) => {
-      counts[c.loyaltyTier] = (counts[c.loyaltyTier] || 0) + 1;
-    });
-
-    return [
-      { name: "Bronze Tier", value: counts.Bronze, fill: "#D1D5DB" }, // Grey
-      { name: "Silver Tier", value: counts.Silver, fill: "#94A3B8" }, // Slate
-      { name: "Gold Tier", value: counts.Gold, fill: "#F59E0B" }, // Amber
-      { name: "Platinum Tier", value: counts.Platinum, fill: "#06B6D4" }, // Cyan
-      { name: "VIP Elite", value: counts.VIP, fill: "#0E4825" }, // Primary Green
-    ];
   }, [customers]);
 
   // Chart Data 3: Geographic Distribution
@@ -237,10 +219,10 @@ export const AdminCustomerAnalyticsPage: React.FC = () => {
         />
       </div>
 
-      {/* Row 1: Growth line & Tier Pie */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      {/* Row 1: Growth line (the retired tier pie is gone) */}
+      <div className="grid grid-cols-1 gap-6">
         {/* Growth Line chart */}
-        <div className="lg:col-span-7">
+        <div>
           <AdminCard
             title="Consolidated Customer Base Accumulation"
             subtitle="Cumulative customer acquisition curve mapped by weekly cohorts"
@@ -276,61 +258,6 @@ export const AdminCustomerAnalyticsPage: React.FC = () => {
                   <Legend verticalAlign="top" height={36} />
                 </AreaChart>
               </ResponsiveContainer>
-            </div>
-          </AdminCard>
-        </div>
-
-        {/* Tier Distribution Pie */}
-        <div className="lg:col-span-5">
-          <AdminCard
-            title="Customer Loyalty Tier Distribution"
-            subtitle="Proportions of customer base holding Silver/Gold/VIP elite status"
-          >
-            <div className="h-80 w-full font-sans text-xs flex flex-col items-center justify-center pt-2">
-              <div className="h-60 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={tierDistributionData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={80}
-                      paddingAngle={5}
-                      dataKey="value"
-                      nameKey="name"
-                    >
-                      {tierDistributionData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.fill} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{
-                        borderRadius: "12px",
-                        border: "1px solid #EAEAEA",
-                      }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Legends */}
-              <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 pb-4">
-                {tierDistributionData.map((tier) => (
-                  <div
-                    key={tier.name}
-                    className="flex items-center gap-1.5 text-[10px] font-semibold text-gray-500"
-                  >
-                    <span
-                      className="w-2.5 h-2.5 rounded-full shrink-0"
-                      style={{ backgroundColor: tier.fill }}
-                    />
-                    <span>
-                      {tier.name} ({tier.value})
-                    </span>
-                  </div>
-                ))}
-              </div>
             </div>
           </AdminCard>
         </div>

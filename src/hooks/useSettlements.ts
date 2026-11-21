@@ -38,6 +38,7 @@ export interface UseSettlementsResult {
     reference: string;
     paidOn: string;
     note?: string;
+    additionalPayment?: boolean;
   }) => Promise<void>;
   isGenerating: boolean;
   isMarkingPaid: boolean;
@@ -57,6 +58,9 @@ export function settlementErrorMessage(err: unknown): string {
     }
     if (err.code === 'SETTLEMENT_INVALID_PAID_ON') {
       return 'That paid date is not valid (it must be a real date, not in the future).';
+    }
+    if (err.code === 'SETTLEMENT_ALREADY_PAID') {
+      return 'This statement is already marked paid. Tick "additional payment" only if you are recording a second payment.';
     }
     return err.message;
   }
@@ -108,6 +112,7 @@ export function useSettlements(params: UseSettlementsParams): UseSettlementsResu
       reference: string;
       paidOn: string;
       note?: string;
+      additionalPayment?: boolean;
     }) => partnerFunctionsApi.markSettlementPaid(input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['settlements'] });
