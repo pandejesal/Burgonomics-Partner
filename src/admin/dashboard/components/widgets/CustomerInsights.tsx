@@ -66,10 +66,10 @@ export const CustomerInsights: React.FC<{ dateRange: { from: string; to: string 
         <div className="flex items-center justify-between pb-4 border-b border-gray-50 dark:border-gray-800/50 mb-5">
           <div>
             <h4 className="text-sm font-black text-gray-900 dark:text-white font-sans uppercase">
-              Customer Cohorts & Loyalty
+              Customer Cohorts
             </h4>
             <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-0.5">
-              Demographic slice of newly acquired vs. recurring loyalty customers
+              Demographic slice of newly acquired vs. returning customers
             </p>
           </div>
           <Users size={16} className="text-primary dark:text-emerald-400 shrink-0" />
@@ -127,7 +127,7 @@ export const CustomerInsights: React.FC<{ dateRange: { from: string; to: string 
 
             <div className="space-y-1">
               <div className="flex justify-between items-center text-[10px] font-bold">
-                <span className="text-gray-400 uppercase">Returning Loyalty</span>
+                <span className="text-gray-400 uppercase">Returning</span>
                 <span className="font-mono text-gray-800 dark:text-gray-200">
                   {customers.returningCustomers} ({retPct}%)
                 </span>
@@ -161,10 +161,10 @@ export const CustomerInsights: React.FC<{ dateRange: { from: string; to: string 
             </div>
             <div>
               <span className="block text-[8px] font-bold text-gray-400 uppercase tracking-wider">
-                Loyalty Lift
+                Repeat Rate
               </span>
               <span className="text-xs font-black font-mono text-gray-800 dark:text-white">
-                +14.2%
+                {retPct}%
               </span>
             </div>
           </div>

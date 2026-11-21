@@ -252,6 +252,23 @@ export interface CreateWalkInRequest {
   tableNumber?: string; notes?: string; customerName?: string; customerPhone?: string;
 }
 
+/**
+ * The till's server bill (F4). The same request minus the fields that only make
+ * sense when booking: no request id, no confirmed total. Pricing is the
+ * server's, so the till never computes a total itself.
+ */
+export interface WalkInQuoteRequest {
+  branchId: string; orderType: 'takeaway' | 'dinein';
+  items: Array<{ productId: string; quantity: number }>;
+  tableNumber?: string; notes?: string; customerName?: string; customerPhone?: string;
+}
+
+export interface WalkInQuote {
+  branchId: string;
+  branchName: string;
+  totals: PricingBreakdown;
+}
+
 /** Stored settlement statement (`branch_settlements/{branch}_{month}_v00N`). */
 export type SettlementStatementRecord = SettlementStatement;
 
@@ -579,6 +596,26 @@ export const partnerFunctionsApi = {
       ...(customerName !== undefined ? { customerName } : {}),
       ...(customerPhone !== undefined ? { customerPhone } : {}),
     }, { idempotencyKey: requestId });
+  },
+
+  /**
+   * F4: the SERVER's counter bill, for the till to display and confirm.
+   *
+   * The modal used to add up food + GST + a separately fetched packaging fee and
+   * post that as `expectedTotalPaise`. HL Road charges ₹15 packaging and the
+   * preview missed it, so the shown bill disagreed with the booked one. This
+   * route prices the same cart through the same builder the create route uses,
+   * which makes the preview and the charge the same arithmetic.
+   */
+  async quoteWalkInOrder(request: WalkInQuoteRequest): Promise<WalkInQuote> {
+    const { branchId, orderType, items, tableNumber, notes, customerName, customerPhone } = request;
+    return apiRequest('/orders/walkInQuote', {
+      branchId, orderType, items,
+      ...(tableNumber !== undefined ? { tableNumber } : {}),
+      ...(notes !== undefined ? { notes } : {}),
+      ...(customerName !== undefined ? { customerName } : {}),
+      ...(customerPhone !== undefined ? { customerPhone } : {}),
+    });
   },
   /**
    * Pushes order KOT to Petpooja POS API
@@ -1137,13 +1174,17 @@ export const partnerFunctionsApi = {
   },
 
   /**
-   * Resolves a support ticket server-side (refunds, loyalty credit, coupon
-   * record). Money-affecting actions MUST go through this — never flip ticket
-   * status with a direct Firestore write and claim money moved (Loop 3).
+   * Resolves a support ticket server-side (refunds, coupon record).
+   * Money-affecting actions MUST go through this — never flip ticket status
+   * with a direct Firestore write and claim money moved (Loop 3).
+   *
+   * Loyalty retirement (owner decision 2026-11-20): the retired coin-credit
+   * action is not in this union at all, so no Partner caller can even ask for
+   * it; the server would refuse it with `LOYALTY_RETIRED` (409) anyway.
    */
   async resolveTicket(params: {
     ticketId: string;
-    action: 'full_refund' | 'partial_refund' | 'discount_coupon' | 'loyalty_credit' | 'explanation';
+    action: 'full_refund' | 'partial_refund' | 'discount_coupon' | 'explanation';
     amount?: number;
     couponCode?: string;
     notes: string;
@@ -1283,6 +1324,12 @@ export const partnerFunctionsApi = {
     reference: string;
     paidOn: string;
     note?: string;
+    /**
+     * N1: an already-paid statement refuses a second payment (409
+     * SETTLEMENT_ALREADY_PAID). Set this only when a human has said this IS an
+     * additional payment — a split payout or a top-up.
+     */
+    additionalPayment?: boolean;
   }): Promise<{ statement: SettlementStatementRecord; reused: boolean }> {
     // Not retried: a replay could append a duplicate payment line.
     return await apiRequest('/settlements/markPaid', params, { retries: 0 });

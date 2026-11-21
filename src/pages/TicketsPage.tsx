@@ -110,30 +110,15 @@ export function TicketsPage({ initialTickets }: { initialTickets?: Ticket[] } = 
 
   const handleConfirmResolution = async (payload: TicketResolutionPayload) => {
     // Loop 33/120: money-affecting resolutions MUST execute server-side. The
-    // old path wrote status text directly ("Credited X Grill Coins") while
-    // crediting nothing, and refunds moved no money. Mirror TicketDetailPage:
-    // server resolveTicket first, loud failure leaves the ticket open.
-    const ticket = tickets.find((t) => t.id === payload.ticketId);
+    // old path wrote status text directly while crediting/refunding nothing.
+    // Mirror TicketDetailPage: server resolveTicket first, loud failure leaves
+    // the ticket open.
+    //
+    // Loyalty retirement (owner decision 2026-11-20): the retired coin-credit
+    // action is gone from this page and from the modal, because the server now
+    // refuses it with `LOYALTY_RETIRED` (409).
     try {
-      if (payload.action === "CREDIT_GRILL_COINS") {
-        if (!ticket?.customerId) {
-          throw new Error(
-            "Guest ticket has no customer profile — credit Grill Coins via the dashboard, ticket left open."
-          );
-        }
-        if (!payload.grillCoinsAmount || payload.grillCoinsAmount <= 0) {
-          throw new Error("Specify a coin amount greater than zero.");
-        }
-        await partnerFunctionsApi.resolveTicket({
-          ticketId: payload.ticketId,
-          action: "loyalty_credit",
-          amount: Math.round(payload.grillCoinsAmount),
-          notes: payload.notes,
-        });
-        toast.success(
-          `${Math.round(payload.grillCoinsAmount)} Grill Coins credited server-side. Ticket resolved.`
-        );
-      } else if (payload.action === "REFUND_ORDER") {
+      if (payload.action === "REFUND_ORDER") {
         await partnerFunctionsApi.resolveTicket({
           ticketId: payload.ticketId,
           action: "full_refund",

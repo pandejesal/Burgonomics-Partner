@@ -169,7 +169,10 @@ describe('M5 / L5: ticket detail reports real outcomes', () => {
 
   it('L5: reports a failed reply send and keeps the draft', async () => {
     ticketState.addMessage.mutateAsync.mockRejectedValueOnce(new Error('offline'));
-    reactState.overrides.set(5, 'Please re-check this order'); // replyText useState
+    // Hook order note: the loyalty retirement removed the `goodwillType`
+    // useState from TicketDetailPage, so `replyText` moved from index 5 to 4.
+    // Same assertion strength — the draft's setter must never fire.
+    reactState.overrides.set(4, 'Please re-check this order'); // replyText useState
 
     const tree = TicketDetailPage();
     const button = findButton(tree, 'Send');
@@ -178,7 +181,7 @@ describe('M5 / L5: ticket detail reports real outcomes', () => {
     await button!.props.onClick?.();
 
     expect(toast.error).toHaveBeenCalledWith('Reply NOT sent.', expect.anything());
-    // Draft preserved: the replyText setter (useState #5) is never called.
-    expect(reactState.setters[5]).not.toHaveBeenCalled();
+    // Draft preserved: the replyText setter (useState #4) is never called.
+    expect(reactState.setters[4]).not.toHaveBeenCalled();
   });
 });

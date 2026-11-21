@@ -1,24 +1,20 @@
 import React, { useState, useMemo } from 'react';
 import { useCustomers } from '@/hooks/useCustomers';
-import { useAdjustGrillCoins } from '@/hooks/useAdjustGrillCoins';
 import { useAuthStore } from '@/stores/authStore';
 import { exportToCsv } from '@/utils/exportCsv';
-import {
-  CustomerTable,
-  GrillCoinsLedgerModal,
-  type WalletAdjustmentPayload,
-} from '@/features/customers';
-import {
-  Users,
-  Download,
-  Search,
-  Coins,
-  TrendingUp,
-  ShoppingBag,
-  Sparkles,
-} from 'lucide-react';
-import type { Customer } from '@/types';
+import { CustomerTable } from '@/features/customers';
+import { Users, Download, Search, TrendingUp, Sparkles } from 'lucide-react';
 
+/**
+ * Customer directory (Customer 360).
+ *
+ * Loyalty is NOT part of the launch (owner decision 2026-11-20: "Loyalty no:
+ * hide coins, tiers and points everywhere"). The "Grill Coins Issued" KPI, the
+ * "Loyalty Points" CSV column, the coin-balance normalisation and the whole
+ * coin-adjustment modal are gone; the server stopped minting in the same
+ * change. Commercial columns (spend, orders, AOV) and the search/segment tools
+ * stay, because they are what a branch actually uses.
+ */
 export function CustomersPage() {
   const { user } = useAuthStore();
   // Loop 40/120: surface query failure loudly — an erroring directory must
@@ -27,17 +23,8 @@ export function CustomersPage() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [segmentFilter, setSegmentFilter] = useState<string>('all');
-  const [adjustingCustomer, setAdjustingCustomer] = useState<Customer | null>(null);
-  const adjustCoins = useAdjustGrillCoins();
 
-  // Server is the source of truth: successful adjustments invalidate the
-  // customers queries above, so fresh balances arrive without local fakes.
-  const customers = useMemo(() => {
-    return rawCustomers.map((c) => ({
-      ...c,
-      loyaltyPoints: c.loyaltyPoints || 0,
-    }));
-  }, [rawCustomers]);
+  const customers = useMemo(() => rawCustomers, [rawCustomers]);
 
   const filteredCustomers = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
@@ -63,7 +50,6 @@ export function CustomersPage() {
     });
   }, [customers, segmentFilter, searchQuery]);
 
-  const totalLoyalty = customers.reduce((sum, c) => sum + (c.loyaltyPoints || 0), 0);
   const totalRevenue = customers.reduce((sum, c) => sum + (c.totalSpend || 0), 0);
   const vipCount = customers.filter((c) => c.segment === 'VIP').length;
 
@@ -77,16 +63,9 @@ export function CustomersPage() {
       { header: 'Total Orders', accessor: (c) => c.totalOrders || 0 },
       { header: 'Total Spend (INR)', accessor: (c) => c.totalSpend || 0 },
       { header: 'Average Order Value (INR)', accessor: (c) => c.averageOrderValue || 0 },
-      { header: 'Loyalty Points', accessor: (c) => c.loyaltyPoints || 0 },
       { header: 'Favorite Branch', accessor: (c) => c.favoriteBranchName || c.favoriteBranchId || 'N/A' },
       { header: 'Last Order Date', accessor: (c) => String(c.lastOrderDate || 'N/A') },
     ]);
-  };
-
-  // Throws on server failure — the modal then toasts the error instead of a
-  // fake success. Balances refresh from the invalidated queries.
-  const handleConfirmCoinAdjustment = async (payload: WalletAdjustmentPayload) => {
-    await adjustCoins.mutateAsync(payload);
   };
 
   return (
@@ -95,15 +74,15 @@ export function CustomersPage() {
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
         <div>
           <h1 className="text-2xl font-black text-white tracking-wide flex items-center gap-2.5">
-            <span>Customer 360 & Loyalty CRM</span>
+            <span>Customer 360 & CRM</span>
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-950 border border-emerald-500/40 text-emerald-400 font-bold">
               RFM Analytics Live
             </span>
           </h1>
           <p className="text-xs text-neutral-400">
             {user?.role === 'branch_owner'
-              ? 'Customer records & loyalty analytics scoped to your branch'
-              : 'Enterprise-wide customer profiles, spend history, and loyalty records'}
+              ? 'Customer records & analytics scoped to your branch'
+              : 'Enterprise-wide customer profiles and spend history'}
           </p>
         </div>
 
@@ -118,7 +97,7 @@ export function CustomersPage() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         <div className="bg-[#090909] border border-neutral-800 rounded-3xl p-4 space-y-1">
           <div className="flex items-center justify-between text-neutral-400">
             <span className="text-xs font-bold uppercase">Total Profiles</span>
@@ -139,20 +118,11 @@ export function CustomersPage() {
 
         <div className="bg-[#090909] border border-neutral-800 rounded-3xl p-4 space-y-1">
           <div className="flex items-center justify-between text-neutral-400">
-            <span className="text-xs font-bold uppercase">Grill Coins Issued</span>
-            <Coins className="w-4 h-4 text-amber-400" />
-          </div>
-          <p className="text-2xl font-black text-amber-400">{totalLoyalty.toLocaleString('en-IN')}</p>
-          <p className="text-[11px] text-neutral-500">Circulating loyalty balance</p>
-        </div>
-
-        <div className="bg-[#090909] border border-neutral-800 rounded-3xl p-4 space-y-1">
-          <div className="flex items-center justify-between text-neutral-400">
             <span className="text-xs font-bold uppercase">VIP Customers</span>
             <Sparkles className="w-4 h-4 text-amber-400" />
           </div>
           <p className="text-2xl font-black text-white">{vipCount}</p>
-          <p className="text-[11px] text-neutral-500">High-frequency burger loyalists</p>
+          <p className="text-[11px] text-neutral-500">High-frequency repeat customers</p>
         </div>
       </div>
 
@@ -199,19 +169,11 @@ export function CustomersPage() {
         </div>
       )}
 
-      {/* Customer CRM Table */}
-      <CustomerTable
-        customers={filteredCustomers}
-        onOpenCoinsModal={setAdjustingCustomer}
-      />
-
-      {/* Grill Coins Adjustment Modal */}
-      <GrillCoinsLedgerModal
-        customer={adjustingCustomer}
-        isOpen={!!adjustingCustomer}
-        onClose={() => setAdjustingCustomer(null)}
-        onConfirmAdjustment={handleConfirmCoinAdjustment}
-      />
+      {isLoading ? (
+        <p className="text-xs text-neutral-400">Loading customer directory…</p>
+      ) : (
+        <CustomerTable customers={filteredCustomers} />
+      )}
     </div>
   );
 }

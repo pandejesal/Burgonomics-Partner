@@ -103,10 +103,6 @@ const AdminAutomationPage = lazyPage(
 // /admin/customers now navigates to the authoritative console CRM, and the
 // :id deep-link fails closed with an honest unavailable page (see
 // AdminCustomerRecordUnavailable below).
-const AdminLoyaltyConfigPage = lazyPage(
-  () => import("@/admin/pages/AdminLoyaltyConfigPage"),
-  "AdminLoyaltyConfigPage"
-);
 const AdminSegmentsPage = lazyPage(
   () => named(() => import("@/admin/pages/AdminSegmentsPage"), "AdminSegmentsPage"),
   "AdminSegmentsPage"

@@ -4,7 +4,7 @@ import { useAppStore } from '@/stores/appStore';
 import { useBranches } from '@/hooks/useBranches';
 import { useStrictWalkInMenu, type WalkInIneligibilityReason } from '@/hooks/useMenu';
 import { resolveWalkInBranchName } from '@/utils/walkInBranch';
-import { useWalkInPackagingFee } from '@/features/orders/hooks/useWalkInPackagingFee';
+import { useWalkInQuote } from '@/features/orders/hooks/useWalkInQuote';
 import { ApiRequestError, partnerFunctionsApi, type WalkInReceipt } from '@/services/partnerFunctionsApi';
 
 interface ManualOrderCreateModalProps {
@@ -47,15 +47,26 @@ export function ManualOrderCreateModal({ isOpen, onClose, onOrderCreated }: Manu
   const [submitting, setSubmitting] = useState(false);
   const [priceChange, setPriceChange] = useState<{ fingerprint: string; paise: number; total: number } | null>(null);
   const identity = useRef<{ fingerprint: string; id: string } | null>(null);
-  const { packagingFee, isLoading: packagingLoading, error: packagingError, retry } = useWalkInPackagingFee({ branchId, orderType, enabled: isOpen && !!branchId });
+
+  // F4: the bill shown here is the SERVER's bill. The modal used to compute
+  // food + an inline GST + a separately fetched packaging fee, and HL Road's
+  // ₹15 packaging went missing from the preview while the booking charged it.
+  // One pricing builder on the server now feeds both the preview and the
+  // booking, so what the cashier reads is what the customer is charged.
+  const quoteState = useWalkInQuote({
+    branchId,
+    orderType,
+    items: cart,
+    enabled: isOpen && !!branchId && cart.length > 0,
+  });
+  const totals = quoteState.quote?.totals ?? null;
+  // While the cart is empty there is nothing to price; once it has items the
+  // total is unknown until the server answers.
+  const quotePending = cart.length > 0 && totals === null;
 
   if (!isOpen) return null;
   const selected = cart.map(line => ({ ...line, item: menu.eligibleItems.find(item => item.id === line.productId) }));
   const validCart = selected.length > 0 && selected.every(line => line.item && line.quantity <= 99);
-  const subtotal = selected.reduce((sum, line) => sum + (line.item?.price ?? 0) * line.quantity, 0);
-  const netFood = Math.round(subtotal * 100) / 100;
-  const total = Math.round((netFood + (packagingFee ?? 0)) * 100) / 100;
-  const gst = Math.round((netFood * 0.05 / 1.05) * 100) / 100;
   const payload = {
     branchId: branchId ?? '', orderType, items: cart,
     ...(orderType === 'dinein' && tableNumber.trim() ? { tableNumber: tableNumber.trim() } : {}),
@@ -63,10 +74,14 @@ export function ManualOrderCreateModal({ isOpen, onClose, onOrderCreated }: Manu
     ...(customerName.trim() ? { customerName: customerName.trim() } : {}),
     ...(customerPhone.trim() ? { customerPhone: customerPhone.trim() } : {}),
   };
-  const fingerprint = JSON.stringify({ ...payload, previewPaise: Math.round(total * 100) });
+  // The fingerprint is the CART, not the price. Request identity across retries
+  // is the basket and its details; the confirmed total is a price check, not a
+  // second identity (F5). Including it here rotated the request id on every
+  // PRICE_CHANGED retry, so a lost response could book the same cart twice.
+  const fingerprint = JSON.stringify(payload);
   const confirmedPrice = priceChange?.fingerprint === fingerprint ? priceChange : null;
-  const expectedTotalPaise = confirmedPrice?.paise ?? Math.round(total * 100);
-  const payable = expectedTotalPaise / 100;
+  const expectedTotalPaise = confirmedPrice?.paise ?? totals?.split.totalAmountPaise ?? null;
+  const payable = expectedTotalPaise === null ? null : expectedTotalPaise / 100;
 
   function add(productId: string) {
     setPriceChange(null);
@@ -80,8 +95,12 @@ export function ManualOrderCreateModal({ isOpen, onClose, onOrderCreated }: Manu
   }
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (submitting || !branchId || !validCart || packagingFee === null || packagingLoading) return;
-    const requestFingerprint = JSON.stringify({ ...payload, expectedTotalPaise });
+    if (submitting || !branchId || !validCart || expectedTotalPaise === null) return;
+    // The retry after PRICE_CHANGED is the SAME order: the cashier has not
+    // changed the basket, only confirmed the server's corrected total. A fresh
+    // request id per confirmation is exactly what made staging's replay
+    // unrecoverable (F5), so the id is keyed on the cart + details only.
+    const requestFingerprint = JSON.stringify(payload);
     if (identity.current?.fingerprint !== requestFingerprint) identity.current = { fingerprint: requestFingerprint, id: newRequestId() };
     const requestId = identity.current.id;
     setSubmitting(true); setError(null);
@@ -91,10 +110,11 @@ export function ManualOrderCreateModal({ isOpen, onClose, onOrderCreated }: Manu
       onOrderCreated?.(receipt); onClose();
     } catch (err: unknown) {
       if (err instanceof ApiRequestError && (err.code === 'PRICE_CHANGED' || err.code === 'IDEMPOTENCY_CONFLICT')) {
-        identity.current = null;
         if (err.code === 'PRICE_CHANGED' && err.totals && Number.isSafeInteger(err.totals.split?.totalAmountPaise)) {
           setPriceChange({ fingerprint, paise: err.totals.split.totalAmountPaise, total: err.totals.grandTotal });
         } else setPriceChange(null);
+        // A price refusal is a NEW confirmation of the same order, so the id is
+        // kept: rotating it would orphan the order the server may have booked.
       }
       setError(err instanceof Error ? err.message : 'Order could not be created. Please retry.');
     } finally { setSubmitting(false); }
@@ -132,15 +152,21 @@ export function ManualOrderCreateModal({ isOpen, onClose, onOrderCreated }: Manu
             {menu.ineligibleItems.map(item => <button className="bg-neutral-800 rounded p-2 opacity-60" type="button" key={item.id} disabled>{item.name} — {reasons[item.reason]}</button>)}</div>
         </section>
         <section><h3 className="font-bold">Cart items ({cart.length})</h3>{selected.map(line => <div key={line.productId} className="flex gap-3 items-center"><span>{line.item?.name ?? 'Item unavailable'} × {line.quantity}</span><button type="button" onClick={() => remove(line.productId)} aria-label={`Remove one ${line.item?.name ?? 'item'}`}>−</button><button type="button" onClick={() => add(line.productId)} aria-label={`Add one ${line.item?.name ?? 'item'}`}>+</button></div>)}{!validCart && cart.length > 0 && <p role="alert">A cart item is unavailable; remove it before creating the order.</p>}</section>
-        <section><h3>Cash tender</h3><label>Change calculator (not recorded) <input type="number" min="0" className="bg-neutral-800 p-2" value={cash} onChange={e => setCash(e.target.value)} /></label><p>Change: ₹{Math.max(0, (Number(cash) || 0) - payable).toFixed(2)}</p></section>
-        <section><p>Subtotal ₹{netFood}</p><p>GST (5%, included) ₹{gst.toFixed(2)}</p>
-          {packagingLoading ? <p role="status">Store Packaging: Loading from server…</p> : packagingError ? <div role="alert"><p>{packagingError}</p><button type="button" onClick={retry}>Retry packaging fee</button></div> : <p>Store Packaging ₹{packagingFee === null ? '—' : packagingFee}</p>}
-          <p>Total ₹{packagingFee === null ? '—' : payable}</p>
+        <section><h3>Cash tender</h3><label>Change calculator (not recorded) <input type="number" min="0" className="bg-neutral-800 p-2" value={cash} onChange={e => setCash(e.target.value)} /></label><p>Change: ₹{payable === null ? '—' : Math.max(0, (Number(cash) || 0) - payable).toFixed(2)}</p></section>
+        <section>
+          {cart.length === 0 ? <p>Add items to see the server's bill.</p> : quoteState.isLoading ? <p role="status">Bill: pricing on the server…</p> : quoteState.error ? <div role="alert"><p>{quoteState.error}</p><button type="button" onClick={quoteState.retry}>Retry bill</button></div> : totals ? (
+            <>
+              <p>Subtotal ₹{totals.foodSubtotal}</p>
+              <p>GST (5%, included) ₹{totals.gst.toFixed(2)}</p>
+              <p>Store Packaging ₹{totals.packagingFee}</p>
+              <p>Total ₹{totals.grandTotal}</p>
+            </>
+          ) : <p>Bill unavailable; retry before creating the order.</p>}
         </section>
         {error && <p role="alert">{error}</p>}
         {confirmedPrice && <p role="alert">Server total is ₹{confirmedPrice.total}. Review and submit again to confirm this price.</p>}
         {!branchId && <p role="alert">Select a branch before creating an order.</p>}
-        <button type="submit" className="bg-emerald-800 rounded p-3 disabled:opacity-50" disabled={!branchId || !validCart || submitting || packagingLoading || packagingFee === null}>{submitting ? 'Creating order…' : confirmedPrice ? `Confirm ₹${payable} and create order` : `Create order — payment pending (₹${packagingFee === null ? '—' : payable})`}</button>
+        <button type="submit" className="bg-emerald-800 rounded p-3 disabled:opacity-50" disabled={!branchId || !validCart || submitting || quotePending || quoteState.isLoading || expectedTotalPaise === null}>{submitting ? 'Creating order…' : confirmedPrice ? `Confirm ₹${payable} and create order` : `Create order — payment pending (${payable === null ? '—' : `₹${payable}`})`}</button>
       </form>
     </div>
   </div>;
