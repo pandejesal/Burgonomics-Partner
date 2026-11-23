@@ -50,6 +50,10 @@ export interface SettlementStatement {
   /** Negative or zero net means the branch owes the brand. */
   netPayablePaise: number;
   branchOwes: boolean;
+  outstandingPaise?: number;
+  ledgerSchema?: number;
+  current?: boolean;
+  complete?: boolean;
   feeApplicable: boolean;
   feeApplicableReason?: string;
   feeNote?: string;
@@ -170,10 +174,24 @@ export function settlementDateLabel(ms: number | null | undefined): string {
 
 /** Who owes whom, in words, instead of asking the reader to parse a minus. */
 export function settlementNetLabel(statement: SettlementStatement): string {
-  const net = Number(statement?.netPayablePaise) || 0;
+  const net = settlementOutstanding(statement);
+  if (net === null) return 'Payment blocked';
   if (net < 0) return 'Branch owes brand';
   if (net === 0) return 'Settled to zero';
   return 'Payable to branch';
+}
+
+export function settlementOutstanding(statement: SettlementStatement): number | null {
+  // Strict cutover gate: a legacy row (no ledger schema) is NEVER payable, even
+  // when it carries an old `netPayablePaise`. Only a signed outstanding from a
+  // current, complete ledger-schema-1 statement is actionable.
+  const amount = statement.outstandingPaise;
+  const actionable = statement.ledgerSchema === 1 &&
+    statement.current === true &&
+    statement.complete === true &&
+    statement.ordersTruncated !== true &&
+    typeof amount === 'number' && Number.isSafeInteger(amount);
+  return actionable ? amount : null;
 }
 
 /** Paid state with the reference once money has been recorded. */
@@ -185,7 +203,7 @@ export function settlementPaidLabel(statement: SettlementStatement): string {
 
 /** The amount the branch owes, as a positive figure, or 0 when it is owed money. */
 export function settlementAmountDue(statement: SettlementStatement): number {
-  const net = Number(statement?.netPayablePaise) || 0;
+  const net = settlementOutstanding(statement) ?? 0;
   return net < 0 ? Math.abs(net) : 0;
 }
 
@@ -211,6 +229,8 @@ export function sortStatementsForDisplay(
     }
   }
   return [...newest.values()].sort((a, b) => {
+    // Display order keeps the historical net key; only the payout surface
+    // switches to signed outstanding.
     const owingA = Number(a.netPayablePaise) < 0 ? 0 : 1;
     const owingB = Number(b.netPayablePaise) < 0 ? 0 : 1;
     if (owingA !== owingB) return owingA - owingB;
@@ -238,12 +258,13 @@ export function settlementTotals(
   const rows = sortStatementsForDisplay(statements);
   return rows.reduce<SettlementTotals>(
     (acc, statement) => {
-      acc.netPayablePaise += Number(statement.netPayablePaise) || 0;
+      const outstanding = settlementOutstanding(statement) ?? 0;
+      acc.netPayablePaise += outstanding;
       acc.feePaise += Number(statement.platformFeePaise) || 0;
       acc.onlineNetPaise += Number(statement.onlineNetPaise) || 0;
       acc.cashCollectedPaise += Number(statement.cashCollectedPaise) || 0;
-      if (Number(statement.netPayablePaise) < 0) {
-        acc.owesBrandPaise += Math.abs(Number(statement.netPayablePaise));
+      if (outstanding < 0) {
+        acc.owesBrandPaise += Math.abs(outstanding);
       }
       if (statement.paidStatus === 'paid') acc.paidCount += 1;
       else acc.unpaidCount += 1;

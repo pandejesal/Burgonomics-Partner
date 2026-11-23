@@ -89,6 +89,10 @@ function statement(over: Partial<SettlementStatement> = {}): SettlementStatement
     cashPendingOrders: 1,
     platformFeePaise: 200000,
     netPayablePaise: 1080000,
+    outstandingPaise: over.netPayablePaise ?? 1080000,
+    ledgerSchema: 1,
+    complete: true,
+    current: true,
     branchOwes: false,
     feeApplicable: true,
     paidStatus: 'unpaid',
@@ -165,6 +169,20 @@ describe('SettlementsPage', () => {
     const html = renderWithClient([statement()]);
     expect(html).toContain('Mark as paid');
     expect(html).toContain('Generate');
+  });
+
+  it.each([{ outstandingPaise: 0 }, { complete: false }, { current: false }, { ledgerSchema: 0 }])('no payout for %j', (fields) => {
+    const html = renderWithClient([statement(fields)]);
+    expect(html).not.toContain('Mark as paid');
+    expect(html).not.toContain('Record additional payment');
+  });
+
+  it('shows a late refund as a signed collection and offers only that delta', () => {
+    const html = renderWithClient([statement({ outstandingPaise: -5000 })]);
+    expect(html).toContain('-₹50');
+    expect(html).toContain('Branch owes brand');
+    expect(html).toContain('Mark as paid');
+    expect(html).not.toContain('₹10,800');
   });
 
   it('hides generation and mark-as-paid from a branch owner (read-only view)', () => {

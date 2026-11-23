@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { useBranches } from '@/hooks/useBranches';
 import { useSettlements, settlementErrorMessage } from '@/hooks/useSettlements';
@@ -11,6 +11,7 @@ import {
   settlementDateLabel,
   settlementMoney,
   settlementMonthOptions,
+  settlementOutstanding,
   settlementNetLabel,
   settlementPaidLabel,
   settlementTotals,
@@ -91,7 +92,6 @@ export function SettlementsPage({
   // operator states this is an ADDITIONAL payment. Two UTRs on one statement is
   // a real accounting event, so the escape hatch exists — but it is a decision,
   // never a silent double tap.
-  const [additionalPayment, setAdditionalPayment] = useState(false);
   const [reference, setReference] = useState('');
   const [paidOn, setPaidOn] = useState(todayIso());
   const [note, setNote] = useState('');
@@ -126,6 +126,14 @@ export function SettlementsPage({
   }
 
   const statements = hook.statements;
+  // A superseded, refreshed or now-blocked statement must close any open form.
+  const targetId = paidTarget?.id ?? null;
+  const targetStillActionable = !!paidTarget && statements.some(
+    (s) => s.id === paidTarget.id && settlementOutstanding(s) !== null
+  );
+  useEffect(() => {
+    if (targetId && !targetStillActionable) setPaidTarget(null);
+  }, [targetId, targetStillActionable]);
   const totals = settlementTotals(statements);
 
   const handleExport = async () => {
@@ -155,7 +163,7 @@ export function SettlementsPage({
   };
 
   const handleMarkPaid = async () => {
-    if (!paidTarget) return;
+    if (!paidTarget || !canMarkPaid || !statements.some(s => s.id === paidTarget.id && settlementOutstanding(s) === settlementOutstanding(paidTarget) && !!settlementOutstanding(s))) return;
     const trimmed = reference.trim();
     if (!trimmed) {
       toast.error('A payment reference is required (bank UTR, cheque or voucher number).');
@@ -167,13 +175,11 @@ export function SettlementsPage({
         reference: trimmed,
         paidOn,
         ...(note.trim() ? { note: note.trim() } : {}),
-        ...(additionalPayment ? { additionalPayment: true } : {}),
       });
       toast.success('Payment recorded. No money was moved by this app.');
       setPaidTarget(null);
       setReference('');
       setNote('');
-      setAdditionalPayment(false);
     } catch (err) {
       toast.error('Payment NOT recorded — the statement is unchanged.', {
         description: settlementErrorMessage(err),
@@ -294,7 +300,8 @@ export function SettlementsPage({
             </thead>
             <tbody className="divide-y divide-neutral-800">
               {statements.map((statement) => {
-                const owing = Number(statement.netPayablePaise) < 0;
+                const outstanding = settlementOutstanding(statement);
+                const owing = (outstanding ?? 0) < 0;
                 return (
                   <React.Fragment key={statement.id}>
                     <tr className="align-top">
@@ -331,7 +338,7 @@ export function SettlementsPage({
                         {settlementMoney(statement.platformFeePaise)}
                       </td>
                       <td className={`px-4 py-3 text-right font-black ${owing ? 'text-rose-300' : 'text-emerald-300'}`}>
-                        {settlementMoney(statement.netPayablePaise)}
+                        {outstanding === null ? 'Blocked' : settlementMoney(outstanding)}
                         <div className="text-[11px] font-semibold text-zinc-400">
                           {settlementNetLabel(statement)}
                         </div>
@@ -354,12 +361,11 @@ export function SettlementsPage({
                           >
                             {expandedId === statement.id ? 'Hide' : 'Details'}
                           </button>
-                          {canMarkPaid && statement.paidStatus !== 'paid' && (
+                          {canMarkPaid && outstanding !== null && outstanding !== 0 && (
                             <button
                               type="button"
                               onClick={() => {
                                 setPaidTarget(statement);
-                                setAdditionalPayment(false);
                                 setReference('');
                                 setPaidOn(todayIso());
                                 setNote('');
@@ -367,24 +373,6 @@ export function SettlementsPage({
                               className="min-h-11 px-3 py-2 rounded-lg bg-accent text-white font-bold"
                             >
                               Mark as paid
-                            </button>
-                          )}
-                          {canMarkPaid && statement.paidStatus === 'paid' && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setPaidTarget(statement);
-                                // A second payment on a settled statement is an
-                                // explicit decision: the form starts with the
-                                // additional-payment box ticked.
-                                setAdditionalPayment(true);
-                                setReference('');
-                                setPaidOn(todayIso());
-                                setNote('');
-                              }}
-                              className="min-h-11 px-3 py-2 rounded-lg bg-neutral-900 border border-neutral-700 text-zinc-200 font-bold"
-                            >
-                              Record additional payment
                             </button>
                           )}
                         </div>
@@ -453,7 +441,7 @@ export function SettlementsPage({
                                 <li className="flex justify-between gap-3 border-t border-neutral-800 pt-1">
                                   <span className="font-bold">Net payable</span>
                                   <span className={`font-black ${owing ? 'text-rose-300' : 'text-emerald-300'}`}>
-                                    {settlementMoney(statement.netPayablePaise)}
+                                    {outstanding === null ? 'Blocked' : settlementMoney(outstanding)}
                                   </span>
                                 </li>
                                 {owing && (
@@ -532,7 +520,7 @@ export function SettlementsPage({
           <div className="flex items-center gap-2">
             <IndianRupee className="w-4 h-4 text-accent" />
             <h2 className="font-bold text-white">
-              Record payment · {paidTarget.branchName} · {settlementMoney(paidTarget.netPayablePaise)}
+              Record payment · {paidTarget.branchName} · {settlementMoney(paidTarget.outstandingPaise ?? 0)}
             </h2>
           </div>
           <p className="text-xs text-zinc-400">
@@ -578,21 +566,6 @@ export function SettlementsPage({
               />
             </label>
           </div>
-          {paidTarget.paidStatus === 'paid' && (
-            <label className="flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-950/30 p-3">
-              <input
-                type="checkbox"
-                checked={additionalPayment}
-                onChange={(e) => setAdditionalPayment(e.target.checked)}
-                className="mt-0.5 h-4 w-4 shrink-0"
-              />
-              <span className="text-xs text-amber-200">
-                This is an <strong>additional</strong> payment on a statement that is already
-                marked paid. Leave it unticked unless you are recording a second payout — an
-                unticked second payment is refused.
-              </span>
-            </label>
-          )}
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
