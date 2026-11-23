@@ -12,6 +12,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import type { Branch, AcceptingOrdersStatus } from '@/types';
+import { isStoreClosedByStaff } from '@/features/stores/services/operatingGate';
 
 interface BranchSettingsModalProps {
   isOpen: boolean;
@@ -36,6 +37,7 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
   const [address, setAddress] = useState('');
   const [phone, setPhone] = useState('');
   const [status, setStatus] = useState<AcceptingOrdersStatus>('open');
+  const [originalStatus, setOriginalStatus] = useState<AcceptingOrdersStatus>('open');
   const [openTime, setOpenTime] = useState('11:00 AM');
   const [closeTime, setCloseTime] = useState('11:30 PM');
   const [prepTime, setPrepTime] = useState(20);
@@ -49,7 +51,13 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
       setCity(branch.city || '');
       setAddress(branch.address || '');
       setPhone(branch.phone || '');
-      setStatus(branch.acceptingOrdersStatus || (branch.active ? 'open' : 'closed'));
+      // r3 A5: a staff-close override outranks the cached mirrors; the modal
+      // must display and compare against the EFFECTIVE status.
+      const effective: AcceptingOrdersStatus = isStoreClosedByStaff(branch)
+        ? 'closed'
+        : branch.acceptingOrdersStatus || (branch.active ? 'open' : 'closed');
+      setStatus(effective);
+      setOriginalStatus(effective);
       setOpenTime(branch.operatingHours?.open || '11:00 AM');
       setCloseTime(branch.operatingHours?.close || '11:30 PM');
       setPrepTime(branch.prepTimeMinutes || 20);
@@ -63,19 +71,25 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await onSave(branch.id, {
+    // r3 A5: only an EXPLICIT gate change goes to the server route. An
+    // unrelated edit from a stale open modal must not carry active/status and
+    // accidentally request a reopen after another session closed the outlet.
+    const payload: Partial<Branch> = {
       name,
       city,
       address,
       phone,
-      active: status !== 'closed',
-      acceptingOrdersStatus: status,
       operatingHours: { open: openTime, close: closeTime },
       prepTimeMinutes: prepTime,
       deliveryRadiusKm: deliveryRadius,
       announcementBanner: announcement,
       petpoojaStoreId,
-    });
+    };
+    if (status !== originalStatus) {
+      payload.active = status !== 'closed';
+      payload.acceptingOrdersStatus = status;
+    }
+    await onSave(branch.id, payload);
     onClose();
   };
 

@@ -25,6 +25,10 @@ vi.mock('firebase/firestore', () => ({
   updateDoc: vi.fn(async (ref: { id: string }, data: Record<string, any>) => {
     state.updates.push({ id: ref.id, data });
   }),
+  runTransaction: async (_db: unknown, fn: any) => fn({
+    get: async () => ({ exists: () => true, data: () => ({ storeStatusOverride: true, acceptingOrdersStatus: 'closed' }) }),
+    update: (ref: { id: string }, data: Record<string, any>) => state.updates.push({ id: ref.id, data }),
+  }),
   query: vi.fn(),
   where: vi.fn(),
   Timestamp: { now: () => ({}) },
@@ -73,6 +77,13 @@ beforeEach(() => {
 });
 
 describe('useBranches.updateBranchSettings — protected fields', () => {
+  it('rejects the stale session’s surge after the other operator has closed the branch', async () => {
+    const cachedOpenSession = useBranches();
+    await expect(cachedOpenSession.updateBranchSettings.mutateAsync({
+      branchId: 'branch_surat_01', settings: { acceptingOrdersStatus: 'busy', active: true, prepTimeMinutes: 35 },
+    })).rejects.toThrow(/closed/i);
+    expect(state.updates).toHaveLength(0);
+  });
   it('omits every protected key for a branch role while saving unrelated fields', async () => {
     const { updateBranchSettings } = useBranches();
     await updateBranchSettings.mutateAsync({
