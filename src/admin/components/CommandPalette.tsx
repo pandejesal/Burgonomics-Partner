@@ -17,7 +17,6 @@ import {
   LogOut,
   Moon,
   Sun,
-  Shield,
 } from "lucide-react";
 import { useAdminTheme } from "../theme/ThemeContext";
 import { useAuthStore } from "@/stores/authStore";

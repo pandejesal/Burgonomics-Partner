@@ -107,6 +107,15 @@ export function SettlementsPage({
   const canMarkPaid = canRecordSettlementPayment(role);
   const brandWide = seesEveryBranch(role);
 
+  const statements = hook.statements;
+  // A superseded, refreshed or now-blocked statement must close any open form.
+  const targetId = paidTarget?.id ?? null;
+  const targetStillActionable = !!paidTarget && statements.some(
+    (s) => s.id === paidTarget.id && settlementOutstanding(s) !== null
+  );
+  useEffect(() => {
+    if (targetId && !targetStillActionable) setPaidTarget(null);
+  }, [targetId, targetStillActionable]);
   if (hook.forbidden) {
     return (
       <div
@@ -125,15 +134,6 @@ export function SettlementsPage({
     );
   }
 
-  const statements = hook.statements;
-  // A superseded, refreshed or now-blocked statement must close any open form.
-  const targetId = paidTarget?.id ?? null;
-  const targetStillActionable = !!paidTarget && statements.some(
-    (s) => s.id === paidTarget.id && settlementOutstanding(s) !== null
-  );
-  useEffect(() => {
-    if (targetId && !targetStillActionable) setPaidTarget(null);
-  }, [targetId, targetStillActionable]);
   const totals = settlementTotals(statements);
 
   const handleExport = async () => {
