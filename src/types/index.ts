@@ -36,6 +36,8 @@ export interface Branch {
   active: boolean;
   status?: BranchStatus;
   acceptingOrdersStatus?: AcceptingOrdersStatus;
+  /** Staff close in force (rule C); only a staff reopen clears it. */
+  storeStatusOverride?: boolean;
   prepTimeMinutes?: number;
   deliveryRadiusKm?: number;
   announcementBanner?: string;

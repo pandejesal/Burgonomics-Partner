@@ -258,6 +258,33 @@ export function useBranches() {
           delete writable[key];
         }
       }
+      // r2 A5: a surge/busy write must be guarded against the FRESH branch,
+      // not the session's cached view. A second operator may have closed the
+      // outlet after this screen last loaded; without a re-check its stale
+      // "busy" save would set active:true over an enforced staff close.
+      const surgeWrite =
+        writable.acceptingOrdersStatus === 'busy' ||
+        (writable.active === true && 'acceptingOrdersStatus' in writable);
+      if (surgeWrite) {
+        const firestore = await import('firebase/firestore');
+        if (typeof firestore.runTransaction === 'function') {
+          const rejected = await firestore.runTransaction(db, async (tx) => {
+            const snap = await tx.get(branchRef);
+            const fresh = (snap.data?.() ?? {}) as Record<string, unknown>;
+            const closed =
+              fresh.storeStatusOverride === true ||
+              fresh.acceptingOrdersStatus === 'closed' ||
+              fresh.active === false;
+            if (closed) return true;
+            tx.update(branchRef, { ...writable, updatedAt: Timestamp.now() });
+            return false;
+          });
+          if (rejected) {
+            throw new Error('This outlet is closed — reopen it before enabling Busy/Rush.');
+          }
+          return;
+        }
+      }
       await updateDoc(branchRef, {
         ...writable,
         updatedAt: Timestamp.now(),

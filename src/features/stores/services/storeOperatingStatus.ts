@@ -28,6 +28,7 @@
  * A refusal is thrown, never swallowed: callers must not toast success.
  */
 import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
+import { isStoreClosedByStaff } from './operatingGate';
 
 export type StoreOperatingStatus = 'open' | 'closed';
 
@@ -125,8 +126,18 @@ export function splitOperatingStatusChange(input: {
   }
 
   // "busy" is a surge control (prep buffer + flag), deliberately not a close.
+  // A5: while a staff close is in force it must NOT write `active: true` or
+  // `acceptingOrdersStatus: 'busy'` — that would make an outlet view claim the
+  // store accepts orders while the customer gate is still closed. Only the
+  // prep-buffer part of the surge may be saved; the surge awaits an explicit
+  // reopen, which is the only thing that clears `storeStatusOverride`.
   if (next === 'busy') {
-    return { gate: null, branchSettings: { ...settings } };
+    const branchSettings: Record<string, unknown> = { ...settings };
+    if (isStoreClosedByStaff(input.current)) {
+      delete branchSettings.acceptingOrdersStatus;
+      delete branchSettings.active;
+    }
+    return { gate: null, branchSettings };
   }
 
   const branchSettings: Record<string, unknown> = { ...settings };

@@ -14,6 +14,7 @@ import {
   applyStaffStoreStatus,
   refreshBranchCache,
 } from '@/features/stores/services/storeOperatingStatus';
+import { isStoreClosedByStaff } from '@/features/stores/services/operatingGate';
 import { toast } from 'sonner';
 import type { Branch, AcceptingOrdersStatus } from '@/types';
 
@@ -30,20 +31,30 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
   const [lastSavedPrep, setLastSavedPrep] = useState<number | undefined>(branch?.prepTimeMinutes);
   const [emergencyReason, setEmergencyReason] = useState<string | null>(null);
 
+  // A5: the canonical gate is the server-maintained staff close, not the local
+  // optimistic `status`. A surge selected while closed must never make any
+  // outlet view claim the store is accepting orders.
+  const closedByStaff = isStoreClosedByStaff(branch);
+  const shownStatus: AcceptingOrdersStatus = closedByStaff ? 'closed' : status;
+
   const prepDirty = !!branch?.id && prepTime !== (lastSavedPrep ?? 20);
 
   // 6a: re-mirror the incoming branch into local state. Deps are primitives
   // only, so a background refetch that returns unchanged values cannot
   // clobber a prep-time drag in progress.
   useEffect(() => {
-    setStatus(branch?.acceptingOrdersStatus || (branch?.active ? 'open' : 'closed'));
+    setStatus(
+      closedByStaff ? 'closed' : branch?.acceptingOrdersStatus || (branch?.active ? 'open' : 'closed'),
+    );
     setPrepTime(branch?.prepTimeMinutes || 20);
     setLastSavedPrep(branch?.prepTimeMinutes);
   }, [
     branch?.id,
     branch?.acceptingOrdersStatus,
     branch?.active,
+    branch?.storeStatusOverride,
     branch?.prepTimeMinutes,
+    closedByStaff,
   ]);
 
   // 6g: prep-time has its own save path — awaited Firestore write first,
@@ -66,13 +77,39 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
     }
   };
 
-  const prevStatus = branch?.acceptingOrdersStatus || (branch?.active ? 'open' : 'closed');
+  const prevStatus: AcceptingOrdersStatus = closedByStaff
+    ? 'closed'
+    : branch?.acceptingOrdersStatus || (branch?.active ? 'open' : 'closed');
 
   const handleUpdateStatus = async (
     newStatus: AcceptingOrdersStatus,
     reasonText?: string,
     bufferMins?: number
   ) => {
+    // A5: a surge on a closed store is NOT a reopen. Change only the prep buffer
+    // and say plainly that the outlet is still closed — never write `active:true`
+    // or `acceptingOrdersStatus:'busy'`, and never toast that orders are accepted.
+    if (newStatus === 'busy' && closedByStaff) {
+      if (!branch?.id) {
+        toast.error('No outlet linked — the prep buffer was not saved.');
+        return;
+      }
+      try {
+        await updateBranchSettings.mutateAsync({
+          branchId: branch.id,
+          settings: { prepTimeMinutes: bufferMins || prepTime },
+        });
+        setPrepTime(bufferMins || prepTime);
+        setLastSavedPrep(bufferMins || prepTime);
+        toast.info('Outlet is closed — prep buffer saved. Reopen it before using Busy/Rush.', {
+          description: 'The customer gate is still closed; no orders are being accepted.',
+        });
+      } catch {
+        toast.error('Prep buffer save failed — the outlet is still closed.');
+      }
+      return;
+    }
+
     setStatus(newStatus);
     setEmergencyReason(reasonText || null);
     if (bufferMins) {
@@ -158,14 +195,14 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
                 className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold border shrink-0 ${
                   !branch
                     ? 'bg-zinc-900 border-zinc-600 text-zinc-300'
-                    : status === 'open'
+                    : shownStatus === 'open'
                     ? 'bg-emerald-950 border-emerald-500/40 text-emerald-400'
-                    : status === 'busy'
+                    : shownStatus === 'busy'
                     ? 'bg-amber-950 border-amber-500/40 text-amber-400'
                     : 'bg-rose-950 border-rose-500/40 text-rose-400'
                 }`}
               >
-                {branch ? status.toUpperCase() : 'NO OUTLET'}
+                {branch ? shownStatus.toUpperCase() : 'NO OUTLET'}
               </span>
             </h2>
             <p className="text-xs text-neutral-400 min-w-0 break-words">
@@ -187,14 +224,14 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
           type="button"
           onClick={() => handleUpdateStatus('open', undefined, 20)}
           className={`p-4 rounded-2xl border text-left transition-colors cursor-pointer ${
-            status === 'open'
+            shownStatus === 'open'
               ? 'bg-[#0E4825] border-emerald-500 text-white shadow-xs'
               : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white'
           }`}
         >
           <div className="flex items-center justify-between mb-1">
             <span className="font-black text-sm text-emerald-300">● Open for Orders</span>
-            {status === 'open' && <CheckCircle2 className="w-4 h-4 text-emerald-300" />}
+            {shownStatus === 'open' && <CheckCircle2 className="w-4 h-4 text-emerald-300" />}
           </div>
           <p className="text-[11px] text-neutral-300">Accepting regular delivery & takeaway</p>
         </button>
@@ -202,8 +239,14 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
         <button
           type="button"
           onClick={() => handleUpdateStatus('busy', 'Rush Hours (+15m buffer)', 35)}
-          className={`p-4 rounded-2xl border text-left transition-colors cursor-pointer ${
-            status === 'busy'
+          disabled={closedByStaff || !branch?.id}
+          title={
+            closedByStaff
+              ? 'Reopen the outlet before enabling Busy/Rush'
+              : 'Adds 15m prep buffer to customer ETA'
+          }
+          className={`p-4 rounded-2xl border text-left transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+            shownStatus === 'busy'
               ? 'bg-amber-950 border-amber-500 text-white shadow-xs'
               : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white'
           }`}
@@ -219,14 +262,14 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
           type="button"
           onClick={() => handleUpdateStatus('closed', 'Manually Paused', 0)}
           className={`p-4 rounded-2xl border text-left transition-colors cursor-pointer ${
-            status === 'closed'
+            shownStatus === 'closed'
               ? 'bg-rose-950 border-rose-500 text-white shadow-xs'
               : 'bg-neutral-900 border-neutral-800 text-neutral-400 hover:text-white'
           }`}
         >
           <div className="flex items-center justify-between mb-1">
             <span className="font-black text-sm text-rose-300">■ Store Closed</span>
-            {status === 'closed' && <CheckCircle2 className="w-4 h-4 text-rose-300" />}
+            {shownStatus === 'closed' && <CheckCircle2 className="w-4 h-4 text-rose-300" />}
           </div>
           <p className="text-[11px] text-neutral-300">Temporarily pauses all online orders</p>
         </button>
@@ -243,7 +286,13 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
             <button
               type="button"
               onClick={() => handleUpdateStatus('busy', '30 Mins Rush Break', 40)}
-              className="px-3 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-200 font-bold text-xs flex items-center justify-center sm:justify-start gap-1.5 transition-colors cursor-pointer min-w-0"
+              disabled={closedByStaff || !branch?.id}
+              title={
+                closedByStaff
+                  ? 'Reopen the outlet before enabling Busy/Rush'
+                  : 'Adds a 30 minute rush buffer'
+              }
+              className="px-3 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-200 font-bold text-xs flex items-center justify-center sm:justify-start gap-1.5 transition-colors cursor-pointer min-w-0 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Flame className="w-3.5 h-3.5 text-orange-400 shrink-0" />
               <span className="break-words min-w-0">30m Rush Break</span>

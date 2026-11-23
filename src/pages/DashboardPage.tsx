@@ -14,6 +14,7 @@ import { RecentOrders } from '@/components/dashboard/RecentOrders';
 import { Spinner } from '@/components/ui/Spinner';
 import { summarizeIstDaySales } from '@/utils/analyticsMath';
 import { applyStaffStoreStatus } from '@/features/stores/services/storeOperatingStatus';
+import { isStoreClosedByStaff } from '@/features/stores/services/operatingGate';
 import { AlertTriangle } from 'lucide-react';
 
 function ageLabel(fromMs: number): string {
@@ -143,7 +144,9 @@ export function DashboardPage() {
           id: b.id,
           name: b.name,
           city: b.city,
-          isAcceptingOrders: b.active !== false && b.acceptingOrdersStatus !== 'closed',
+          // r2 A5: the staff-close override outranks both mirrors in every view.
+          isAcceptingOrders:
+            !isStoreClosedByStaff(b) && b.active !== false && b.acceptingOrdersStatus !== 'closed',
         }))}
         selectedBranchId={activeBranchId}
         isSuperadmin={isSuperadmin}

@@ -9,6 +9,7 @@ import {
   applyStaffStoreStatus,
   splitOperatingStatusChange,
 } from '@/features/stores/services/storeOperatingStatus';
+import { isStoreClosedByStaff } from '@/features/stores/services/operatingGate';
 import { FranchiseLeadsPipeline } from '@/components/stores/FranchiseLeadsPipeline';
 import { LaunchBroadcastModal } from '@/components/stores/LaunchBroadcastModal';
 import {
@@ -98,12 +99,12 @@ export function BranchesPage() {
     // ordering path reads. Split it: an open/closed CHANGE goes to the server
     // gate (which also owns `active` and the POS override); "busy" and every
     // other field stay a branch save.
+    // r2 A5: use the FRESH branch from the live list (the query updates across
+    // operator sessions) and pass the whole doc — including `storeStatusOverride`
+    // — so a surge save from a stale form cannot reopen a closed store.
     const target = branches.find((b) => b.id === branchId) ?? editingBranch;
     const split = splitOperatingStatusChange({
-      current: {
-        acceptingOrdersStatus: target?.acceptingOrdersStatus,
-        active: target?.active,
-      },
+      current: { ...(target ?? {}) },
       settings: settings as Record<string, unknown>,
     });
 
@@ -132,7 +133,10 @@ export function BranchesPage() {
    * offline while customers keep ordering.
    */
   const handleToggleBranchOperatingStatus = async (branch: Branch) => {
-    const closing = branch.active !== false;
+    // r3 A5: derive from the EFFECTIVE status. A stale card showing "open"
+    // while a staff override is in force is still closed — the action must not
+    // silently request a reopen.
+    const closing = !isStoreClosedByStaff(branch) && branch.active !== false;
     try {
       await applyStaffStoreStatus({
         branchId: branch.id,
@@ -300,6 +304,11 @@ export function BranchesPage() {
               {filteredBranches.map((branch) => {
                 const isComingSoon = branch.status === 'coming_soon';
                 const userCanEdit = canEditBranch(branch.id);
+                // r4: the action label/style MUST use the same effective state as
+                // the handler at line ~139. A stale `active:true` mirror under an
+                // override is closed, so it shows "Go Live" (reopen), never
+                // "Go Offline" (which would reopen via a close intent).
+                const closing = !isStoreClosedByStaff(branch) && branch.active !== false;
 
                 return (
                   <div
@@ -332,16 +341,20 @@ export function BranchesPage() {
                         {!isComingSoon && (
                           <span
                             className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold ${
-                              branch.acceptingOrdersStatus === 'busy'
+                              isStoreClosedByStaff(branch)
+                                ? 'bg-zinc-800 text-zinc-400 border border-zinc-700'
+                                : branch.acceptingOrdersStatus === 'busy'
                                 ? 'bg-amber-950 text-amber-400 border border-amber-800'
-                                : branch.active && branch.acceptingOrdersStatus !== 'closed'
+                                : branch.active
                                 ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
                                 : 'bg-zinc-800 text-zinc-400 border border-zinc-700'
                             }`}
                           >
-                            {branch.acceptingOrdersStatus === 'busy'
+                            {isStoreClosedByStaff(branch)
+                              ? 'Offline / Closed'
+                              : branch.acceptingOrdersStatus === 'busy'
                               ? 'Busy (Delays)'
-                              : branch.active && branch.acceptingOrdersStatus !== 'closed'
+                              : branch.active
                               ? 'Accepting Orders'
                               : 'Offline / Closed'}
                           </span>
@@ -439,13 +452,13 @@ export function BranchesPage() {
                         <button
                           onClick={() => handleToggleBranchOperatingStatus(branch)}
                           className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors flex items-center gap-1.5 cursor-pointer ${
-                            branch.active
+                            closing
                               ? 'bg-amber-950/40 text-amber-300 border-amber-800/60 hover:bg-amber-900/60'
                               : 'bg-emerald-950/40 text-emerald-300 border-emerald-800/60 hover:bg-emerald-900/60'
                           }`}
                         >
                           <Power className="w-3.5 h-3.5" />
-                          <span>{branch.active ? 'Go Offline' : 'Go Live'}</span>
+                          <span>{closing ? 'Go Offline' : 'Go Live'}</span>
                         </button>
                       )}
                     </div>
