@@ -636,9 +636,20 @@ export function getThermalReceiptText(
 
     text += lineSeparator + "\n";
     text += `SUBTOTAL                : ₹${order.totals.subtotal.toFixed(2).padStart(12)}\n`;
-    const discountVal = order.totals.discount ?? 0;
-    if (discountVal > 0) {
-      text += `DISCOUNT                : ₹-${discountVal.toFixed(2).padStart(12)}\n`;
+    // c9: print only the discount fields the server supplied. `discount` is a
+    // legacy aggregate and cannot distinguish an item discount from a coupon;
+    // using it made the coupon invisible (and could double-count a client-side
+    // sum). Customer receipts use the same explicit item/promo fields and label.
+    const itemDiscountVal = order.totals.itemDiscount ?? 0;
+    if (itemDiscountVal > 0) {
+      text += `${'ITEM DISCOUNT'.padEnd(24)}: ₹${(-itemDiscountVal).toFixed(2).padStart(12)}\n`;
+    }
+    const couponDiscountVal = order.totals.promoDiscount || order.promo?.discount || 0;
+    if (couponDiscountVal > 0) {
+      const couponCode =
+        typeof order.promo?.code === 'string' ? order.promo.code.trim() : '';
+      const couponLabel = `COUPON DISCOUNT${couponCode ? ` (${couponCode})` : ''}`;
+      text += `${couponLabel.padEnd(24)}: ₹${(-couponDiscountVal).toFixed(2).padStart(12)}\n`;
     }
     const delVal = order.totals.deliveryCharge ?? order.totals.deliveryFee ?? 0;
     if (delVal > 0) {
