@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { Capacitor } from "@capacitor/core";
 import { Link } from "react-router-dom";
 import {
   RefreshCw,
@@ -144,6 +145,11 @@ export const AdminPaymentHealthPage: React.FC = () => {
         />
 
         <div className="flex gap-2 self-start md:self-center">
+          {canModifyInfrastructure && !Capacitor.isNativePlatform() && (
+            <Link to="/admin/settlement-issues" className="inline-flex min-h-9 items-center rounded border border-current px-3 font-medium underline underline-offset-2">
+              Capture recovery
+            </Link>
+          )}
           <AdminButton
             variant="outline"
             size="sm"

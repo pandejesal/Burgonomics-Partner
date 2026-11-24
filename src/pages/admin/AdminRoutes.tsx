@@ -1,4 +1,5 @@
 import React, { Suspense, lazy } from "react";
+import { Capacitor } from "@capacitor/core";
 import { Routes, Route, Outlet, Navigate, Link } from "react-router-dom";
 import { useAuthStore } from "@/stores/authStore";
 import { canAccessRoute } from "@/core/auth/routePolicy";
@@ -22,6 +23,9 @@ import { AdminStoresPage } from "@/admin/pages/AdminStoresPage";
 // recharts bundle stays out of the shipped app entirely.
 const AdminCustomerAnalyticsPage = lazy(
   () => import("@/admin/pages/AdminCustomerAnalyticsPage")
+);
+const SettlementIssuesPage = lazy(
+  () => import("@/admin/pages/SettlementIssuesPage")
 );
 const AdminPaymentHealthPage = lazy(
   () => import("@/admin/pages/AdminPaymentHealthPage")
@@ -381,6 +385,14 @@ export function AdminRoutes() {
             </Suspense>
           }
         />
+        {!Capacitor.isNativePlatform() && <Route
+          path="settlement-issues"
+          element={
+            <Suspense fallback={<AdminLazyFallback />}>
+              <SettlementIssuesPage />
+            </Suspense>
+          }
+        />}
         <Route path="refunds" element={<AdminRefundsPage />} />
         <Route path="reconciliation" element={<AdminReconciliationPage />} />
 
