@@ -24,6 +24,17 @@ export interface ApiRequestOptions {
   responseFormat?: 'json' | 'text';
 }
 
+export interface CaptureRecoveryIssue {
+  id: string;
+  orderId: string;
+  paymentId: string;
+  status: 'open' | 'conflict' | 'resolved';
+  providerStatus?: string;
+  createdMonthKey?: string;
+  conflict?: { manualMonthKey: string; webhookMonthKey: string; manualAtMs: number; webhookAtMs: number };
+  pendingRegeneration?: { months: string[] };
+}
+
 /** Options exposed to public callers (book/rebook). Timeout defaults to 30 000. */
 export interface ApiOptions {
   timeoutMs?: number;
@@ -1164,6 +1175,23 @@ export const partnerFunctionsApi = {
    * health page MUST measure this instead of fabricating latency. Public
    * /health route — no auth needed, never reports healthy without it.
    */
+  /** Stuck-capture issues (brand only). Web-only admin page; no native change. */
+  async listCaptureIssues() {
+    return apiGet<{ issues: CaptureRecoveryIssue[] }>('/settlements/captureIssues');
+  },
+
+  async resolveCapture(body: { orderId: string; razorpayPaymentId: string; capturedAtMs: number; reason: string }) {
+    return apiRequest<{ ok: true; monthKey: string }>('/settlements/resolveCapture', body, { retries: 0 });
+  },
+
+  async reconcileCaptureMonth(body: { orderId: string; keepMonth: string; reason: string }) {
+    return apiRequest<{ ok: true; regenerationPending: boolean }>('/settlements/reconcileCaptureMonth', body, { retries: 0 });
+  },
+
+  async retryCaptureRegeneration(orderId: string) {
+    return apiRequest<{ ok: true; regenerationPending: boolean }>('/settlements/retryCaptureRegeneration', { orderId }, { retries: 0 });
+  },
+
   async checkApiHealth(): Promise<{ ok: boolean; latencyMs: number; service?: string }> {
     const baseUrl = getFunctionsBaseUrl();
     const started = Date.now();
