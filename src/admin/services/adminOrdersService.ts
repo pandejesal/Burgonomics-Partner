@@ -12,6 +12,7 @@ import {
 } from "firebase/firestore";
 import type { RichOrder } from "../pages/ordersData";
 import type {
+  AppliedPromo,
   CartLine,
   CartTotals,
   OrderAddressSnapshot,
@@ -333,6 +334,27 @@ function toTotals(o: NormalizedOrder, raw: Record<string, any>): CartTotals {
 }
 
 /**
+ * Server promo snapshot for receipts. Validate each field and copy it as-is;
+ * never derive a discount from totals or invent a code. A malformed/partial
+ * promo is omitted rather than printed as money.
+ */
+function toAppliedPromo(raw: Record<string, any>): AppliedPromo | null {
+  const src = raw.promo;
+  if (!src || typeof src !== "object" || Array.isArray(src)) return null;
+  const code = strOf(src.code).trim();
+  const discount = numOf(src.discount, Number.NaN);
+  if (!code || !Number.isFinite(discount) || discount <= 0) return null;
+  return {
+    code,
+    discount,
+    ...(strOf(src.offerId) ? { offerId: strOf(src.offerId) } : {}),
+    ...(strOf(src.description) ? { description: strOf(src.description) } : {}),
+    ...(strOf(src.savingsLabel) ? { savingsLabel: strOf(src.savingsLabel) } : {}),
+    ...(strOf(src.type) ? { type: strOf(src.type) } : {}),
+  };
+}
+
+/**
  * Delivery address snapshot — every required key is a string, defaulted to ""
  * (never undefined): the drawer renders this block for delivery orders and the
  * history table walks `address.contactName` as a nested path.
@@ -486,6 +508,7 @@ function toRichOrder(id: string, raw: Record<string, any>): RichOrder {
     address: toAddressSnapshot(raw),
     items: toCartLines(raw.items, storeId),
     totals: toTotals(o, raw),
+    promo: toAppliedPromo(raw),
     payment,
     placedAt,
     orderStatus: toRichStatus(o, raw),

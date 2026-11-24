@@ -10,6 +10,7 @@ import {
   getThermalReceiptText,
   type RichOrder,
 } from '../src/admin/pages/ordersData';
+import { toRichOrderForTest } from '../src/admin/services/adminOrdersService';
 
 function lineStartingWith(text: string, prefix: string): string {
   const line = text.split('\n').find((l) => l.startsWith(prefix));
@@ -31,32 +32,76 @@ describe('Thermal receipt coupon line (c9)', () => {
     return Number(line!.split('₹')[1]);
   }
 
-  it('prints the server coupon discount and reconciles subtotal - discount + fees = total', () => {
-    const order: RichOrder = {
-      ...base,
-      promo: { code: 'SAVE10', discount: 100 },
+  /** Sum EVERY printed totals row, including CGST/SGST, without item rows. */
+  function printedTotalsSum(text: string): number {
+    const lines = text.split('\n');
+    const start = lines.findIndex((l) => /^SUBTOTAL/.test(l));
+    const end = lines.findIndex((l) => /^GRAND TOTAL/.test(l));
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    return lines
+      .slice(start, end)
+      .filter((l) => l.includes('₹'))
+      .reduce((sum, l) => sum + Number(l.split('₹')[1]), 0);
+  }
+
+  function rawCouponOrder(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'ord_receipt_coupon',
+      customerId: 'cust_1',
+      customerName: 'Aarav',
+      branchId: 'branch_surat_01',
+      items: [{ id: 'p1', name: 'Burger', price: 1000, quantity: 1 }],
       totals: {
-        ...base.totals,
         subtotal: 1000,
         itemDiscount: 0,
         promoDiscount: 100,
         discount: 100,
+        taxes: 0,
+        tax: 0,
         deliveryFee: 50,
         deliveryCharge: 50,
         packingFee: 25,
         packagingCharge: 25,
         grandTotal: 975,
       },
-    };
+      promo: { code: 'SAVE10', discount: 100 },
+      orderType: 'delivery',
+      status: 'preparing',
+      paymentMethod: 'razorpay',
+      paymentStatus: 'completed',
+      createdAt: { seconds: 1762099000, toMillis: () => 1762099000_000 },
+      ...overrides,
+    } as any;
+  }
+
+  it('maps the live server promo and prints its code; every totals row reconciles', () => {
+    const order = toRichOrderForTest('ord_receipt_coupon', rawCouponOrder());
+    const text = getThermalReceiptText(order, 'INVOICE');
+    expect(order.promo).toMatchObject({ code: 'SAVE10', discount: 100 });
+    expect(text).toMatch(/COUPON DISCOUNT \(SAVE10\)/i);
+    expect(amountFor(text, /COUPON DISCOUNT/i)).toBe(-100);
+    expect(printedTotalsSum(text)).toBe(amountFor(text, /^GRAND TOTAL/));
+  });
+
+  it('uses the server promo.discount fallback when totals.promoDiscount is absent', () => {
+    const raw = rawCouponOrder({
+      totals: {
+        ...rawCouponOrder().totals,
+        promoDiscount: 0,
+        discount: 0,
+        deliveryFee: 0,
+        deliveryCharge: 0,
+        packingFee: 0,
+        packagingCharge: 0,
+        grandTotal: 900,
+      },
+    });
+    const order = toRichOrderForTest('ord_receipt_coupon', raw);
     const text = getThermalReceiptText(order, 'INVOICE');
     expect(text).toMatch(/COUPON DISCOUNT \(SAVE10\)/i);
     expect(amountFor(text, /COUPON DISCOUNT/i)).toBe(-100);
-    const subtotal = amountFor(text, /^SUBTOTAL/);
-    const discount = amountFor(text, /COUPON DISCOUNT/i);
-    const delivery = amountFor(text, /^DELIVERY CHARGE/);
-    const packing = amountFor(text, /^PACKAGING CHARGE/);
-    const total = amountFor(text, /^GRAND TOTAL/);
-    expect(subtotal + discount + delivery + packing).toBe(total);
+    expect(printedTotalsSum(text)).toBe(amountFor(text, /^GRAND TOTAL/));
   });
 
   it('hides the coupon line when there is no coupon and still reconciles an item discount', () => {
@@ -69,6 +114,8 @@ describe('Thermal receipt coupon line (c9)', () => {
         itemDiscount: 100,
         promoDiscount: 0,
         discount: 100,
+        tax: 0,
+        taxes: 0,
         deliveryFee: 0,
         deliveryCharge: 0,
         packingFee: 0,
@@ -79,10 +126,7 @@ describe('Thermal receipt coupon line (c9)', () => {
     const text = getThermalReceiptText(order, 'INVOICE');
     expect(text).not.toMatch(/COUPON DISCOUNT/i);
     expect(amountFor(text, /^ITEM DISCOUNT/)).toBe(-100);
-    const subtotal = amountFor(text, /^SUBTOTAL/);
-    const itemDiscount = amountFor(text, /^ITEM DISCOUNT/);
-    const total = amountFor(text, /^GRAND TOTAL/);
-    expect(subtotal + itemDiscount).toBe(total);
+    expect(printedTotalsSum(text)).toBe(amountFor(text, /^GRAND TOTAL/));
   });
 });
 
