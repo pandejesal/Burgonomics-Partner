@@ -24,6 +24,8 @@ export interface SettlementPaymentRecord {
   recordedBy: string;
   recordedByEmail: string | null;
   note: string | null;
+  /** The signed net this payment settled (a part payout is smaller than the balance). */
+  settledNetPaise?: number;
 }
 
 /**
@@ -46,6 +48,13 @@ export interface SettlementStatement {
   cashCollectedPaise: number;
   cashOrders: number;
   cashPendingOrders: number;
+  /** Walk-in counter UPI the branch took itself: reported apart from cash. */
+  branchUpiCollectedPaise?: number;
+  branchUpiOrders?: number;
+  /** Signed change against the previous version of the same month. */
+  netAdjustmentPaise?: number;
+  /** Online captures still pending brand review: they block this month. */
+  unresolvedCaptures?: number;
   platformFeePaise: number;
   /** Negative or zero net means the branch owes the brand. */
   netPayablePaise: number;
@@ -196,7 +205,15 @@ export function settlementOutstanding(statement: SettlementStatement): number | 
 
 /** Paid state with the reference once money has been recorded. */
 export function settlementPaidLabel(statement: SettlementStatement): string {
-  if (statement?.paidStatus !== 'paid') return 'Unpaid';
+  const outstanding = settlementOutstanding(statement);
+  if (outstanding === null) return 'Blocked';
+  if (outstanding !== 0) {
+    // A residual is never hidden behind a "Paid" badge: a part payment says so.
+    return statement.payments?.length
+      ? `Part-settled · ${settlementMoney(Math.abs(outstanding))} ${outstanding < 0 ? 'owed to brand' : 'still owed'}`
+      : 'Unpaid';
+  }
+  if (statement.paidStatus !== 'paid') return 'Settled to zero';
   const reference = String(statement.paymentReference ?? '').trim();
   return reference ? `Paid · ${reference}` : 'Paid';
 }
@@ -244,8 +261,12 @@ export function sortStatementsForDisplay(
 export interface SettlementTotals {
   netPayablePaise: number;
   feePaise: number;
+  onlineCollectedPaise: number;
+  onlineRefundedPaise: number;
   onlineNetPaise: number;
   cashCollectedPaise: number;
+  branchUpiCollectedPaise: number;
+  payableToBranchesPaise: number;
   owesBrandPaise: number;
   unpaidCount: number;
   paidCount: number;
@@ -261,12 +282,16 @@ export function settlementTotals(
       const outstanding = settlementOutstanding(statement) ?? 0;
       acc.netPayablePaise += outstanding;
       acc.feePaise += Number(statement.platformFeePaise) || 0;
+      acc.onlineCollectedPaise += Number(statement.onlineCollectedPaise) || 0;
+      acc.onlineRefundedPaise += Number(statement.onlineRefundedPaise) || 0;
       acc.onlineNetPaise += Number(statement.onlineNetPaise) || 0;
       acc.cashCollectedPaise += Number(statement.cashCollectedPaise) || 0;
-      if (outstanding < 0) {
-        acc.owesBrandPaise += Math.abs(outstanding);
-      }
-      if (statement.paidStatus === 'paid') acc.paidCount += 1;
+      acc.branchUpiCollectedPaise += Number(statement.branchUpiCollectedPaise) || 0;
+      // Payable and collect-back stay separate figures: netting them hides both
+      // the money to fund and the money to recover.
+      if (outstanding < 0) acc.owesBrandPaise += Math.abs(outstanding);
+      else acc.payableToBranchesPaise += outstanding;
+      if (statement.paidStatus === 'paid' && outstanding === 0) acc.paidCount += 1;
       else acc.unpaidCount += 1;
       acc.branchCount += 1;
       return acc;
@@ -274,8 +299,12 @@ export function settlementTotals(
     {
       netPayablePaise: 0,
       feePaise: 0,
+      onlineCollectedPaise: 0,
+      onlineRefundedPaise: 0,
       onlineNetPaise: 0,
       cashCollectedPaise: 0,
+      branchUpiCollectedPaise: 0,
+      payableToBranchesPaise: 0,
       owesBrandPaise: 0,
       unpaidCount: 0,
       paidCount: 0,

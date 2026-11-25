@@ -44,7 +44,7 @@ export function BranchConfigModal({
       'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=800&auto=format&fit=crop&q=80',
     petpoojaStoreId: '',
     razorpayAccountId: '',
-    monthlyFee: 2500,
+    monthlyFee: 2000,
     deliveryRadiusKm: 7,
     prepTimeMinutes: 20,
     operatingHours: { open: '11:00 AM', close: '11:30 PM' },
@@ -286,7 +286,7 @@ export function BranchConfigModal({
           <RazorpayRouteAccountCard
             accountId={formData.razorpayAccountId || ''}
             onChange={(accountId) => setFormData({ ...formData, razorpayAccountId: accountId })}
-            monthlyFee={formData.monthlyFee ?? 2500}
+            monthlyFee={formData.monthlyFee ?? 2000}
             onMonthlyFeeChange={(monthlyFee) => setFormData({ ...formData, monthlyFee })}
             canEditMonthlyFee={canEditMonthlyFee ?? isSuperAdmin}
             isSuperAdmin={isSuperAdmin}

@@ -39,6 +39,7 @@ export interface UseSettlementsResult {
     paidOn: string;
     note?: string;
     additionalPayment?: boolean;
+    settledNetPaise?: number;
   }) => Promise<void>;
   isGenerating: boolean;
   isMarkingPaid: boolean;
@@ -60,7 +61,13 @@ export function settlementErrorMessage(err: unknown): string {
       return 'That paid date is not valid (it must be a real date, not in the future).';
     }
     if (err.code === 'SETTLEMENT_ALREADY_PAID') {
-      return 'This statement is already marked paid. Tick "additional payment" only if you are recording a second payment.';
+      return 'This statement is already fully paid. Record a further transfer only as an additional payment.';
+    }
+    if (err.code === 'SETTLEMENT_REGENERATION_PENDING') {
+      return 'The month is being corrected after a refund or capture change. Wait for the new version before recording a payment.';
+    }
+    if (err.code === 'SETTLEMENT_INVALID_AMOUNT') {
+      return 'That amount is in the wrong direction or larger than the outstanding balance.';
     }
     return err.message;
   }
@@ -113,6 +120,7 @@ export function useSettlements(params: UseSettlementsParams): UseSettlementsResu
       paidOn: string;
       note?: string;
       additionalPayment?: boolean;
+      settledNetPaise?: number;
     }) => partnerFunctionsApi.markSettlementPaid(input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['settlements'] });

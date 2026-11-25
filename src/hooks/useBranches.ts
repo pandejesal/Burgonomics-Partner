@@ -39,7 +39,7 @@ export interface CreateBranchInput {
   bannerImage?: string;
   petpoojaStoreId?: string;
   razorpayAccountId?: string;
-  /** Fixed monthly branch fee in rupees; absent means ₹2,500, 0 means none. */
+  /** Fixed monthly branch fee in rupees; absent means ₹2,000, 0 means none. */
   monthlyFee?: number;
   deliveryRadiusKm?: number;
   prepTimeMinutes?: number;
@@ -86,7 +86,7 @@ export function useBranches() {
           prepTimeMinutes: 20,
           deliveryRadiusKm: 7,
           razorpayAccountId: 'acc_Rzp_Surat_01',
-          monthlyFee: 2500,
+          monthlyFee: 2000,
           announcementBanner: '🔥 Weekend Special: Flat 20% off Gourmet Burgers!',
           petpoojaStoreId: 'PP_SURAT_01',
           coordinates: { lat: 21.1959, lng: 72.7933 },
@@ -105,7 +105,7 @@ export function useBranches() {
           prepTimeMinutes: 25,
           deliveryRadiusKm: 8,
           razorpayAccountId: 'acc_Rzp_Ahmd_01',
-          monthlyFee: 2500,
+          monthlyFee: 2000,
           petpoojaStoreId: 'PP_AMD_01',
           coordinates: { lat: 23.0525, lng: 72.512 },
           operatingHours: { open: '11:00 AM', close: '11:30 PM' },
@@ -125,7 +125,7 @@ export function useBranches() {
           allowComingSoonSubscribers: true,
           subscribersCount: 142,
           razorpayAccountId: 'acc_Rzp_Vdr_01',
-          monthlyFee: 2500,
+          monthlyFee: 2000,
           coordinates: { lat: 22.3106, lng: 73.1695 },
           createdAt: Timestamp.now(),
         },
@@ -159,7 +159,7 @@ export function useBranches() {
         razorpayAccountId: branchInput.razorpayAccountId || null,
         // Fixed monthly fee (0 is valid and means no fee). Never write the
         // retired per-order royalty percentage on new branches.
-        monthlyFee: branchInput.monthlyFee ?? 2500,
+        monthlyFee: branchInput.monthlyFee ?? 2000,
         deliveryRadiusKm: branchInput.deliveryRadiusKm || 7,
         prepTimeMinutes: branchInput.prepTimeMinutes || 20,
         operatingHours: branchInput.operatingHours || { open: '11:00 AM', close: '11:30 PM' },

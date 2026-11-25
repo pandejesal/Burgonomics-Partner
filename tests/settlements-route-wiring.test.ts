@@ -42,8 +42,14 @@ describe('Settlements route wiring', () => {
   });
 
   it('derives every amount from the server statement - no local re-derivation', () => {
-    expect(page).toContain('netPayablePaise');
+    // Cycle 11: the row's payable is now the server-signed `outstandingPaise`
+    // (net payable minus recorded payments), not a locally recomputed net, and
+    // the footer reads the server totals. The invariant is unchanged: no amount
+    // on the screen is calculated from parts in this file.
+    expect(page).toContain('outstandingPaise');
     expect(page).toContain('platformFeePaise');
+    expect(page).toContain('payableToBranchesPaise');
+    expect(page).toContain('owesBrandPaise');
     // The screen must never recompute the payable from parts.
     expect(page).not.toMatch(/netPayable\s*=\s*.*-\s*.*fee/i);
   });

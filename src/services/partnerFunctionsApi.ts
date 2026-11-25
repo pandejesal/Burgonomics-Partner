@@ -1192,6 +1192,15 @@ export const partnerFunctionsApi = {
     return apiRequest<{ ok: true; regenerationPending: boolean }>('/settlements/retryCaptureRegeneration', { orderId }, { retries: 0 });
   },
 
+  /**
+   * Brand/developer only: the provider itself reports this payment was never
+   * captured, so the order can never carry a capture time. Refused server-side
+   * for anything captured, authorised, refunded or simply unknown.
+   */
+  async resolveCaptureNotCaptured(body: { orderId: string; razorpayPaymentId: string; reason: string }) {
+    return apiRequest<{ ok: true }>('/settlements/resolveNotCaptured', body, { retries: 0 });
+  },
+
   async checkApiHealth(): Promise<{ ok: boolean; latencyMs: number; service?: string }> {
     const baseUrl = getFunctionsBaseUrl();
     const started = Date.now();
@@ -1358,6 +1367,8 @@ export const partnerFunctionsApi = {
      * additional payment — a split payout or a top-up.
      */
     additionalPayment?: boolean;
+    /** The signed net this payment evidences; defaults to the outstanding balance. */
+    settledNetPaise?: number;
   }): Promise<{ statement: SettlementStatementRecord; reused: boolean }> {
     // Not retried: a replay could append a duplicate payment line.
     return await apiRequest('/settlements/markPaid', params, { retries: 0 });

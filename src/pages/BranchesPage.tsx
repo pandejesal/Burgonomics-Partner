@@ -189,7 +189,7 @@ export function BranchesPage() {
       // operator must paste the real Razorpay linked account; empty stays
       // empty and the Route worker skips the branch with a log.
       razorpayAccountId: '',
-      monthlyFee: 2500,
+      monthlyFee: 2000,
     });
     setShowAddBranchModal(true);
   };
@@ -409,7 +409,7 @@ export function BranchesPage() {
                           <div className="font-mono font-bold text-white mt-0.5">
                             {branch.monthlyFee != null
                               ? `₹${branch.monthlyFee.toLocaleString()} / month`
-                              : '₹2,500 / month (default)'}
+                              : '₹2,000 / month (default)'}
                           </div>
                         </div>
                       </div>

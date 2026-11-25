@@ -28,9 +28,11 @@ export function canAccessRoute(role: UserRole | undefined, pathname: string): bo
   // branch owner reaching /customers only ever got a permission-denied page.
   //
   // /settlements is NOT restricted for a branch owner: it reads its own
-  // branch's month-end statement (the server scopes the read and the
-  // `branch_settlements` rules admit ownsBranch). Generating a month and
-  // recording a payment stay brand-only, and the screen hides those actions.
+  // branch's month-end statement through the authenticated API, which returns a
+  // projected view (no brand staff e-mail, no internal control notes). The raw
+  // `branch_settlements` document is brand-only, so that projection cannot be
+  // bypassed by reading Firestore directly. Generating a month and recording a
+  // payment stay brand-only, and the screen hides those actions.
   if (role === 'branch_owner') {
     const restricted = ['/branches', '/users', '/admin', '/customers'];
     return !restricted.some((prefix) => path.startsWith(prefix));

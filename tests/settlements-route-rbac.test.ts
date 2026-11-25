@@ -124,11 +124,30 @@ describe('settlement display maths', () => {
 
   it('labels the paid state with the reference once money is recorded', () => {
     expect(settlementPaidLabel(statement())).toBe('Unpaid');
+    // A4 §6: "paid" now means the residual is settled. The fixture used to keep
+    // the full 10,800 outstanding while claiming paidStatus 'paid' — that is the
+    // exact contradiction the audit found, so the balance is zeroed to match.
     expect(
       settlementPaidLabel(
-        statement({ paidStatus: 'paid', paymentReference: 'NEFT-8891', paidAtMs: 0 })
+        statement({
+          paidStatus: 'paid',
+          paymentReference: 'NEFT-8891',
+          paidAtMs: 0,
+          outstandingPaise: 0,
+        })
       )
     ).toBe('Paid · NEFT-8891');
+    // Money still owed is never rendered as a clean "Paid · <ref>".
+    expect(
+      settlementPaidLabel(
+        statement({
+          paidStatus: 'paid',
+          paymentReference: 'NEFT-8891',
+          paidAtMs: 0,
+          payments: [{ paidAtMs: 0, reference: 'NEFT-8891', recordedBy: 'x', recordedByEmail: null, note: null, settledNetPaise: 400000 }],
+        })
+      )
+    ).toBe('Part-settled · ₹10,800 still owed');
   });
 
   it('never adds cash into the payable and keeps the fee a single line', () => {
