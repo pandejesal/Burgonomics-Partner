@@ -9,8 +9,71 @@ let isAudioUnlocked = false;
 let currentPendingCount = 0;
 let acknowledgedPendingCount: number | null = null;
 
+/**
+ * UX audit 2026-11-26 #3: "the chime is scheduled on a SUSPENDED context".
+ *
+ * A suspended AudioContext's clock does not advance, so tones scheduled into it
+ * do not play — but they are not discarded either. When the context is finally
+ * resumed every queued tone fires together: a burst of overlapping chimes
+ * exactly at the moment the kitchen thought audio came back.
+ *
+ * The rule enforced below is therefore absolute: NOTHING is ever scheduled
+ * unless `ctx.state === 'running'`. A resume is attempted first; while it is in
+ * flight every further request coalesces into ONE pending cue (never a queue),
+ * and if the resume is refused nothing plays and the board says so.
+ */
+let resumeInFlight: Promise<boolean> | null = null;
+/** One coalesced cue waiting for the in-flight resume to settle. */
+let queuedChimeGain: number | null = null;
+/** True while the context exists but is not running (sound cannot be honest). */
+let audioBlocked = false;
+const blockedSubscribers = new Set<(blocked: boolean) => void>();
+
 /** Repeating alarm interval — pending orders chime every 10 seconds. */
 export const KDS_ALARM_REPEAT_MS = 10000;
+
+/** Default chime gains (A5 / D6) before any staff volume multiplier. */
+const CHIME_GAIN_A5 = 0.3;
+const CHIME_GAIN_D6 = 0.35;
+
+/** Clamp a caller-supplied multiplier into the range that is actually audible. */
+function clampGainMultiplier(multiplier: number | undefined): number {
+  if (multiplier === undefined || !Number.isFinite(multiplier)) return 1;
+  // 0 would schedule a silent "success"; keep a floor so a chime that reports
+  // itself as played can really be heard.
+  return Math.min(2, Math.max(0.05, multiplier));
+}
+
+function setAudioBlocked(next: boolean): void {
+  if (audioBlocked === next) return;
+  audioBlocked = next;
+  for (const notify of blockedSubscribers) {
+    try {
+      notify(next);
+    } catch {
+      /* a listener throwing must not break the alarm path */
+    }
+  }
+}
+
+/**
+ * Subscribe to the honest "audio is blocked" flag. Returns an unsubscribe
+ * function. The KDS toolbar uses this so a refused resume turns the button
+ * back into the enable prompt instead of leaving a green "unmuted" icon over a
+ * silent kitchen.
+ */
+export function subscribeKDSAudioBlocked(listener: (blocked: boolean) => void): () => void {
+  blockedSubscribers.add(listener);
+  listener(audioBlocked);
+  return () => {
+    blockedSubscribers.delete(listener);
+  };
+}
+
+/** True when the audio context exists but is not running (no sound possible). */
+export function isKDSAudioBlocked(): boolean {
+  return audioBlocked;
+}
 
 /**
  * Initialize or get active AudioContext
@@ -28,25 +91,46 @@ function getAudioContext(): AudioContext | null {
 }
 
 /**
- * Unlocks AudioContext upon user gesture (click/touch)
+ * Unlocks AudioContext upon user gesture (click/touch).
+ *
+ * UX #3: the result is the CONTEXT's real state. A resume the autoplay policy
+ * refuses resolves normally but leaves `state === 'suspended'`; reporting
+ * `true` there is what made the toolbar advertise sound over a silent kitchen.
  */
 export async function unlockKDSAudio(): Promise<boolean> {
   try {
     const ctx = getAudioContext();
-    if (ctx && ctx.state === 'suspended') {
+    if (!ctx) {
+      isAudioUnlocked = false;
+      setAudioBlocked(true);
+      return false;
+    }
+    if (ctx.state === 'suspended') {
       await ctx.resume();
     }
-    isAudioUnlocked = true;
-    return true;
+    const running = ctx.state === 'running';
+    isAudioUnlocked = running;
+    // A refused resume also throws away any cue that was waiting on it: the
+    // tone was never heard, and replaying it later would be the burst.
+    if (!running) queuedChimeGain = null;
+    setAudioBlocked(!running);
+    return running;
   } catch (err) {
     console.warn('[KDSAudio] Failed to unlock audio context:', err);
+    isAudioUnlocked = false;
+    queuedChimeGain = null;
+    setAudioBlocked(true);
     return false;
   }
 }
 
 export function isKDSAudioUnlocked(): boolean {
   const ctx = getAudioContext();
-  return !!(isAudioUnlocked && ctx && ctx.state === 'running');
+  const running = !!(isAudioUnlocked && ctx && ctx.state === 'running');
+  // UX #3: reading the real state also keeps the "blocked" flag honest, so the
+  // toolbar never shows a green unmuted icon over a suspended context.
+  setAudioBlocked(!running);
+  return running;
 }
 
 /**
@@ -76,23 +160,75 @@ export function setKDSAudioMuted(muted: boolean): void {
  * Tone 1: 880.00 Hz (A5), ~0.35s, gain 0.30
  * Tone 2: 1174.66 Hz (D6), starts at +0.18s, ~0.65s, gain 0.35
  * Uses Web Audio API sine oscillator with exponential decay envelope.
+ *
+ * UX audit 2026-11-26 #3: a chime is only ever scheduled on a RUNNING context.
+ * Scheduling into a suspended one is silent now and a burst later, because a
+ * suspended context's clock does not advance. The call resumes first and plays
+ * after the resume resolves; repeated calls during that resume coalesce into
+ * ONE cue (newest gain wins) instead of stacking.
+ *
+ * `gainMultiplier` lets the Settings tester honour its volume slider without
+ * changing the alarm's own loudness.
  */
-export function playKDSChime(): void {
+export function playKDSChime(gainMultiplier?: number): void {
   if (isKDSAudioMuted()) return;
 
   const ctx = getAudioContext();
-  if (!ctx) return;
-
-  if (ctx.state === 'suspended') {
-    // Intentionally ignored: autoplay policy blocks resume until the first
-    // staff tap; the next chime attempt retries. Logged for diagnostics.
-    ctx.resume().catch((e) => console.debug('[KDSAudio] resume blocked until user gesture:', e?.message));
+  if (!ctx) {
+    setAudioBlocked(true);
+    return;
   }
 
+  if (ctx.state === 'running') {
+    setAudioBlocked(false);
+    scheduleChime(ctx, gainMultiplier);
+    return;
+  }
+
+  // Not running: remember the newest request only, and try to resume once.
+  queuedChimeGain = clampGainMultiplier(gainMultiplier);
+  setAudioBlocked(true);
+
+  if (resumeInFlight) {
+    // A resume is already in flight; this call's gain replaced the queued one,
+    // so the eventual output stays a single cue rather than a pile-up.
+    return;
+  }
+
+  resumeInFlight = (async () => {
+    try {
+      await ctx.resume();
+    } catch (e) {
+      console.debug('[KDSAudio] resume blocked until user gesture:', (e as Error)?.message);
+    } finally {
+      resumeInFlight = null;
+    }
+    return ctx.state === 'running';
+  })();
+
+  void resumeInFlight.then((running) => {
+    const pendingGain = queuedChimeGain;
+    queuedChimeGain = null;
+    if (!running) {
+      // Refused resume: the cue was never heard. Dropping it is the honest
+      // outcome — replaying it when audio returns later would be the burst.
+      isAudioUnlocked = false;
+      setAudioBlocked(true);
+      return;
+    }
+    isAudioUnlocked = true;
+    setAudioBlocked(false);
+    if (pendingGain !== null) scheduleChime(ctx, pendingGain);
+  });
+}
+
+/** Schedule the two tones. Only called with a context already `running`. */
+function scheduleChime(ctx: AudioContext, gainMultiplier?: number): void {
+  const multiplier = clampGainMultiplier(gainMultiplier);
   const now = ctx.currentTime;
   const notes = [
-    { freq: 880.0, time: 0.0, duration: 0.35, gain: 0.3 }, // A5
-    { freq: 1174.66, time: 0.18, duration: 0.65, gain: 0.35 }, // D6
+    { freq: 880.0, time: 0.0, duration: 0.35, gain: CHIME_GAIN_A5 * multiplier }, // A5
+    { freq: 1174.66, time: 0.18, duration: 0.65, gain: CHIME_GAIN_D6 * multiplier }, // D6
   ];
 
   notes.forEach(({ freq, time, duration, gain }) => {

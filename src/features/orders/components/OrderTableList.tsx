@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   Bike,
@@ -26,6 +26,15 @@ interface OrderTableListProps {
   onClearFilters?: () => void;
 }
 
+/**
+ * UX audit 2026-11-26 #17: this table painted EVERY order in the feed (the
+ * data layer caps at 100) inside one `overflow-x-auto` scroller with two
+ * sticky columns. On the Android tablet that is the default surface after
+ * login and the pinned columns tear during a diagonal drag. Render one page of
+ * rows with an explicit "show more" so painted cost stays flat.
+ */
+export const ORDER_TABLE_PAGE_SIZE = 25;
+
 export function OrderTableList({
   orders,
   onPrintKot,
@@ -39,6 +48,20 @@ export function OrderTableList({
   const deliveryQueuePath = (location.pathname || '').startsWith('/admin')
     ? '/admin/delivery-queue'
     : '/delivery-queue';
+
+  // UX #17: page the rows. Hooks must run before the early returns below, and a
+  // filter change (a shrinking feed) resets the window so "show more" never
+  // leaves an empty tail on screen.
+  const [visibleCount, setVisibleCount] = useState(ORDER_TABLE_PAGE_SIZE);
+  useEffect(() => {
+    setVisibleCount((current) =>
+      current > ORDER_TABLE_PAGE_SIZE && orders.length <= ORDER_TABLE_PAGE_SIZE
+        ? ORDER_TABLE_PAGE_SIZE
+        : current
+    );
+  }, [orders.length]);
+  const visibleOrders = orders.slice(0, visibleCount);
+  const hiddenCount = Math.max(0, orders.length - visibleOrders.length);
   if (isLoading) {
     return (
       <div className="p-8 text-center text-neutral-400 bg-neutral-900/60 rounded-2xl border border-neutral-800 animate-pulse">
@@ -98,14 +121,14 @@ export function OrderTableList({
             <th scope="col" className="py-3 px-4">Total</th>
             <th scope="col" className="py-3 px-4">Payment</th>
             <th scope="col" className="py-3 px-4">Status</th>
-            <th scope="col" className="py-3 px-4 text-right sticky right-0 z-20 bg-neutral-900">
+            <th scope="col" className="py-3 px-4 text-right right-0 z-20 bg-neutral-900 lg:sticky">
               Actions
             </th>
           </tr>
         </thead>
 
         <tbody className="divide-y divide-neutral-850">
-          {orders.map((order) => {
+          {visibleOrders.map((order) => {
             // Every order id starts `ord_17…`, so truncating from the LEFT made
             // every row render the same reference. orderRef() prefers shortCode
             // and falls back to the identifying tail.
@@ -232,9 +255,10 @@ export function OrderTableList({
                   <OrderStatusBadge status={order.status} />
                 </td>
 
-                {/* 1-Tap Row Actions. Sticky so the action stays reachable
-                    even when the table is scrolled to the left. */}
-                <td className="py-3 px-4 text-right sticky right-0 z-10 bg-neutral-950/95">
+                {/* 1-Tap Row Actions. Pinned only from `lg` up: below that the
+                    two pinned columns tore during a diagonal drag on the demo
+                    tablet, and the identity column alone is enough. */}
+                <td className="py-3 px-4 text-right right-0 z-10 bg-neutral-950/95 lg:sticky">
                   <div className="flex items-center justify-end gap-1.5">
                     {/* Print KOT */}
                     <button
@@ -291,6 +315,20 @@ export function OrderTableList({
         Scroll the table sideways for Status and Actions. Actions stay pinned on
         the right.
       </p>
+      {hiddenCount > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-neutral-800 px-4 py-2">
+          <span className="text-[11px] font-semibold text-neutral-400">
+            Showing {visibleOrders.length} of {orders.length} orders.
+          </span>
+          <button
+            type="button"
+            onClick={() => setVisibleCount((current) => current + ORDER_TABLE_PAGE_SIZE)}
+            className="min-h-11 px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-bold transition-colors cursor-pointer"
+          >
+            Show more ({hiddenCount} more)
+          </button>
+        </div>
+      )}
     </div>
   );
 }

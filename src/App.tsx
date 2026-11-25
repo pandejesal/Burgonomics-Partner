@@ -175,7 +175,16 @@ function App() {
         </RouteErrorBoundary>
       </Router>
       </AppErrorBoundary>
-      <Toaster position="top-right" richColors />
+      {/* UX audit 2026-11-26 #20: `top-right` with no safe-area offset put
+          toasts under the Android status bar and over the header's outlet
+          switcher (and on top of the KDS audio banner). Bottom-centre with the
+          gesture-bar inset matches the customer app's toaster. */}
+      <Toaster
+        position="bottom-center"
+        richColors
+        offset={{ bottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}
+        mobileOffset={{ bottom: 'calc(0.75rem + env(safe-area-inset-bottom, 0px))' }}
+      />
       </AuthProvider>
     </QueryClientProvider>
   );

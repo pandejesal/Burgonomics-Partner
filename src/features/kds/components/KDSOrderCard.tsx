@@ -169,8 +169,13 @@ export function KDSOrderCard({
       {/* Cash fee warning: the courier quote could not be verified. */}
       <DeliveryFeeUnverifiedWarning order={order} className="mx-3 my-2" />
 
-      {/* Items Checklist for Chefs */}
-      <div className="p-3.5 flex-1 space-y-2.5 overflow-y-auto max-h-[320px]">
+      {/* Items Checklist for Chefs. UX #14: this used to be its own
+          `max-h-[320px] overflow-y-auto` pane INSIDE a scrolling column inside
+          a scrolling `main` — three nested vertical scrollers, so a drag over a
+          ticket scrolled the ticket's item list instead of the makeline and a
+          long ticket hid its bump bar. The column now owns scrolling and this
+          list grows with the card, keeping the bump bar at the card's bottom. */}
+      <div className="p-3.5 flex-1 space-y-2.5">
         {order.items && order.items.length > 0 ? (
           order.items.map((item, idx) => {
             const isChecked = !!checkedItems[`${order.id}::${idx}`];

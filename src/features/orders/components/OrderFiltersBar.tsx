@@ -132,12 +132,20 @@ export function OrderFiltersBar({
 
       {/* Row 2: Channel Filter Tabs & Status Chips */}
       <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 border-t border-neutral-800/80 pt-3">
-        {/* Fulfillment Channel Tabs */}
-        <div className="flex items-center gap-1 p-1 rounded-xl bg-neutral-950 border border-neutral-800 overflow-x-auto max-w-full" onFocusCapture={revealFocusedFilter}>
+        {/* Fulfillment Channel Tabs. UX #16: these chips measured ~28px tall
+            (`px-3 py-1.5 text-xs`) while the KDS had already fixed the same
+            control to `min-h-11` — on a demo phone they were hard to hit and
+            easy to mis-tap. Same visual weight, 44px hit area. The row also
+            contains its own drag so a sideways swipe on the chips does not
+            pull the page. */}
+        <div
+          className="flex items-center gap-1 p-1 rounded-xl bg-neutral-950 border border-neutral-800 overflow-x-auto overscroll-x-contain max-w-full"
+          onFocusCapture={revealFocusedFilter}
+        >
           <button
             type="button"
             onClick={() => onChannelChange('all')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0 ${
+            className={`min-h-11 inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0 ${
               channelFilter === 'all'
                 ? 'bg-[#0E4825] text-emerald-300 shadow-xs'
                 : 'text-neutral-400 hover:text-white'
@@ -149,7 +157,7 @@ export function OrderFiltersBar({
           <button
             type="button"
             onClick={() => onChannelChange('delivery')}
-            className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0 ${
+            className={`min-h-11 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0 ${
               channelFilter === 'delivery'
                 ? 'bg-orange-600 text-white shadow-xs'
                 : 'text-neutral-400 hover:text-white'
@@ -162,7 +170,7 @@ export function OrderFiltersBar({
           <button
             type="button"
             onClick={() => onChannelChange('takeaway')}
-            className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0 ${
+            className={`min-h-11 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0 ${
               channelFilter === 'takeaway'
                 ? 'bg-emerald-700 text-white shadow-xs'
                 : 'text-neutral-400 hover:text-white'
@@ -175,7 +183,7 @@ export function OrderFiltersBar({
           <button
             type="button"
             onClick={() => onChannelChange('dinein')}
-            className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0 ${
+            className={`min-h-11 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0 ${
               channelFilter === 'dinein'
                 ? 'bg-cyan-700 text-white shadow-xs'
                 : 'text-neutral-400 hover:text-white'
@@ -188,7 +196,7 @@ export function OrderFiltersBar({
 
         {/* Payment stream chips: Razorpay / Cash & counter / Unpaid */}
         <div
-          className="flex items-center gap-1.5 overflow-x-auto max-w-full pb-1 lg:pb-0"
+          className="flex items-center gap-1.5 overflow-x-auto overscroll-x-contain max-w-full pb-1 lg:pb-0"
           onFocusCapture={revealFocusedFilter}
           role="group"
           aria-label="Filter by payment stream"
@@ -208,7 +216,7 @@ export function OrderFiltersBar({
                 type="button"
                 onClick={() => onPaymentChange(chip.key)}
                 aria-pressed={isActive}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer shrink-0 ${
+                className={`min-h-11 inline-flex items-center px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer shrink-0 ${
                   isActive
                     ? 'bg-purple-900/60 text-purple-200 border-purple-500/60'
                     : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white hover:border-neutral-700'
@@ -221,7 +229,12 @@ export function OrderFiltersBar({
         </div>
 
         {/* Status Chips */}
-        <div className="flex items-center gap-1.5 overflow-x-auto max-w-full pb-1 lg:pb-0" onFocusCapture={revealFocusedFilter}>
+        <div
+          className="flex items-center gap-1.5 overflow-x-auto overscroll-x-contain max-w-full pb-1 lg:pb-0"
+          onFocusCapture={revealFocusedFilter}
+          role="group"
+          aria-label="Filter by order status"
+        >
           {STATUS_CHIPS.map((chip) => {
             const isActive = statusFilter === chip.key;
             return (
@@ -229,7 +242,8 @@ export function OrderFiltersBar({
                 key={chip.key}
                 type="button"
                 onClick={() => onStatusChange(chip.key)}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer shrink-0 ${
+                aria-pressed={isActive}
+                className={`min-h-11 inline-flex items-center px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer shrink-0 ${
                   isActive
                     ? 'bg-neutral-200 text-black border-white'
                     : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white hover:border-neutral-700'

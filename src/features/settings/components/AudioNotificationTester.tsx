@@ -53,7 +53,10 @@ export function AudioNotificationTester() {
     } else if (!unlocked) {
       toast.error('Audio could not be unlocked — nothing played. Tap the screen once, then retry.');
     } else {
-      playKDSChime();
+      // UX #19: the slider now really changes the PREVIEW's loudness — it feeds
+      // the chime's gain multiplier instead of only its own label. The alarm
+      // itself is unchanged (see the note under the slider).
+      playKDSChime(volume / 100);
       toast.success('Played the kitchen alarm test tone (A5 → D6).');
     }
 
@@ -165,8 +168,9 @@ export function AudioNotificationTester() {
           </div>
 
           <p className="text-[10px] text-neutral-500">
-            Visual reference only — this slider does not change the alarm volume or the
-            system volume (use your device volume).
+            Adjusts the PREVIEW tone only — the pending-order alarm uses your device's
+            volume, so this slider does not change the alarm volume. Use your device
+            volume for the kitchen.
           </p>
 
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pt-1 max-w-full min-w-0">

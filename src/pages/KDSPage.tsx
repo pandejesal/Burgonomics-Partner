@@ -53,7 +53,19 @@ export function KDSPage() {
   const { selectedBranchId, setSelectedBranchId } = useAppStore();
 
   const headerRef = useRef<HTMLElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const [isHeaderSticky, setIsHeaderSticky] = useState(false);
+
+  /**
+   * UX audit 2026-11-26 #15: the new-order overlay is anchored under the
+   * toolbar, so its real bottom edge is published as `--kds-chrome-bottom`.
+   * Published from the SAME measurement that decides stickiness (a second
+   * ResizeObserver on this header would split one measurement into two sources
+   * of truth and double the layout work on a wall tablet). The measure function
+   * is kept in a ref so a strip appearing/disappearing can re-measure it
+   * without creating another observer.
+   */
+  const remeasureHeader = useRef<(() => void) | null>(null);
 
   useSafeLayoutEffect(() => {
     if (typeof ResizeObserver === 'undefined') {
@@ -64,12 +76,24 @@ export function KDSPage() {
     if (!el) return;
 
     const measure = () => {
+      // Publish the toolbar's bottom edge first: the arrival overlay must sit
+      // under the toolbar even when this measurement decides it is not sticky.
+      const root = rootRef.current;
+      if (root) {
+        const rootTop = root.getBoundingClientRect().top;
+        const headerBottom = el.getBoundingClientRect().bottom;
+        root.style.setProperty(
+          '--kds-chrome-bottom',
+          `${Math.max(0, Math.round(headerBottom - rootTop))}px`,
+        );
+      }
       const height = el.getBoundingClientRect().height || el.offsetHeight || 0;
       const vh = typeof window !== 'undefined' ? window.innerHeight || 0 : 0;
       const shouldPin = height > 0 && vh > 0 && height < vh / 2;
       setIsHeaderSticky((prev) => (prev !== shouldPin ? shouldPin : prev));
     };
 
+    remeasureHeader.current = measure;
     measure();
 
     const ro = new ResizeObserver(() => {
@@ -85,6 +109,7 @@ export function KDSPage() {
     window.addEventListener('resize', onResize);
 
     return () => {
+      remeasureHeader.current = null;
       ro.disconnect();
       window.removeEventListener('resize', onResize);
     };
@@ -119,7 +144,19 @@ export function KDSPage() {
   const scopeNotice = readsCompleteScope ? null : scopeTruncationNotice(scopeBranchIds);
   const [nowTick, setNowTick] = useState(0);
   useEffect(() => {
-    const t = window.setInterval(() => setNowTick(Date.now()), 15000);
+    const t = window.setInterval(() => {
+      setNowTick(Date.now());
+      // UX audit 2026-11-26 #3: the toolbar must not keep advertising sound
+      // while the AudioContext is not running (a refused resume, a screen that
+      // slept, a discarded context). This cheap periodic re-read — on the clock
+      // the header already ticks — flips `audioUnlocked` back to false so the
+      // "Click to Enable Audio Alarm" prompt returns. The chime module itself
+      // never schedules a tone in that state; this keeps the ICON honest too.
+      setAudioUnlocked((prev) => {
+        const live = isKDSAudioUnlocked();
+        return prev === live ? prev : live;
+      });
+    }, 15000);
     return () => window.clearInterval(t);
   }, []);
   void nowTick;
@@ -129,6 +166,22 @@ export function KDSPage() {
   const liveUnavailable = streamStatus === 'live_unavailable';
   const streamLive = streamStatus === 'live';
   const freshnessLabel = formatKdsDataAge(Date.now(), lastRefreshAt, streamLive);
+
+  /**
+   * UX audit 2026-11-26 #6: whether a top strip (offline / degraded) is up.
+   * Whichever strip is topmost owns the safe-area inset; the toolbar then
+   * drops its own copy so the two never stack.
+   */
+  const stripOwnsInset = !isOnline || liveUnavailable;
+
+  /**
+   * A strip appearing or disappearing moves where the toolbar starts, so the
+   * published `--kds-chrome-bottom` must be re-measured. This reuses the
+   * observer installed above (no second ResizeObserver on the header).
+   */
+  useEffect(() => {
+    remeasureHeader.current?.();
+  }, [stripOwnsInset]);
 
   // Channel filter: 'all' | 'delivery' | 'takeaway' | 'dinein'
   const [channelFilter, setChannelFilter] = useState<OrderType | 'all'>('all');
@@ -235,6 +288,21 @@ export function KDSPage() {
     if (!nextMuted) {
       handleUnlockAudio();
     }
+  };
+
+  /**
+   * UX audit 2026-11-26 #4: "Not now — keep silent" only persisted the
+   * intro-seen flag and left `isMuted` false, so the toolbar kept the green
+   * unmuted `Volume2` icon over a kitchen that could not beep for the rest of
+   * the demo. Dismissing the intro now goes through the SAME path as the mute
+   * toggle, so the red `VolumeX` state is truthful and the alarm stops at the
+   * source.
+   */
+  const handleKeepSilentFromIntro = () => {
+    dismissAudioIntro();
+    setIsMuted(true);
+    setKDSAudioMuted(true);
+    setAudioUnlocked(false);
   };
 
   const CHECKLIST_SEP = '::';
@@ -398,43 +466,42 @@ export function KDSPage() {
   );
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white flex flex-col font-sans select-none pt-safe">
+    <div
+      ref={rootRef}
+      className="relative min-h-screen bg-[#050505] text-white flex flex-col font-sans select-none"
+    >
+      {/* UX audit 2026-11-26 #6: the top safe-area inset had THREE owners on
+          this screen — the root's `pt-safe`, the toolbar's
+          `calc(var(--safe-area-inset-top) + 0.75rem)` and each strip's
+          `calc(env(safe-area-inset-top) + 0.625rem)` — so on a punch-hole
+          Android phone the toolbar started ~40-48px low and the red
+          "KITCHEN OFFLINE" strip floated away from the status bar.
+          Exactly one owner now, decided by what is actually topmost:
+            - a strip is up -> the FIRST strip owns the inset, toolbar does not;
+            - no strip      -> the toolbar owns it (see the toolbar comment).
+          The root is only the positioning context for the arrival overlay. */}
       {/* Offline Loss Alert Banner */}
       {!isOnline && (
         <div
           role="alert"
-          className="bg-red-600 text-white px-4 py-2.5 pt-[calc(env(safe-area-inset-top,0px)_+_0.625rem)] flex items-center justify-center gap-2 font-black text-sm uppercase tracking-wider animate-pulse shadow-md z-50"
+          className="bg-red-600 text-white px-4 pb-2.5 pt-[calc(env(safe-area-inset-top,0px)_+_0.625rem)] flex items-center justify-center gap-2 font-black text-sm uppercase tracking-wider animate-pulse shadow-md z-50"
         >
           <WifiOff className="w-5 h-5 stroke-[2.5]" aria-hidden="true" />
           <span>⚠️ KITCHEN OFFLINE - CHECK INTERNET & RECONNECTING WEBSOCKET...</span>
         </div>
       )}
 
-      {/* Non-audio new-order signal (A11Y-14): visible banner + persistent
-          polite live region. Sound is best-effort; this is not. */}
-      <KDSNewOrderAlert
-        orderIds={newOrderIds}
-        totalCount={newOrderTotal}
-        onDismiss={dismissNewOrderAlert}
-      />
-
-      {/* One-time audio-unlock onboarding (dismissible, persisted) */}
-      {!isMuted && !audioUnlocked && !audioIntroDismissed && (
-        <KDSAudioUnlockModal
-          open
-          onEnable={() => void handleEnableAudioFromIntro()}
-          onDismiss={dismissAudioIntro}
-        />
-      )}
-
       {/* Live-stream degradation banner. Announced politely (role=status),
           never claimed live while the listener is dead. The data-age chip in
           the header carries the staleness number so this banner's text stays
-          static and does not re-announce on every tick. */}
+          static and does not re-announce on every tick.
+          The inset is only its own when it is the TOPMOST strip. */}
       {liveUnavailable && (
         <div
           role="status"
-          className="bg-amber-950/60 border-b border-amber-500/40 text-amber-200 px-4 py-2.5 pt-[calc(env(safe-area-inset-top,0px)_+_0.625rem)] flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 text-xs font-bold"
+          className={`bg-amber-950/60 border-b border-amber-500/40 text-amber-200 px-4 pb-2.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 text-xs font-bold ${
+            isOnline ? 'pt-[calc(env(safe-area-inset-top,0px)_+_0.625rem)]' : 'pt-2.5'
+          }`}
         >
           <AlertTriangle className="w-4 h-4 stroke-[2.5] text-amber-400 shrink-0" aria-hidden="true" />
           <span>
@@ -452,16 +519,43 @@ export function KDSPage() {
         </div>
       )}
 
+      {/* Non-audio new-order signal (A11Y-14): visible OVERLAY + persistent
+          polite live region. Sound is best-effort; this is not. UX #15: it used
+          to be a flow row above the makeline, so every arrival shoved the whole
+          grid down. It is now out of flow (see KDSNewOrderAlert). */}
+      <KDSNewOrderAlert
+        orderIds={newOrderIds}
+        totalCount={newOrderTotal}
+        onDismiss={dismissNewOrderAlert}
+      />
+
+      {/* One-time audio-unlock onboarding (dismissible, persisted). UX #4:
+          "keep silent" goes through the mute path, never a silent-but-green
+          toolbar. */}
+      {!isMuted && !audioUnlocked && !audioIntroDismissed && (
+        <KDSAudioUnlockModal
+          open
+          onEnable={() => void handleEnableAudioFromIntro()}
+          onDismiss={handleKeepSilentFromIntro}
+        />
+      )}
+
       {/* Top Operations Toolbar. On a notched/punch-hole phone the WebView
           starts at y=0, so the toolbar keeps the OS inset ABOVE the existing
           12px rhythm instead of sitting under the status bar (verified at
-          360 CSS px: header top0/paddingTop12 in DEVICE_CHECKS.md). */}
+          360 CSS px: header top0/paddingTop12 in DEVICE_CHECKS.md). When a
+          strip is already clearing the status bar, the toolbar drops the inset
+          so the two never stack. */}
       <header
         ref={headerRef}
         className={`px-4 py-3 bg-[#0A0A0A] border-b border-neutral-800 flex flex-wrap items-center justify-between gap-3 ${
           isHeaderSticky ? 'sticky top-0 z-40' : 'relative z-40'
         }`}
-        style={{ paddingTop: 'calc(var(--safe-area-inset-top, env(safe-area-inset-top, 0px)) + 0.75rem)' }}
+        style={{
+          paddingTop: stripOwnsInset
+            ? '0.75rem'
+            : 'calc(var(--safe-area-inset-top, env(safe-area-inset-top, 0px)) + 0.75rem)',
+        }}
       >
         <div className="flex flex-wrap items-center gap-2 sm:gap-3 min-w-0">
           <Link
@@ -655,12 +749,15 @@ export function KDSPage() {
         )}
       </header>
 
-      {/* Main 3-Column Makeline Kanban Grid */}
-      <main className="flex-1 p-3 sm:p-4 grid grid-cols-1 md:grid-cols-3 gap-4 overflow-y-auto">
+      {/* Main 3-Column Makeline Kanban Grid. UX #14: scrolling belongs to the
+          COLUMN, not to `main` — three nested vertical scrollers meant a drag
+          over a ticket scrolled the ticket's item list instead of the
+          makeline. `main` keeps the grid and hands vertical scroll down. */}
+      <main className="flex-1 min-h-0 p-3 sm:p-4 grid grid-cols-1 md:grid-cols-3 gap-4 md:overflow-hidden">
         {/* Column 1: New KOTs (Pending) */}
         <section
           aria-label="New KOTs"
-          className="flex flex-col rounded-2xl bg-[#090909] border border-neutral-800/80 overflow-hidden"
+          className="flex flex-col min-h-0 rounded-2xl bg-[#090909] border border-neutral-800/80 overflow-hidden"
         >
           <div className="p-3 bg-neutral-900/90 border-b border-neutral-800 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -674,7 +771,7 @@ export function KDSPage() {
             </span>
           </div>
 
-          <div className="flex-1 p-3 space-y-3.5 overflow-y-auto">
+          <div className="flex-1 min-h-0 p-3 space-y-3.5 overflow-y-auto overscroll-contain">
             {renderColumnBody(
               pendingColumn,
               filteredPending,
@@ -700,7 +797,7 @@ export function KDSPage() {
         {/* Column 2: On The Grill (Preparing) */}
         <section
           aria-label="On The Grill"
-          className="flex flex-col rounded-2xl bg-[#090909] border border-neutral-800/80 overflow-hidden"
+          className="flex flex-col min-h-0 rounded-2xl bg-[#090909] border border-neutral-800/80 overflow-hidden"
         >
           <div className="p-3 bg-neutral-900/90 border-b border-neutral-800 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -714,7 +811,7 @@ export function KDSPage() {
             </span>
           </div>
 
-          <div className="flex-1 p-3 space-y-3.5 overflow-y-auto">
+          <div className="flex-1 min-h-0 p-3 space-y-3.5 overflow-y-auto overscroll-contain">
             {renderColumnBody(
               preparingColumn,
               filteredPreparing,
@@ -740,7 +837,7 @@ export function KDSPage() {
         {/* Column 3: Ready / Packing */}
         <section
           aria-label="Ready at Counter"
-          className="flex flex-col rounded-2xl bg-[#090909] border border-neutral-800/80 overflow-hidden"
+          className="flex flex-col min-h-0 rounded-2xl bg-[#090909] border border-neutral-800/80 overflow-hidden"
         >
           <div className="p-3 bg-neutral-900/90 border-b border-neutral-800 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -754,7 +851,7 @@ export function KDSPage() {
             </span>
           </div>
 
-          <div className="flex-1 p-3 space-y-3.5 overflow-y-auto">
+          <div className="flex-1 min-h-0 p-3 space-y-3.5 overflow-y-auto overscroll-contain">
             {renderColumnBody(
               readyColumn,
               filteredReady,

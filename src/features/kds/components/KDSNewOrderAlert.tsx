@@ -48,21 +48,33 @@ export function KDSNewOrderAlert({
       </div>
 
       {orderIds.length > 0 && (
-        <div className="bg-emerald-600 text-white px-4 py-2.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 text-sm font-black uppercase tracking-wider shadow-md z-50">
-          <BellRing className="w-5 h-5 stroke-[2.5] shrink-0" aria-hidden="true" />
-          <span>
-            New order{total > 1 ? 's' : ''} received{total > 1 ? ` (${total})` : ''} —{' '}
-            {labels.join(', ')}
-            {overflow > 0 ? ` (+${overflow} more)` : ''}
-          </span>
-          <button
-            type="button"
-            onClick={onDismiss}
-            aria-label="Dismiss new order alert"
-            className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg bg-emerald-800/70 border border-white/30 hover:bg-emerald-800 transition-colors cursor-pointer"
-          >
-            <X className="w-4 h-4" aria-hidden="true" />
-          </button>
+        /* UX #15: the banner used to be a flow row above the makeline, so every
+           arriving ticket shoved the whole three-column grid down and back up
+           at the exact moment the client was watching. It is now an overlay
+           anchored under the toolbar the page measured (`--kds-chrome-bottom`,
+           published by KDSPage), so the layout never moves. The wrapper is
+           pointer-transparent and only the pill itself takes taps, so the
+           tickets underneath stay reachable while the alert is up. */
+        <div
+          data-testid="kds-new-order-banner"
+          className="absolute inset-x-0 top-[var(--kds-chrome-bottom,calc(env(safe-area-inset-top,0px)+3.5rem))] z-50 px-3 pt-2 pointer-events-none"
+        >
+          <div className="rounded-xl bg-emerald-600 text-white px-4 py-2.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 text-sm font-black uppercase tracking-wider shadow-md pointer-events-auto">
+            <BellRing className="w-5 h-5 stroke-[2.5] shrink-0" aria-hidden="true" />
+            <span>
+              New order{total > 1 ? 's' : ''} received{total > 1 ? ` (${total})` : ''} —{' '}
+              {labels.join(', ')}
+              {overflow > 0 ? ` (+${overflow} more)` : ''}
+            </span>
+            <button
+              type="button"
+              onClick={onDismiss}
+              aria-label="Dismiss new order alert"
+              className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg bg-emerald-800/70 border border-white/30 hover:bg-emerald-800 transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" aria-hidden="true" />
+            </button>
+          </div>
         </div>
       )}
     </>
