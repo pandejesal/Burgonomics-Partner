@@ -21,6 +21,7 @@ import {
   orderDocTimeMs,
 } from '@/utils/orderContract';
 import { chunkOrderBranchIds, isGlobalRole, resolveOrderReadScope, resolveScopedBranchIds } from '@/utils/branchScope';
+import { OPEN_ORDER_PAGE_SIZE } from '@/utils/orderWindow';
 
 /**
  * Demo seeds are DEV-only (Runbook §8). Production shows real orders or an
@@ -241,14 +242,14 @@ function useScopedOrderFeed(user: ReturnType<typeof useAuthStore.getState>['user
       const pages = new Map<number, Array<{ id: string; data: Record<string, any> }>>();
       chunks.forEach((chunk, index) => {
         const unsubscribe = onSnapshot(
-          query(collection(db, 'orders'), where('branchId', 'in', chunk), orderBy('createdAt', 'desc'), limit(100)),
+          query(collection(db, 'orders'), where('branchId', 'in', chunk), orderBy('createdAt', 'desc'), limit(OPEN_ORDER_PAGE_SIZE)),
           (snapshot) => {
             if (!active || revision !== currentRevision) return;
             pages.set(index, snapshot.docs.map((row) => ({ id: row.id, data: row.data() })).filter((row) => chunk.includes(row.data.branchId)));
             const merged = new Map([...pages.values()].flat().map((row) => [row.id, row]));
             const orders = [...merged.values()]
               .sort((a, b) => orderDocTimeMs(b.data) - orderDocTimeMs(a.data))
-              .slice(0, 100)
+              .slice(0, OPEN_ORDER_PAGE_SIZE)
               .map((row) => normalizeOrderDoc(row.id, row.data));
             const complete = pages.size === chunks.length;
             setFeed({ key, orders: complete ? orders : [], branchIds, loading: !complete, error: null, updatedAt: complete ? Date.now() : 0 });
@@ -387,7 +388,7 @@ export function useOrders(params: UseOrdersParams = {}) {
             collection(db, 'orders'),
             where('branchId', 'in', scopeBranchIds.slice(0, 10)),
             orderBy('createdAt', 'desc'),
-            limit(100)
+            limit(OPEN_ORDER_PAGE_SIZE)
           )
         );
         rawDocs = toRawDocs(scopedSnap);
@@ -398,7 +399,7 @@ export function useOrders(params: UseOrdersParams = {}) {
         // Firestore orderBy excludes a missing field, so merge both schema
         // pages; never substitute an unordered page after an ordered failure.
         const pages = await Promise.all(['createdAt', 'placedAt'].map((field) =>
-          getDocs(query(collection(db, 'orders'), orderBy(field, 'desc'), limit(100)))
+          getDocs(query(collection(db, 'orders'), orderBy(field, 'desc'), limit(OPEN_ORDER_PAGE_SIZE)))
         ));
         // A record with both fields belongs to the primary createdAt feed.
         // Otherwise a delayed placedAt snapshot could rewind its status.

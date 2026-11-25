@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { X, Printer, Check, Copy, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatOrderForKOT, generateASCIIReceipt } from '../services/thermalPrinterService';
+import { printSlipDocument, SLIP_COLUMNS } from '@/utils/printDocument';
+import { getStoredPrinterConfig } from '@/utils/printerConfig';
 import type { Order } from '@/types';
 
 interface KOTPrintPreviewProps {
@@ -11,7 +13,12 @@ interface KOTPrintPreviewProps {
 }
 
 export function KOTPrintPreview({ order, isOpen, onClose }: KOTPrintPreviewProps) {
-  const [paperWidth, setPaperWidth] = useState<'80mm' | '58mm'>('80mm');
+  // A7 #7: start from the outlet's SAVED printer configuration instead of a
+  // hardcoded 80mm. A 58mm roll configured in Settings used to be formatted at
+  // 48 columns, so item names wrapped mid-token and the Amount column clipped.
+  const [paperWidth, setPaperWidth] = useState<'80mm' | '58mm'>(
+    () => getStoredPrinterConfig().paperSize,
+  );
   const [copied, setCopied] = useState(false);
 
   // A malformed order doc must never white-screen the whole order page —
@@ -41,14 +48,33 @@ export function KOTPrintPreview({ order, isOpen, onClose }: KOTPrintPreviewProps
   if (!isOpen) return null;
 
   const handlePrint = () => {
-    try {
-      window.print();
-    } catch {
-      // Missing/blocked printer path — surface it, never crash the page.
-      toast.error('Print dialog failed to open.', {
-        description: 'Check the printer connection (or use Copy ASCII and print from a text editor).',
-      });
+    // A7-HIGH: `window.print()` printed the WHOLE Partner shell first — sidebar,
+    // board, other customers' orders, today's revenue — before the slip, which
+    // is both a wasted ticket and a customer-PII leak on the counter. The slip
+    // now prints from its own document that contains nothing else, at the
+    // outlet's configured width and copy count.
+    const config = getStoredPrinterConfig();
+    const outcome = printSlipDocument({
+      title: `Burgonomics KOT ${kotData.shortCode}`,
+      text: asciiKOT,
+      columns: SLIP_COLUMNS[paperWidth],
+      copies: config.copies,
+    });
+    if (outcome.started) {
+      toast.success('Slip sent to the print dialog — confirm it prints.');
+      return;
     }
+    toast.error(
+      outcome.reason === 'popup-blocked'
+        ? 'Print window blocked — allow popups for this site, then print again.'
+        : 'The slip could not be written to a print window.',
+      {
+        description:
+          outcome.reason === 'popup-blocked'
+            ? 'Nothing was sent to the printer.'
+            : 'Use Copy ASCII and print from a text editor instead.',
+      }
+    );
   };
 
   const handleCopy = () => {
@@ -244,11 +270,6 @@ export function KOTPrintPreview({ order, isOpen, onClose }: KOTPrintPreviewProps
             </button>
           </div>
         </div>
-      </div>
-
-      {/* Pure Print-Only Viewport Document */}
-      <div className="hidden print:block font-mono text-black text-[12px] leading-tight p-0 m-0">
-        <pre className="whitespace-pre-wrap font-mono text-xs">{asciiKOT}</pre>
       </div>
     </>
   );

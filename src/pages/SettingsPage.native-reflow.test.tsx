@@ -158,19 +158,27 @@ describe('SettingsPage Native Reflow & Responsive Layout Suite (Prompt 23 / Base
       expect(subtitle?.className).toContain('break-words');
     });
 
-    it('stacks emergency store pause control buttons on narrow viewports', async () => {
+    it('removed the timed pause buttons and keeps one open/close switch (A7 #3)', async () => {
       await renderSettings();
 
-      const rushButton = Array.from(container.querySelectorAll('button')).find((el) =>
-        el.textContent?.includes('30m Rush Break')
+      // Owner decision 2026-11-25 #4: the "30m Rush Break" / "1h Rain Pause"
+      // buttons are REMOVED — they promised a duration `applyStaffStoreStatus`
+      // cannot honour (no expiry is stored, and only a staff reopen clears the
+      // override), so an outlet "paused for an hour" stayed shut all night.
+      const timed = Array.from(container.querySelectorAll('button')).filter(
+        (el) =>
+          el.textContent?.includes('30m Rush Break') || el.textContent?.includes('1h Rain Pause')
       );
-      expect(rushButton).toBeDefined();
+      expect(timed).toHaveLength(0);
 
-      const emergencyGrid = rushButton?.parentElement;
-      expect(emergencyGrid).not.toBeNull();
-      // On narrow viewport, must be single column (grid-cols-1 sm:grid-cols-2)
-      expect(emergencyGrid?.className).toContain('grid-cols-1');
-      expect(emergencyGrid?.className).toContain('sm:grid-cols-2');
+      // The normal switch survives, and still stacks on narrow viewports.
+      const openButton = Array.from(container.querySelectorAll('button')).find((el) =>
+        el.textContent?.includes('Open for Orders')
+      );
+      expect(openButton).toBeDefined();
+      const switchGrid = openButton?.parentElement;
+      expect(switchGrid).not.toBeNull();
+      expect(switchGrid?.className).toContain('grid-cols-1');
     });
 
     it('wraps prep time slider label and action controls without clipping', async () => {
@@ -242,26 +250,33 @@ describe('SettingsPage Native Reflow & Responsive Layout Suite (Prompt 23 / Base
       expect(operatorName?.textContent).toContain('Chef Mario');
     });
 
-    it('ensures emergency control buttons wrap naturally without truncate or copy loss', async () => {
+    it('keeps the remaining switch copy wrapping without truncation', async () => {
       await renderSettings();
 
-      const rushButton = Array.from(container.querySelectorAll('button')).find((el) =>
-        el.textContent?.includes('30m Rush Break')
+      // A7 #3: the two timed-pause controls are gone, so this protects the
+      // control that remains (plus the closed-state copy that explains it).
+      const closedCard = Array.from(container.querySelectorAll('button')).find((el) =>
+        el.textContent?.includes('Store Closed')
       );
-      expect(rushButton).toBeDefined();
-      const rushSpan = rushButton?.querySelector('span');
-      expect(rushSpan?.className).not.toContain('truncate');
-      expect(rushSpan?.className).not.toContain('whitespace-nowrap');
-      expect(rushSpan?.textContent?.trim()).toBe('30m Rush Break');
+      expect(closedCard).toBeDefined();
+      const closedCopy = Array.from(closedCard!.querySelectorAll('p')).find((el) =>
+        el.textContent?.includes('until a staff member reopens')
+      );
+      expect(closedCopy).toBeDefined();
+      expect(closedCopy?.className).not.toContain('truncate');
+      expect(closedCopy?.className).not.toContain('whitespace-nowrap');
+      // The copy must not promise a timer any more.
+      expect(closedCopy?.textContent).not.toMatch(/1 ?h(our)?|30 ?m(in)?/i);
 
-      const rainButton = Array.from(container.querySelectorAll('button')).find((el) =>
-        el.textContent?.includes('1h Rain Pause')
+      const openCard = Array.from(container.querySelectorAll('button')).find((el) =>
+        el.textContent?.includes('Open for Orders')
       );
-      expect(rainButton).toBeDefined();
-      const rainSpan = rainButton?.querySelector('span');
-      expect(rainSpan?.className).not.toContain('truncate');
-      expect(rainSpan?.className).not.toContain('whitespace-nowrap');
-      expect(rainSpan?.textContent?.trim()).toBe('1h Rain Pause');
+      expect(openCard).toBeDefined();
+      const openSpan = Array.from(openCard!.querySelectorAll('span')).find((el) =>
+        el.textContent?.includes('Open for Orders')
+      );
+      expect(openSpan?.className).not.toContain('truncate');
+      expect(openSpan?.className).not.toContain('whitespace-nowrap');
     });
 
     it('ensures footer product info wraps naturally and does NOT introduce truncate class', async () => {

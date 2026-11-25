@@ -59,15 +59,22 @@ async function pushStock(
   }
 }
 
-export function useBranchMenu() {
-  const baseMenu = useMenu();
+export function useBranchMenu(branchIdOverride?: string | null) {
+  const baseMenu = useMenu(branchIdOverride);
   const queryClient = useQueryClient();
   const { selectedBranchId } = useAppStore();
   const { user } = useAuth();
 
   // Never default to a delivery store id — products are keyed by branchId and
   // a store id matches nothing, yielding permanently empty menus and writes.
-  const branchId = selectedBranchId || user?.branchIds?.[0] || null;
+  // A7 #5: an explicit override is the outlet the CALLING SURFACE is showing
+  // (the KDS board). Without it, every 86 write landed on the session's first
+  // branch: a two-outlet owner looking at "all outlets" 86'd outlet A's paneer
+  // while outlet B — the one that actually ran out — kept selling it.
+  const branchId =
+    branchIdOverride === undefined
+      ? selectedBranchId || user?.branchIds?.[0] || null
+      : branchIdOverride;
 
   const toggleAvailability = useMutation({
     mutationFn: async ({

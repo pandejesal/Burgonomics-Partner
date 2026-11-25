@@ -45,6 +45,8 @@ import { adminOrdersService } from "../services/adminOrdersService";
 import { partnerFunctionsApi } from "@/services/partnerFunctionsApi";
 import { buildOpsRefundRequest } from "@/utils/refundRequestIdentity";
 import { canTriggerBoardRefund } from "./refundRoles";
+import { printSlipDocument, SLIP_COLUMNS } from "@/utils/printDocument";
+import { getStoredPrinterConfig } from "@/utils/printerConfig";
 import { PetpoojaKotResolver } from "@/features/orders/components/PetpoojaKotResolver";
 import {
   PETPOOJA_KOT_UNCONFIRMED_LABEL,
@@ -59,6 +61,7 @@ import {
   scopeTruncationNotice,
 } from "@/utils/branchScope";
 import { isStaleOrderConflict } from "@/utils/orderConflict";
+import { orderWindowTruncationNotice } from "@/utils/orderWindow";
 import type { UserRole } from "@/types";
 
 interface AdminOrdersPageProps {
@@ -256,6 +259,11 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
     ? null
     : scopeTruncationNotice(assignedStoreIds);
 
+  // A7 #2: a capped order window (the feed returned a full page) is disclosed
+  // here too — the live board must never look like it lists every open ticket.
+  const [windowTruncated, setWindowTruncated] = useState(false);
+  const windowNotice = orderWindowTruncationNotice(windowTruncated);
+
   // Confirm actions
   const [confirmAction, setConfirmAction] = useState<{
     type:
@@ -308,9 +316,10 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
 
     const unsubscribe = adminOrdersService.listenLiveOrders(
       boardStoreFilter,
-      (liveOrders) => {
+      (liveOrders, window) => {
         setStreamError(null);
         setOrders(liveOrders);
+        setWindowTruncated(!!window?.truncated);
       },
       // A stalled stream looks exactly like a quiet kitchen — banner it.
       (err) => setStreamError(err?.message || "Live order stream disconnected — reload the page."),
@@ -378,6 +387,23 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
     }
   }, [defaultOrderId, orders]);
 
+  // A7 #8: the open drawer must act on the CURRENT status, not the snapshot it
+  // was opened with. Two terminals (or one slow operator) could otherwise use
+  // the drawer's stale buttons: B taps "Mark Ready" on a ticket A already sent
+  // to the kitchen, regressing it, or "Void Order" on an order A dispatched.
+  // Re-synced from the live list whenever the row changes, and closed outright
+  // once the row leaves the list (it is no longer actionable).
+  useEffect(() => {
+    if (!selectedOrder) return;
+    const current = orders.find((o) => o.id === selectedOrder.id);
+    if (!current) {
+      if (orders.length > 0) setSelectedOrder(null);
+      return;
+    }
+    if (current === selectedOrder) return;
+    setSelectedOrder(current);
+  }, [orders, selectedOrder]);
+
   // Alert trigger whenever a "New" status order exists and sound is on
   const hasNewOrders = useMemo(() => orders.some((o) => o.orderStatus === "New"), [orders]);
   useEffect(() => {
@@ -417,11 +443,24 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
     descOverride?: string,
   ): Promise<boolean> => {
     try {
-      await adminOrdersService.updateOrderStatus(orderId, nextStatus, {
-        title: `Order status: ${nextStatus}`,
-        actor,
-        description: descOverride || `Transitioned status to ${nextStatus}`,
-      });
+      // A7 #8: the status the acting button was rendered from is the
+      // precondition. Without it two terminals could reverse each other's
+      // moves (Ready back to Preparing, or void after dispatch). Taken from
+      // the live board row, falling back to the open drawer's copy.
+      const boardRow = orders.find((o) => o.id === orderId);
+      const expectedStatus: RichOrder["orderStatus"] | undefined =
+        boardRow?.orderStatus ??
+        (selectedOrder && selectedOrder.id === orderId ? selectedOrder.orderStatus : undefined);
+      await adminOrdersService.updateOrderStatus(
+        orderId,
+        nextStatus,
+        {
+          title: `Order status: ${nextStatus}`,
+          actor,
+          description: descOverride || `Transitioned status to ${nextStatus}`,
+        },
+        expectedStatus,
+      );
 
       // The local state (orders array) will automatically update via the onSnapshot listener if we are in "live" mode.
       // If we are in "history" mode, we might need a manual refresh, but history mode shouldn't typically be used for real-time status transitions.
@@ -673,6 +712,17 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
           className="rounded-2xl border border-amber-500/40 bg-amber-50 dark:bg-amber-950/20 px-4 py-3 text-xs font-bold text-amber-800 dark:text-amber-200"
         >
           {scopeNotice}
+        </div>
+      )}
+
+      {/* A7 #2: a capped live feed says so — this board never claims to list
+          every open ticket when the page bound was reached. */}
+      {windowNotice && (
+        <div
+          role="note"
+          className="rounded-2xl border border-amber-500/40 bg-amber-50 dark:bg-amber-950/20 px-4 py-3 text-xs font-bold text-amber-800 dark:text-amber-200"
+        >
+          {windowNotice}
         </div>
       )}
 
@@ -1884,35 +1934,25 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
             <div className="p-5 border-t border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/10 flex gap-3">
               <button
                 onClick={() => {
-                  const printContent = getThermalReceiptText(
-                    printReceiptData.order,
-                    printReceiptData.type,
-                  );
-                  // Escape first: receipt text carries customer names, notes,
-                  // and item modifiers — raw document.write turned them into
-                  // live HTML/JS in the print window (stored XSS via order).
-                  const escaped = printContent
-                    .replace(/&/g, "&amp;")
-                    .replace(/</g, "&lt;")
-                    .replace(/>/g, "&gt;")
-                    .replace(/\n/g, "<br>");
-                  const printWindow = window.open("", "_blank", "noopener");
-                  if (printWindow) {
-                    printWindow.document.write(`
-                      <html>
-                        <head>
-                          <title>Burgonomics Thermal Receipt</title>
-                          <style>
-                            body { font-family: monospace; font-size: 12px; padding: 20px; white-space: pre-wrap; width: 300px; }
-                          </style>
-                        </head>
-                        <body>
-                          ${escaped}
-                          <script>window.print();</script>
-                        </body>
-                      </html>
-                    `);
-                    printWindow.document.close();
+                  // A7-CRITICAL: `window.open(..., 'noopener')` returns null by
+                  // design, so this button printed nothing while the Settings
+                  // test print (a real window) worked. Printing now goes through
+                  // one shared slip-document helper: the stored paper width and
+                  // copy count are honoured, the text is escaped there, and a
+                  // blocked popup is reported instead of silently doing nothing.
+                  const config = getStoredPrinterConfig();
+                  const outcome = printSlipDocument({
+                    title: `Burgonomics ${printReceiptData.type}`,
+                    text: getThermalReceiptText(printReceiptData.order, printReceiptData.type),
+                    columns: SLIP_COLUMNS[config.paperSize],
+                    copies: config.copies,
+                  });
+                  if (!outcome.started) {
+                    toast.error(
+                      outcome.reason === "popup-blocked"
+                        ? "Print window blocked — allow popups for this site, then print again."
+                        : "The slip could not be written to a print window — use Copy Text instead.",
+                    );
                   }
                 }}
                 className="flex-1 py-3 px-4 bg-primary text-white font-black text-xs uppercase tracking-wider rounded-2xl hover:bg-[#12592d] transition-all flex items-center justify-center gap-1.5"

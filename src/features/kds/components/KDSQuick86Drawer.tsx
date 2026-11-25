@@ -6,6 +6,16 @@ import type { MenuItem } from '@/types';
 export interface KDSQuick86DrawerProps {
   isOpen: boolean;
   onClose: () => void;
+  /**
+   * A7 #5: the outlet the board is actually showing. `null` means the board is
+   * showing MORE THAN ONE outlet, and 86ing from here would silently write to
+   * whichever branch the session happened to list first — so the drawer refuses
+   * and asks staff to pick an outlet. Absent (`undefined`) keeps the historical
+   * "session's first branch" behaviour for callers that do not pass one.
+   */
+  branchId?: string | null;
+  /** Outlet name stamped in the header so staff can see what they are writing. */
+  branchName?: string | null;
 }
 
 /** Single source of truth for "sellable": every flag defaults to true. */
@@ -33,10 +43,17 @@ export function get86ToggleArgs(item: MenuItem): { itemId: string; available: bo
   return { itemId: item.id, available: !isItemInStock(item) };
 }
 
-export function KDSQuick86Drawer({ isOpen, onClose }: KDSQuick86DrawerProps) {
+export function KDSQuick86Drawer({ isOpen, onClose, branchId, branchName }: KDSQuick86DrawerProps) {
   const [query, setQuery] = useState('');
-  const { items, toggleAvailability, markItem86 } = useBranchMenu();
+  const { items, toggleAvailability, markItem86 } = useBranchMenu(branchId);
   void markItem86;
+
+  // `undefined` = caller does not scope this drawer; `null` = caller scopes it
+  // to "more than one outlet", which has no valid write target.
+  const unscopedOutlet = branchId === null;
+  const targetLabel = unscopedOutlet
+    ? 'No single outlet'
+    : branchName || branchId || 'Session outlet';
 
   const filtered = useMemo(
     () => filter86Items(items ?? [], query),
@@ -52,6 +69,9 @@ export function KDSQuick86Drawer({ isOpen, onClose }: KDSQuick86DrawerProps) {
     typeof rawToggle === 'function' ? false : (rawToggle.isPending ?? false);
 
   const handleToggle = (item: MenuItem) => {
+    // Fail closed: without one definite outlet the write would land on the
+    // wrong branch's product doc (and 86 that outlet's POS SKU).
+    if (unscopedOutlet) return;
     const args = get86ToggleArgs(item);
     if (typeof rawToggle === 'function') {
       rawToggle(args);
@@ -83,6 +103,15 @@ export function KDSQuick86Drawer({ isOpen, onClose }: KDSQuick86DrawerProps) {
             <p className="text-[11px] text-neutral-400 font-medium">
               1-tap out-of-stock toggle &bull; {inStockCount} in stock &bull; {outCount} 86&rsquo;d
             </p>
+            {/* A7 #5: name the outlet these writes actually land on. */}
+            <p
+              data-testid="86-drawer-outlet"
+              className={`text-[11px] font-bold mt-0.5 ${
+                unscopedOutlet ? 'text-rose-300' : 'text-emerald-300'
+              }`}
+            >
+              {unscopedOutlet ? 'Pick an outlet first' : `Outlet: ${targetLabel}`}
+            </p>
           </div>
           <button
             type="button"
@@ -94,6 +123,19 @@ export function KDSQuick86Drawer({ isOpen, onClose }: KDSQuick86DrawerProps) {
             <span>Done</span>
           </button>
         </div>
+
+        {/* A7 #5: refusing to write is the honest state. The old drawer wrote
+            to the session's first branch while the board showed another one. */}
+        {unscopedOutlet && (
+          <div
+            role="alert"
+            className="mx-4 mt-3 rounded-xl border border-rose-500/40 bg-rose-950/40 px-3 py-2 text-[11px] font-bold text-rose-200"
+          >
+            86 and stock toggles are disabled: the makeline is showing more than one outlet, so
+            there is no single branch to mark. Pick one outlet in the filter above, then reopen
+            this drawer.
+          </div>
+        )}
 
         <div className="px-4 py-3 border-b border-neutral-800">
           <div className="relative">
@@ -141,7 +183,7 @@ export function KDSQuick86Drawer({ isOpen, onClose }: KDSQuick86DrawerProps) {
                     <button
                       type="button"
                       data-testid={`86-toggle-${item.id}`}
-                      disabled={isToggling}
+                      disabled={isToggling || unscopedOutlet}
                       onClick={() => handleToggle(item)}
                       aria-pressed={!inStock}
                       aria-label={`${item.name} is ${inStock ? 'in stock' : '86 sold out'} — tap to mark ${inStock ? 'out of stock' : 'back in stock'}`}

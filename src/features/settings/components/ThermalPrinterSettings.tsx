@@ -2,62 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { Printer, CheckCircle2, Sparkles, Sliders, RefreshCw, Usb, Wifi, Bluetooth } from 'lucide-react';
 import { toast } from 'sonner';
 import { generateASCIIReceipt } from '@/features/orders/services/thermalPrinterService';
-
-export interface PrinterConfig {
-  paperSize: '80mm' | '58mm';
-  connectionType: 'usb' | 'network' | 'bluetooth';
-  copies: number;
-}
-
-const DEFAULT_CONFIG: PrinterConfig = {
-  paperSize: '80mm',
-  connectionType: 'usb',
-  copies: 1,
-};
-
-/**
- * Only the keys this screen actually uses survive. A stored config written by
- * an older build may carry the retired auto-print flag, which nothing ever
- * consumed (Petpooja prints the kitchen tickets while an outlet is linked).
- * Picking fields explicitly means a legacy blob can never resurrect a control
- * that does nothing.
- */
-export function getStoredPrinterConfig(): PrinterConfig {
-  return readStoredConfig();
-}
-
-function readStoredConfig(): PrinterConfig {
-  try {
-    if (typeof localStorage !== 'undefined') {
-      const raw = localStorage.getItem('burgonomics_printer_config');
-      if (raw) {
-        const parsed = JSON.parse(raw) as Record<string, unknown>;
-        const paperSize = parsed.paperSize === '58mm' ? '58mm' : '80mm';
-        const connectionType =
-          parsed.connectionType === 'network'
-            ? 'network'
-            : parsed.connectionType === 'bluetooth'
-              ? 'bluetooth'
-              : 'usb';
-        const copies = parsed.copies === 2 ? 2 : 1;
-        return { paperSize, connectionType, copies };
-      }
-    }
-  } catch (e) {
-    console.warn('Failed to parse printer config:', e);
-  }
-  return { ...DEFAULT_CONFIG };
-}
-
-export function savePrinterConfig(config: PrinterConfig): void {
-  try {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('burgonomics_printer_config', JSON.stringify(config));
-    }
-  } catch (e) {
-    console.warn('Failed to save printer config:', e);
-  }
-}
+import { printSlipDocument, SLIP_COLUMNS } from '@/utils/printDocument';
+// A7 #7: the stored config lives in one shared module now, because the LIVE KOT
+// print path must read it too. Imported and re-exported here so the settings
+// screen (and the suites that already import from it) keep one source of truth;
+// a bare `export {} from` would not bind these names locally.
+import {
+  type PrinterConfig,
+  getStoredPrinterConfig,
+  savePrinterConfig,
+} from '@/utils/printerConfig';
+export { type PrinterConfig, getStoredPrinterConfig, savePrinterConfig };
 
 export function ThermalPrinterSettings() {
   const [config, setConfig] = useState<PrinterConfig>(getStoredPrinterConfig);
@@ -69,34 +24,42 @@ export function ThermalPrinterSettings() {
 
   // Honest test print: renders a REAL slip (same ASCII formatter as live
   // KOTs) into a print window and opens the OS print dialog. Success toasts
-  // only after the dialog is invoked — the old code toasted success without
-  // touching any printer path, so dead hardware passed setup.
+  // only after the window really opened — the old code toasted success without
+  // touching any printer path, so dead hardware passed setup. It now goes
+  // through the SAME slip-document helper as the live KOT path, so the test
+  // proves the path that actually prints.
   const handleTestPrint = () => {
     setIsTestingPrint(true);
     try {
-      const slip = generateASCIIReceipt({
-        orderId: 'test-print',
-        shortCode: '#TEST',
-        orderType: 'TEST',
-        branchName: 'Burgonomics Store',
-        createdAtFormatted: new Date().toLocaleString('en-IN'),
-        items: [{ name: 'Test KOT Slip', quantity: 1, price: 0 }],
-        subtotal: 0,
-        tax: 0,
-        total: 0,
-        specialNotes: `Test print — ${config.paperSize}, ${config.copies} cop${config.copies === 1 ? 'y' : 'ies'}, ${config.connectionType}. If this prints, the printer path works.`,
+      const slip = generateASCIIReceipt(
+        {
+          orderId: 'test-print',
+          shortCode: '#TEST',
+          orderType: 'TEST',
+          branchName: 'Burgonomics Store',
+          createdAtFormatted: new Date().toLocaleString('en-IN'),
+          items: [{ name: 'Test KOT Slip', quantity: 1, price: 0 }],
+          subtotal: 0,
+          tax: 0,
+          total: 0,
+          specialNotes: `Test print — ${config.paperSize}, ${config.copies} cop${config.copies === 1 ? 'y' : 'ies'}, ${config.connectionType}. If this prints, the printer path works.`,
+        },
+        SLIP_COLUMNS[config.paperSize]
+      );
+      const outcome = printSlipDocument({
+        title: 'Test KOT Slip',
+        text: slip,
+        columns: SLIP_COLUMNS[config.paperSize],
+        copies: config.copies,
       });
-      const win = window.open('', '_blank', 'width=320,height=600');
-      if (!win) {
-        toast.error('Popup blocked — allow popups to test print.');
+      if (!outcome.started) {
+        toast.error(
+          outcome.reason === 'popup-blocked'
+            ? 'Popup blocked — allow popups to test print.'
+            : 'Test print failed before reaching the printer.'
+        );
         return;
       }
-      win.document.write(
-        `<html><head><title>Test KOT Slip</title></head><body><pre style="font-family:monospace;font-size:12px;white-space:pre-wrap;">${slip
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')}</pre><script>window.onload=()=>window.print()<\/script></body></html>`
-      );
-      win.document.close();
       toast.success('Test slip sent to the print dialog — confirm it prints.');
     } catch (err: any) {
       toast.error(err?.message || 'Test print failed before reaching the printer.');

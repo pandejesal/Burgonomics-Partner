@@ -223,7 +223,7 @@ describe('Control Room live board — orders read policy', () => {
     // issued at all. The old code sent `in ['branch_a', 'branch_b']`.
     expect(h.branchIdWheres).toEqual([]);
     expect(queryListeners()).toHaveLength(0);
-    expect(next).toHaveBeenCalledWith([]);
+    expect(next).toHaveBeenCalledWith([], { truncated: false });
     expect(error).not.toHaveBeenCalled();
     cleanup();
   });
@@ -259,7 +259,7 @@ describe('Control Room live board — orders read policy', () => {
 
     expect(queryListeners()).toHaveLength(0);
     expect(h.branchIdWheres).toEqual([]);
-    expect(next).toHaveBeenLastCalledWith([]);
+    expect(next).toHaveBeenLastCalledWith([], { truncated: false });
     expect(error).not.toHaveBeenCalled();
     cleanup();
   });
@@ -337,7 +337,7 @@ describe('Control Room live board — orders read policy', () => {
     emitRegistry({ role: 'regional_manager', branchIds: [] });
     await flush();
     expect(queryListeners()).toHaveLength(0);
-    expect(next).toHaveBeenLastCalledWith([]);
+    expect(next).toHaveBeenLastCalledWith([], { truncated: false });
     cleanup();
   });
 
@@ -361,7 +361,7 @@ describe('Control Room live board — orders read policy', () => {
     await flush();
 
     expect(listeners.every((listener) => listener.stopped)).toBe(true);
-    expect(next).toHaveBeenLastCalledWith([]);
+    expect(next).toHaveBeenLastCalledWith([], { truncated: false });
 
     // A late snapshot from the revoked listener cannot repaint the board.
     listeners[0].next(
@@ -383,7 +383,7 @@ describe('Control Room live board — orders read policy', () => {
     expect(lastIds(next)).toEqual(['visible']);
 
     registryListener()!.error(new Error('registry unavailable'));
-    expect(next).toHaveBeenLastCalledWith([]);
+    expect(next).toHaveBeenLastCalledWith([], { truncated: false });
     expect(error).toHaveBeenCalledWith(expect.objectContaining({ message: 'registry unavailable' }));
     expect(listeners.every((listener) => listener.stopped)).toBe(true);
     listeners[0].next(snapshotOf([historyRow('late', 'a', 'pending')]));
@@ -403,7 +403,7 @@ describe('Control Room live board — orders read policy', () => {
 
     const original = h.user;
     setUser(null);
-    expect(next).toHaveBeenLastCalledWith([]);
+    expect(next).toHaveBeenLastCalledWith([], { truncated: false });
     setUser(original);
     listeners[0].next(snapshotOf([historyRow('late', 'a', 'pending')]));
     await flush();

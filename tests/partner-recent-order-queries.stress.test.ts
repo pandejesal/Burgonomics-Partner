@@ -98,6 +98,7 @@ import { adminOrdersService } from '../src/admin/services/adminOrdersService';
 import { useOrders } from '../src/hooks/useOrders';
 import { useKDSRealtimeStream } from '../src/features/kds/hooks/useKDSRealtimeStream';
 import { fetchAliasedStoreOrders } from '../src/utils/orderContract';
+import { OPEN_ORDER_PAGE_SIZE } from '../src/utils/orderWindow';
 
 const newestId = 'order_479';
 
@@ -145,7 +146,7 @@ describe.each(['iso', 'timestamp'] as const)('bounded recent-order queries (%s)'
     const orders = await h.queryOptions.queryFn();
     expect(orders.map((o: any) => o.id)).toContain(newestId);
     if (scope === 'scoped') expect(orders.map((o: any) => o.id)).not.toContain('foreign_newest');
-    expect(h.queries[0].constraints).toContainEqual({ kind: 'limit', count: 100 });
+    expect(h.queries[0].constraints).toContainEqual({ kind: 'limit', count: OPEN_ORDER_PAGE_SIZE });
   });
 
   it.each(['scoped', 'global'])('Control Room history includes newest (%s)', async (scope) => {
@@ -358,7 +359,7 @@ describe.each(['iso', 'timestamp'] as const)('bounded recent-order queries (%s)'
       const storeId = kind === 'all' ? 'all' : null;
       const cleanup = adminOrdersService.listenLiveOrders(storeId as any, next, error);
 
-      expect(next).toHaveBeenCalledWith([]);
+      expect(next).toHaveBeenCalledWith([], { truncated: false });
       expect(h.queries).toHaveLength(0);
       expect(error).not.toHaveBeenCalled();
       cleanup();

@@ -35,6 +35,7 @@ import {
   createKdsIngestionGate,
   resolveGatewayPaymentId,
 } from "@/utils/orderContract";
+import { OPEN_ORDER_PAGE_SIZE, orderWindowTruncationNotice, pageWasCapped } from "@/utils/orderWindow";
 import type { Order as NormalizedOrder } from "@/types";
 import { branchIdForDeliveryStore } from "@/utils/storeBranchRegistry";
 import { logger } from "@/core/logging/logger";
@@ -541,9 +542,17 @@ function toRichOrder(id: string, raw: Record<string, any>): RichOrder {
 
 /**
  * Bounded scoped order fetch shared by live + history: one `branchId in` page
- * per chunk of the authorised set (never a global fallback, never a silent
- * truncation) plus the Delivery-aliased store merge (same contract as the KDS
- * makeline). No composite indexes (single-field `in` + client-side sort/filter).
+ * per chunk of the authorised set (never a global fallback) plus the
+ * Delivery-aliased store merge (same contract as the KDS makeline). No composite
+ * indexes (single-field `in` + client-side sort/filter).
+ *
+ * A7 #2: the page is `OPEN_ORDER_PAGE_SIZE`, not 100 — the history table was
+ * reading the newest 100 docs of a branch and then filtering to its status
+ * bucket, so an older completed ticket vanished as soon as a branch passed 100
+ * docs in a day. A page this size holds a full trading day for an outlet; the
+ * live board additionally DISCLOSES its bound on screen (see
+ * `listenLiveOrders` / `AdminOrdersPage`), because a board that silently drops
+ * an open ticket is the failure that matters for a kitchen.
  */
 async function fetchScopedOrders(
   scope: OrderReadScope,
@@ -555,7 +564,7 @@ async function fetchScopedOrders(
   if (scope.global && scope.branchIds.length === 0) {
     // Both order schemas need an ordered page: Delivery docs can lack createdAt.
     const pages = await Promise.all(["createdAt", "placedAt"].map((field) =>
-      getDocs(query(collection(db, "orders"), orderBy(field, "desc"), limit(100)))
+      getDocs(query(collection(db, "orders"), orderBy(field, "desc"), limit(OPEN_ORDER_PAGE_SIZE)))
     ));
     for (const [index, snap] of pages.entries()) snap.forEach((d) => {
       const data = d.data() as Record<string, any>;
@@ -566,7 +575,7 @@ async function fetchScopedOrders(
 
   for (const chunk of chunkOrderBranchIds([...scope.branchIds])) {
     const snap = await getDocs(
-      query(collection(db, "orders"), where("branchId", "in", chunk), orderBy("createdAt", "desc"), limit(100))
+      query(collection(db, "orders"), where("branchId", "in", chunk), orderBy("createdAt", "desc"), limit(OPEN_ORDER_PAGE_SIZE))
     );
     snap.forEach((d) => merged.set(d.id, d.data() as Record<string, any>));
   }
@@ -608,10 +617,15 @@ export const adminOrdersService = {
    * collectionGroup query on phantom `store.id`/`orderStatus` fields could
    * never match real docs, so this board was permanently empty).
    * An outlet selection only narrows the caller's orders-only read scope.
+   *
+   * A7 #2: every feed is bounded (see `@/utils/orderWindow`). `onUpdate`'s
+   * second argument says whether ANY feed returned a full page, so the board
+   * can disclose a truncation instead of looking complete. It is part of the
+   * callback (not a new parameter) so existing callers keep their signature.
    */
   listenLiveOrders(
     storeId: string | null,
-    onUpdate: (orders: RichOrder[]) => void,
+    onUpdate: (orders: RichOrder[], window: { truncated: boolean }) => void,
     onError: (err: Error) => void,
   ) {
     const user = useAuthStore.getState().user;
@@ -623,11 +637,16 @@ export const adminOrdersService = {
     let orderUnsubscribers: Array<() => void> = [];
     let unsubscribeRegistry = () => {};
     let unsubscribeAuth = () => {};
+    // A7 #2: subscriber keys whose last snapshot filled its page. A key leaves
+    // the set as soon as its page is short again, so the disclosure follows
+    // reality instead of sticking on after a quiet minute.
+    const cappedKeys = new Set<string>();
     const current = () => !cancelled && orderSessionKey(useAuthStore.getState().user) === sessionKey;
     const clearListeners = () => {
       revision++;
       orderUnsubscribers.forEach((unsubscribe) => unsubscribe());
       orderUnsubscribers = [];
+      cappedKeys.clear();
     };
     const retire = () => {
       cancelled = true;
@@ -638,7 +657,7 @@ export const adminOrdersService = {
     unsubscribeAuth = useAuthStore.subscribe((state) => {
       if (orderSessionKey(state.user) !== sessionKey) {
         retire();
-        onUpdate([]);
+        onUpdate([], { truncated: false });
       }
     });
 
@@ -650,7 +669,7 @@ export const adminOrdersService = {
       const replacing = scopeKey !== null;
       scopeKey = nextKey;
       clearListeners();
-      if (replacing || !scopeIsAuthorised(scope)) onUpdate([]);
+      if (replacing || !scopeIsAuthorised(scope)) onUpdate([], { truncated: false });
       if (!scopeIsAuthorised(scope)) return;
       const generation = revision;
       const pages = new Map<string, Map<string, Record<string, any>>>();
@@ -660,12 +679,16 @@ export const adminOrdersService = {
         if (!active()) return;
         scopeKey = null;
         clearListeners();
-        onUpdate([]);
+        onUpdate([], { truncated: false });
         onError(error instanceof Error ? error : new Error(String(error)));
       };
       const receivePage = (key: string, field: string) => (snapshot: QuerySnapshot) => {
         if (!active()) return;
         const token = ingestionGate.next();
+        // A7 #2: decide from THIS feed's own page size, before the merge below
+        // (the alias read only adds rows; it cannot un-truncate a capped page).
+        if (pageWasCapped(snapshot.size)) cappedKeys.add(key);
+        else cappedKeys.delete(key);
         const page = new Map<string, Record<string, any>>();
         snapshot.forEach((d) => {
           const data = d.data() as Record<string, any>;
@@ -684,7 +707,9 @@ export const adminOrdersService = {
             const live = sortMergedDocs(merged).map(({ id, data }) => toRichOrder(id, data))
               .filter((order) => LIVE_STATUSES.has(order.orderStatus))
               .sort((a, b) => orderDocTimeMs({ placedAt: a.placedAt }) - orderDocTimeMs({ placedAt: b.placedAt }));
-            onUpdate(live);
+            // A7 #2: the window flag travels WITH the rows, so a truncated board
+            // can never be rendered as a complete one.
+            onUpdate(live, { truncated: cappedKeys.size > 0 });
           } catch (error) {
             if (ingestionGate.isCurrent(token)) fail(error);
           }
@@ -693,7 +718,7 @@ export const adminOrdersService = {
       const subscribe = (key: string, field: string, predicates: QueryConstraint[]) => {
         if (!active()) return;
         const unsubscribe = onSnapshot(
-          query(collection(db, "orders"), ...predicates, orderBy(field, "desc"), limit(100)),
+          query(collection(db, "orders"), ...predicates, orderBy(field, "desc"), limit(OPEN_ORDER_PAGE_SIZE)),
           receivePage(key, field),
           fail,
         );
@@ -711,14 +736,14 @@ export const adminOrdersService = {
     };
 
     if (user?.role === "regional_manager" && user.id) {
-      onUpdate([]);
+      onUpdate([], { truncated: false });
       unsubscribeRegistry = onSnapshot(doc(db, "admins", user.id), { includeMetadataChanges: true }, (snapshot) => {
         startScope(snapshot.metadata.fromCache || snapshot.metadata.hasPendingWrites || !snapshot.exists() ? null : snapshot.data());
       }, (error) => {
         if (!current()) return;
         clearListeners();
         scopeKey = null;
-        onUpdate([]);
+        onUpdate([], { truncated: false });
         onError(error);
       });
     } else {
@@ -825,11 +850,19 @@ export const adminOrdersService = {
    * appended server-side. Direct Firestore flips are gone — they skipped
    * scope enforcement and wrote phantom `orderStatus` strings no reader
    * understands.
+   *
+   * A7 #8: `expectedStatus` is the board status the pressed button was
+   * rendered from. The server FREEZES terminal states but accepts any
+   * non-terminal move, so without it a second terminal (or a stale open
+   * drawer) could push "Ready" back to "Preparing" — moving the customer's
+   * ETA and the makeline backwards — or void an order another cashier had
+   * already dispatched. The KDS and the order-detail page already send it.
    */
   async updateOrderStatus(
     orderId: string,
     status: RichOrder["orderStatus"],
     timelineUpdate?: { title: string; actor: string; description: string },
+    expectedStatus?: RichOrder["orderStatus"],
   ): Promise<void> {
     const toPartner: Record<Exclude<RichOrder["orderStatus"], "Refunded" | "Needs Review">, string> = {
       New: "pending",
@@ -852,9 +885,18 @@ export const adminOrdersService = {
         throw new Error("Quarantined orders cannot be status-bumped — review the raw document first.");
       }
       const { partnerFunctionsApi } = await import("@/services/partnerFunctionsApi");
+      // A7 #8: the precondition is the board status the caller acted from,
+      // translated through the SAME table as the target — the server compares
+      // Delivery codes, not board labels. Refunded/Needs Review are unmappable
+      // (and unbumpable) so they contribute no precondition.
+      const expectedPartnerStatus =
+        expectedStatus && expectedStatus in toPartner
+          ? toPartner[expectedStatus as keyof typeof toPartner]
+          : undefined;
       await partnerFunctionsApi.bumpOrderStatus({
         orderId,
         status: toPartner[status],
+        ...(expectedPartnerStatus ? { expectedStatus: expectedPartnerStatus } : {}),
         ...(timelineUpdate
           ? {
               timelineEvent: {

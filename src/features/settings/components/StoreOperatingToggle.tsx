@@ -6,8 +6,6 @@ import {
   CheckCircle2,
   PauseCircle,
   PlayCircle,
-  CloudRain,
-  Flame,
 } from 'lucide-react';
 import { useBranches } from '@/hooks/useBranches';
 import {
@@ -206,7 +204,8 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
               </span>
             </h2>
             <p className="text-xs text-neutral-400 min-w-0 break-words">
-              Live online ordering toggle, kitchen prep time buffer, and emergency rush pause
+              Live online ordering switch, kitchen prep time buffer, and rush surge — closed means
+              closed until staff reopen it.
             </p>
           </div>
         </div>
@@ -271,44 +270,22 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
             <span className="font-black text-sm text-rose-300">■ Store Closed</span>
             {shownStatus === 'closed' && <CheckCircle2 className="w-4 h-4 text-rose-300" />}
           </div>
-          <p className="text-[11px] text-neutral-300">Temporarily pauses all online orders</p>
+          <p className="text-[11px] text-neutral-300">
+            Closes online ordering until a staff member reopens it — no timer
+            lifts it, and Petpooja cannot reopen it.
+          </p>
         </button>
       </div>
 
-      {/* Emergency Closure Quick Actions & Prep Time Slider */}
-      <div className="pt-2 border-t border-neutral-800/80 grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Quick Emergency Buttons */}
-        <div className="space-y-2">
-          <label className="block text-xs font-bold uppercase text-neutral-400">
-            Emergency Store Pause Controls
-          </label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => handleUpdateStatus('busy', '30 Mins Rush Break', 40)}
-              disabled={closedByStaff || !branch?.id}
-              title={
-                closedByStaff
-                  ? 'Reopen the outlet before enabling Busy/Rush'
-                  : 'Adds a 30 minute rush buffer'
-              }
-              className="px-3 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-200 font-bold text-xs flex items-center justify-center sm:justify-start gap-1.5 transition-colors cursor-pointer min-w-0 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <Flame className="w-3.5 h-3.5 text-orange-400 shrink-0" />
-              <span className="break-words min-w-0">30m Rush Break</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleUpdateStatus('closed', '1 Hour Rain Pause', 0)}
-              className="px-3 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-200 font-bold text-xs flex items-center justify-center sm:justify-start gap-1.5 transition-colors cursor-pointer min-w-0"
-            >
-              <CloudRain className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-              <span className="break-words min-w-0">1h Rain Pause</span>
-            </button>
-          </div>
-        </div>
-
+      {/* Prep Time Slider. The two "Emergency Store Pause" buttons that used to
+          sit beside this slider ("30m Rush Break" and "1h Rain Pause") promised
+          a DURATION the server cannot honour: `applyStaffStoreStatus` writes a
+          staff override with no expiry, and nothing reopens the outlet but a
+          staff "open". The label therefore made staff believe the pause lifts
+          itself while the outlet stayed shut all night (A7 #3). Owner decision
+          (2026-11-25, item 4): both buttons are REMOVED. Open/Close above is
+          the only switch, and its copy says what it does: closed until reopened. */}
+      <div className="pt-2 border-t border-neutral-800/80 grid grid-cols-1 gap-6">
         {/* Prep Time Slider */}
         <div className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">

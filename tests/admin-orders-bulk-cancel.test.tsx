@@ -211,6 +211,10 @@ describe('AdminOrdersPage — bulk cancel is honest and gated (F1)', () => {
       'ord_paid',
       'Cancelled',
       expect.objectContaining({ actor: 'Bulk Operations Panel' }),
+      // A7 #8: the board row is the status precondition. This fixture has no
+      // board rows (the live listener never emits), so no precondition is sent
+      // and the write stays conditional only on the server's own rules.
+      undefined,
     );
     expect(h.releaseRefund).not.toHaveBeenCalled();
     expect(h.toastSuccess).toHaveBeenCalledWith(

@@ -15,6 +15,11 @@ import {
   createKdsIngestionGate,
 } from '@/utils/orderContract';
 import { FIRESTORE_IN_LIMIT, isGlobalRole, resolveScopedBranchIds } from '@/utils/branchScope';
+import {
+  OPEN_ORDER_PAGE_SIZE,
+  orderWindowTruncationNotice,
+  pageWasCapped,
+} from '@/utils/orderWindow';
 import { playKDSArrivalCue, stopRepeatingKDSAlarm, resetKDSAlarmState, syncKDSAlarmState } from '@/utils/kdsAudio';
 import {
   capNewOrderIds,
@@ -1025,6 +1030,11 @@ export function useKDSRealtimeStream() {
   // is exactly the frozen-board lie this field exists to prevent.
   const [lastRefreshAt, setLastRefreshAt] = useState<number>(Date.now());
 
+  // A7 #2 honesty: which feeds returned a FULL page. A capped feed means older
+  // still-open tickets may sit outside the window — tracked per feed so a
+  // complete primary page cannot mask a capped Delivery (placedAt) page.
+  const [cappedFeeds, setCappedFeeds] = useState<Record<string, boolean>>({});
+
   useEffect(() => {
     // ANY authorisation change (uid, role, resolved branches, selection)
     // invalidates everything scoped: readiness, faults, retained pages, the
@@ -1045,6 +1055,7 @@ export function useKDSRealtimeStream() {
       setRecallStack([]);
       setNewOrderAlert(null);
       setNewOrderAlertScope(null);
+      setCappedFeeds({});
       // Deliberately leave `liveOrders` AND `liveOrdersScope` alone. The owner
       // stamp still names the OLD scope, so the render fence withholds those
       // rows from the new identity instead of presenting them; new data (or a
@@ -1085,15 +1096,20 @@ export function useKDSRealtimeStream() {
       return;
     }
 
-    // Select the newest page before applying the cap. The scoped composite
-    // is in the root index manifest; its deployment is an ops prerequisite.
-    // Client sorting alone cannot rescue tickets omitted by an unordered cap.
+    // A7 #2: `orderBy(createdAt) + limit(100)` with no status predicate hid the
+    // OLDEST still-open ticket as soon as a branch passed 100 docs in a day —
+    // the newest page fills with finished work and the pending ticket drops out
+    // of the snapshot (no chime, nobody re-notices it). The page is now large
+    // enough for a full trading day, and a capped page is DISCLOSED on screen
+    // (`windowTruncationNotice`) rather than left to look complete. The index
+    // definitions for a status-filtered read are published on the fix-wave bus
+    // (`c11-indexes`); see `@/utils/orderWindow` for why that is not this fix.
     const constraints: QueryConstraint[] = [
       ...(scopeBranchIds.length
         ? [where('branchId', 'in', scopeBranchIds.slice(0, FIRESTORE_IN_LIMIT))]
         : []),
       orderBy('createdAt', 'desc'),
-      limit(100),
+      limit(OPEN_ORDER_PAGE_SIZE),
     ];
 
     let alive = true;
@@ -1177,6 +1193,18 @@ export function useKDSRealtimeStream() {
       publishFeedHealth();
     };
 
+    /**
+     * Record whether a feed's snapshot filled its page (A7 #2). Ignored for a
+     * feed that already errored in this generation, so a straggler cannot claim
+     * the window is complete after a terminal failure.
+     */
+    const noteFeedPage = (feed: KdsFeedId, pageSize: number): void => {
+      if (!alive) return;
+      if (feedFailures.has(feed)) return;
+      const capped = pageWasCapped(pageSize);
+      setCappedFeeds((prev) => (prev[feed] === capped ? prev : { ...prev, [feed]: capped }));
+    };
+
     const ingest = (
       rawDocs: Array<{ id: string; data: Record<string, any> }>,
       from: KdsFeedId = 'primary',
@@ -1212,8 +1240,9 @@ export function useKDSRealtimeStream() {
     // new generation's first primary snapshot replaces only the primary page
     // and never deletes the Delivery tickets already on screen. A scope change
     // clears the ref above.
-    const ingestGlobalPage = (field: string, page: Array<{ id: string; data: Record<string, any> }>) => {
+    const ingestGlobalPage = (field: string, page: Array<{ id: string; data: Record<string, any> }>, pageSize: number) => {
       if (!alive) return;
+      noteFeedPage(field === 'placedAt' ? 'delivery' : 'primary', pageSize);
       // The secondary date feed owns only documents missing createdAt; it
       // must never overwrite the primary feed with a delayed older snapshot.
       globalPagesRef.current.set(
@@ -1238,11 +1267,15 @@ export function useKDSRealtimeStream() {
       query(collection(db, 'orders'), ...constraints),
       (snap) => {
         const direct = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
+        // A7 #2: was the page full? Decide BEFORE any merge: the alias merge
+        // only ADDS rows, and a capped primary page is truncated whether or not
+        // the alias read found extra ones.
+        noteFeedPage('primary', snap.size);
 
         // Branch-scoped reads can't see Delivery docs (they store store.id,
         // not branchId) — merge the aliased store orders like useOrders does.
         if (scopeBranchIds.length === 0) {
-          ingestGlobalPage('createdAt', direct);
+          ingestGlobalPage('createdAt', direct, snap.size);
           return;
         }
         // Gate the async merge: snapshot #5 must not be overwritten by
@@ -1295,8 +1328,8 @@ export function useKDSRealtimeStream() {
     // The global feed cannot use branch aliases. Listen to the Delivery date
     // field too, otherwise orderBy(createdAt) hides that entire order schema.
     const unsubscribeDelivery = scopeBranchIds.length === 0 ? onSnapshot(
-      query(collection(db, 'orders'), orderBy('placedAt', 'desc'), limit(100)),
-      (snap) => ingestGlobalPage('placedAt', snap.docs.map((d) => ({ id: d.id, data: d.data() }))),
+      query(collection(db, 'orders'), orderBy('placedAt', 'desc'), limit(OPEN_ORDER_PAGE_SIZE)),
+      (snap) => ingestGlobalPage('placedAt', snap.docs.map((d) => ({ id: d.id, data: d.data() })), snap.size),
       handleStreamError('delivery')
     ) : null;
 
@@ -1330,6 +1363,11 @@ export function useKDSRealtimeStream() {
   // must not verify a foreign dataset.
   const dataVerified = regional ? regionalFeedVerified : verifiedForScope || (!isLoading && !ordersError && oneShotOwnedByScope);
 
+  // A7 #2 honesty copy. Regional rows come from useOrders, whose page bound this
+  // hook does not own, so nothing is claimed for that path.
+  const windowCapped = regional ? false : Object.values(cappedFeeds).some(Boolean);
+  const windowTruncationNotice = regional ? null : orderWindowTruncationNotice(windowCapped);
+
   return {
     isOnline,
     isLoading,
@@ -1356,6 +1394,11 @@ export function useKDSRealtimeStream() {
     scopeBranchIds,
     /** Regional rows come from useOrders, which queries every ≤10-id chunk. */
     readsCompleteScope: regional,
+    /**
+     * A7 #2: a feed returned a FULL page, so older tickets may sit outside the
+     * window. Null when the window is known to be complete (or regional).
+     */
+    windowTruncationNotice,
   };
 }
 

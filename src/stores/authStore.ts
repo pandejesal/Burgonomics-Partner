@@ -36,16 +36,27 @@ const OFFLINE_GRACE_TTL_MS = 12 * 60 * 60 * 1000;
 const CACHED_PROFILE_KEY = 'burg.partner.auth.cachedProfile';
 
 interface CachedProfile {
+  /**
+   * A3 #5: the Firebase UID this profile was verified for. Restoring a cache
+   * without it let operator B's terminal boot show operator A's name, email,
+   * phone, role and branchIds (A's PII and A's branch-scoped views) whenever
+   * the transient-failure path was reached after a user switch.
+   */
+  uid: string;
   profile: Omit<User, 'createdAt'> & { createdAt?: unknown };
   savedAt: number;
 }
 
-function readCachedProfile(): User | null {
+function readCachedProfile(firebaseUid: string | null | undefined): User | null {
+  if (!firebaseUid) return null;
   try {
     const raw = typeof window !== 'undefined' ? window.localStorage.getItem(CACHED_PROFILE_KEY) : null;
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CachedProfile;
     if (!parsed?.profile || typeof parsed.savedAt !== 'number') return null;
+    // Fail closed: a cache written for another UID is NOT this session's
+    // profile, and neither is one with a missing/mismatched id.
+    if (typeof parsed.uid !== 'string' || parsed.uid !== firebaseUid) return null;
     if (Date.now() - parsed.savedAt > OFFLINE_GRACE_TTL_MS) return null;
     return { ...parsed.profile, createdAt: Timestamp.now() } as User;
   } catch {
@@ -53,13 +64,13 @@ function readCachedProfile(): User | null {
   }
 }
 
-function writeCachedProfile(profile: User): void {
+function writeCachedProfile(uid: string, profile: User): void {
   try {
     if (typeof window === 'undefined') return;
     const { createdAt: _ignored, ...rest } = profile;
     window.localStorage.setItem(
       CACHED_PROFILE_KEY,
-      JSON.stringify({ profile: rest, savedAt: Date.now() } satisfies CachedProfile)
+      JSON.stringify({ uid, profile: rest, savedAt: Date.now() } satisfies CachedProfile)
     );
   } catch {
     /* quota exceeded or restricted — grace simply unavailable */
@@ -273,7 +284,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         throw new Error(GENERIC_AUTH_ERROR);
       }
 
-      writeCachedProfile(profile);
+      writeCachedProfile(result.user.uid, profile);
       set({
         user: profile,
         firebaseUser: result.user,
@@ -350,7 +361,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           }
         }
         if (profile) {
-          writeCachedProfile(profile);
+          writeCachedProfile(firebaseUser.uid, profile);
           set({
             user: profile,
             firebaseUser,
@@ -360,9 +371,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           });
         } else if (transient) {
           // Offline grace: restore the last VERIFIED profile inside its TTL
-          // with a visible banner. Expired/absent cache → loading clears
-          // with no session (never silent trust, never sign-out loop).
-          const cached = readCachedProfile();
+          // with a visible banner. Expired/absent/OTHER-user cache → loading
+          // clears with no session (never silent trust, never sign-out loop).
+          // A3 #5: the cache must belong to THIS signed-in UID — a terminal
+          // shared by two operators must not show the first one's identity.
+          const cached = readCachedProfile(firebaseUser.uid);
           if (cached) {
             set({
               user: cached,
@@ -388,6 +401,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           });
         }
       } else {
+        // A3 #5: no signed-in user means any cached profile is now stale
+        // identity — clear it so a later boot cannot restore it under someone
+        // else's session (sign-out clears it too, but an auth transition to
+        // null that never ran signOut would otherwise leave it behind).
+        clearCachedProfile();
         set({ user: null, firebaseUser: null, loading: false });
       }
     });

@@ -434,14 +434,20 @@ export function demoSeedMenuItems(): MenuItem[] {
   }));
 }
 
-export function useMenu() {
+export function useMenu(overrideBranchId?: string | null) {
   const { user } = useAuth();
   const { selectedBranchId } = useAppStore();
   const queryClient = useQueryClient();
 
   // Never default to a delivery store id — products are keyed by branchId and
   // a store id matches nothing, yielding a permanently empty menu.
-  const branchId = selectedBranchId || user?.branchIds?.[0] || null;
+  // A7 #5: an explicit override lets a surface that knows its own effective
+  // outlet (the KDS board) read the menu of THAT outlet instead of the
+  // session's first branch. `undefined` keeps the historical default.
+  const branchId =
+    overrideBranchId === undefined
+      ? selectedBranchId || user?.branchIds?.[0] || null
+      : overrideBranchId;
 
   /**
    * THIS hook instance's lifetime token. Captured in a ref so it survives

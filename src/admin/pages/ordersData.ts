@@ -4,6 +4,17 @@ import {
   OrderAddressSnapshot,
   CartLine,
 } from "@/features/orders/models";
+import { modifierLabelsFrom } from "@/utils/orderContract";
+
+/**
+ * A7 #6: the per-line kitchen note. `notes` is what the drawer's cart mapper
+ * writes; `specialInstructions` is the key both other apps use, so read either.
+ * Trimmed and length-capped between the two spellings so a blank never prints.
+ */
+function strOfLineNote(item: { notes?: unknown; specialInstructions?: unknown }): string {
+  const value = item.notes ?? item.specialInstructions;
+  return typeof value === "string" ? value.trim() : "";
+}
 
 export interface RichOrder extends Omit<Order, "status" | "petpoojaStatus"> {
   // We'll keep our own flexible status for admin state but match features/orders/models
@@ -583,11 +594,18 @@ export function getThermalReceiptText(
 
     order.items.forEach((item) => {
       text += `${item.quantity.toString().padEnd(5)} ${item.name.toUpperCase()}\n`;
-      if (item.customizations && item.customizations.length > 0) {
-        item.customizations.forEach((cust: any) => {
-          const custTitle = (cust.name || cust.optionName || "").toUpperCase();
-          text += `      >> ${custTitle}\n`;
-        });
+      // A7 #6: this loop read only `customizations`, so a line carrying
+      // `modifiers: ["No onion"]` (the shape the customer app writes) or a line
+      // note (`notes`/`specialInstructions`) printed as a bare item name —
+      // the kitchen made it with the onion and mayo the customer asked to skip.
+      // Both now come from the same helpers every other Partner surface uses.
+      const modifiers = modifierLabelsFrom(item);
+      modifiers.forEach((label) => {
+        text += `      >> ${label.toUpperCase()}\n`;
+      });
+      const lineNote = strOfLineNote(item);
+      if (lineNote) {
+        text += `      * ${lineNote.toUpperCase()}\n`;
       }
     });
 

@@ -73,16 +73,20 @@ function buttonWithText(text: string): HTMLButtonElement | undefined {
 }
 
 describe('A5 — surge cannot mask a staff close', () => {
-  it('disables Busy/Rush and shows CLOSED while the override is in force', async () => {
+  it('disables Busy and shows CLOSED while the override is in force', async () => {
     await act(async () => { root.render(<StoreOperatingToggle branch={closedBranch as any} />); });
 
     const busy = buttonWithText('Kitchen Busy')!;
-    const rush = buttonWithText('30m Rush Break')!;
+    // A7 #3 (owner decision 2026-11-25 #4): the two "timed" pause buttons
+    // ("30m Rush Break", "1h Rain Pause") promised a duration the server cannot
+    // honour and were removed. Their absence is the contract now — a control
+    // that claims a timer is worse than no control, so it must not come back.
+    expect(buttonWithText('30m Rush Break')).toBeUndefined();
+    expect(buttonWithText('1h Rain Pause')).toBeUndefined();
     expect(busy.disabled).toBe(true);
-    expect(rush.disabled).toBe(true);
     expect(container.textContent).toContain('CLOSED');
 
-    await act(async () => { busy.click(); rush.click(); });
+    await act(async () => { busy.click(); });
     const acceptingWrites = branchMutation.mutateAsync.mock.calls.filter(
       (c: any[]) => c[0]?.settings?.active === true || c[0]?.settings?.acceptingOrdersStatus === 'busy',
     );

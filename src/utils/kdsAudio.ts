@@ -224,6 +224,26 @@ export function isKDSAlarmRepeating(): boolean {
   return repeatIntervalId !== null;
 }
 
+/**
+ * A7 #10: re-read the AudioContext's real state instead of trusting the
+ * mount-time snapshot. A wall-mounted tablet that slept, a browser that
+ * discarded the context, or a long-idle throttled tab leaves the context
+ * `suspended`/`closed` while the UI still showed "audio enabled" — so the alarm
+ * went silent with no way for staff to know (the enable banner never came back).
+ * Returns true only while the flag AND the live context agree; the page mirrors
+ * that into its `audioUnlocked` state on visibility/focus.
+ */
+export function refreshKDSAudioUnlocked(): boolean {
+  const live = isKDSAudioUnlocked();
+  if (!live) {
+    // A context that stopped running must not keep claiming it is armed: drop
+    // the flag so the next unlock is a real user gesture, not a silent resume
+    // from a timer callback that the autoplay policy will refuse.
+    isAudioUnlocked = false;
+  }
+  return live;
+}
+
 /** Reset the alarm loop plus the synced count and acknowledge latch for a new scope. */
 export function resetKDSAlarmState(): void {
   stopRepeatingKDSAlarm();

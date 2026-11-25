@@ -11,11 +11,13 @@ import {
   KOTTimerBadge,
   useKDSRealtimeStream,
 } from '@/features/kds';
+import { kds86BranchName, resolveKds86BranchId } from '@/features/kds/utils/kds86Outlet';
 import {
   isKDSAudioMuted,
   setKDSAudioMuted,
   unlockKDSAudio,
   isKDSAudioUnlocked,
+  refreshKDSAudioUnlocked,
   acknowledgeKDSAlarm,
 } from '@/utils/kdsAudio';
 import { scopeTruncationNotice } from '@/utils/branchScope';
@@ -112,11 +114,15 @@ export function KDSPage() {
     lastRefreshAt,
     scopeBranchIds,
     readsCompleteScope,
+    windowTruncationNotice,
   } = useKDSRealtimeStream();
   // F6: the Firestore `in` cap covers only the first 10 assigned outlets —
   // state that on the header instead of silently hiding the remaining ones.
   // A feed that queries every assigned chunk has nothing to disclose.
   const scopeNotice = readsCompleteScope ? null : scopeTruncationNotice(scopeBranchIds);
+  // A7 #2: the makeline read is bounded; a full page means older still-open
+  // tickets may sit outside it. Never let the board look complete.
+  const windowNotice = readsCompleteScope ? null : windowTruncationNotice;
   const [nowTick, setNowTick] = useState(0);
   useEffect(() => {
     const t = window.setInterval(() => setNowTick(Date.now()), 15000);
@@ -227,6 +233,35 @@ export function KDSPage() {
     const unlocked = await handleUnlockAudio();
     if (unlocked) dismissAudioIntro();
   };
+
+  // A7 #10: `audioUnlocked` used to be read ONCE at mount. A tablet whose screen
+  // slept, a browser that discarded the AudioContext, or a throttled long-idle
+  // tab could leave the context suspended while this screen still showed "audio
+  // enabled" — the enable banner never reappeared and the alarm stayed silent.
+  // Re-check the real context whenever the tab becomes visible or focused, and
+  // flip the state back to false so the honest enable prompt returns.
+  useEffect(() => {
+    const recheck = () => setAudioUnlocked(refreshKDSAudioUnlocked());
+    const onVisibility = () => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') recheck();
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVisibility);
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', recheck);
+      window.addEventListener('pageshow', recheck);
+    }
+    return () => {
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVisibility);
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('focus', recheck);
+        window.removeEventListener('pageshow', recheck);
+      }
+    };
+  }, []);
 
   const toggleMute = () => {
     const nextMuted = !isMuted;
@@ -653,6 +688,16 @@ export function KDSPage() {
             {scopeNotice}
           </div>
         )}
+
+        {/* A7 #2: the makeline window is bounded — a capped page is stated. */}
+        {windowNotice && (
+          <div
+            role="note"
+            className="w-full rounded-lg border border-amber-500/40 bg-amber-950/40 px-3 py-2 text-[11px] font-bold text-amber-200"
+          >
+            {windowNotice}
+          </div>
+        )}
       </header>
 
       {/* Main 3-Column Makeline Kanban Grid */}
@@ -778,7 +823,15 @@ export function KDSPage() {
         </section>
       </main>
 
-      <KDSQuick86Drawer isOpen={is86DrawerOpen} onClose={() => setIs86DrawerOpen(false)} />
+      <KDSQuick86Drawer
+        isOpen={is86DrawerOpen}
+        onClose={() => setIs86DrawerOpen(false)}
+        branchId={resolveKds86BranchId(selectedBranchId, user?.branchIds)}
+        branchName={kds86BranchName(
+          resolveKds86BranchId(selectedBranchId, user?.branchIds),
+          activeOrders,
+        )}
+      />
     </div>
   );
 }
