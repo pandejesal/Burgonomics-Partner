@@ -1,4 +1,6 @@
-import React from 'react';
+/** @vitest-environment jsdom */
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
@@ -183,6 +185,54 @@ describe('SettlementsPage', () => {
     expect(html).toContain('Branch owes brand');
     expect(html).toContain('Mark as paid');
     expect(html).not.toContain('₹10,800');
+  });
+
+  it('reports gross, refunds, payable and manual collection separately in the footer', () => {
+    const html = renderWithClient([statement(), statement({ id: 'other', branchId: 'other', onlineCollectedPaise: 0, onlineRefundedPaise: 0, onlineNetPaise: 0, outstandingPaise: -600000 })]);
+    const footer = html.split('<tfoot')[1].split('</tfoot>')[0];
+    expect(footer).toContain('₹13,000');
+    expect(footer).toContain('₹200');
+    expect(footer).toContain('₹10,800');
+    expect(footer).toContain('₹6,000');
+    expect(footer).toContain('Owes brand');
+  });
+
+  it('names the blocking captures instead of only saying "Blocked"', () => {
+    const html = renderWithClient([statement({ complete: false, unresolvedCaptures: 2 })]);
+    expect(html).toContain('Blocked');
+    expect(html).toContain('2 captures need brand review');
+    // A blocked month is never offered for payment.
+    expect(html).not.toContain('Mark as paid');
+  });
+
+  it('submits only the collection amount actually entered for a part payment', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const click = (text: string) => [...container.querySelectorAll('button')].find(b => b.textContent?.includes(text))?.click();
+    const change = (input: HTMLInputElement, value: string) => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    const env = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    env.IS_REACT_ACT_ENVIRONMENT = true;
+    try {
+      await act(async () => root.render(<QueryClientProvider client={queryClient}><MemoryRouter>
+        <SettlementsPage initialStatements={[statement({ outstandingPaise: -200000 })]} initialMonthKey="2026-11" />
+      </MemoryRouter></QueryClientProvider>));
+      await act(async () => { click('Mark as paid'); });
+      const amount = [...container.querySelectorAll('label')].find(l => l.textContent?.includes('Actual amount (₹)'))?.querySelector('input');
+      expect(amount).toBeDefined();
+      await act(async () => { change(amount!, '321.45'); change(container.querySelector('input[maxlength="120"]')!, 'UTR-PART'); });
+      await act(async () => { click('Record payment'); });
+      expect(apiMocks.markSettlementPaid).toHaveBeenCalledWith(expect.objectContaining({ reference: 'UTR-PART', settledNetPaise: -32145 }));
+    } finally {
+      await act(async () => root.unmount());
+      env.IS_REACT_ACT_ENVIRONMENT = false;
+      container.remove();
+      queryClient.clear();
+    }
   });
 
   it('hides generation and mark-as-paid from a branch owner (read-only view)', () => {

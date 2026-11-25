@@ -95,6 +95,9 @@ export function SettlementsPage({
   const [reference, setReference] = useState('');
   const [paidOn, setPaidOn] = useState(todayIso());
   const [note, setNote] = useState('');
+  // A part payout is a real event: the operator types the amount evidenced by
+  // the UTR, and the balance stays visible instead of the statement reading paid.
+  const [amount, setAmount] = useState('');
   const [isExporting, setIsExporting] = useState(false);
 
   const hook = useSettlements({
@@ -169,17 +172,28 @@ export function SettlementsPage({
       toast.error('A payment reference is required (bank UTR, cheque or voucher number).');
       return;
     }
+    const outstanding = settlementOutstanding(paidTarget) ?? 0;
+    const rupees = amount.trim() === '' ? Math.abs(outstanding) / 100 : Number(amount);
+    if (!Number.isFinite(rupees) || rupees <= 0) {
+      toast.error('Enter the amount this payment is for, in rupees.');
+      return;
+    }
+    // The API is signed: a collect-back is negative, a payout positive.
+    const settledNetPaise = Math.round(rupees * 100) * (outstanding < 0 ? -1 : 1);
     try {
       await hook.markPaid({
         statementId: paidTarget.id,
         reference: trimmed,
         paidOn,
+        settledNetPaise,
+        ...(settledNetPaise !== outstanding ? { additionalPayment: true } : {}),
         ...(note.trim() ? { note: note.trim() } : {}),
       });
       toast.success('Payment recorded. No money was moved by this app.');
       setPaidTarget(null);
       setReference('');
       setNote('');
+      setAmount('');
     } catch (err) {
       toast.error('Payment NOT recorded — the statement is unchanged.', {
         description: settlementErrorMessage(err),
@@ -342,6 +356,12 @@ export function SettlementsPage({
                         <div className="text-[11px] font-semibold text-zinc-400">
                           {settlementNetLabel(statement)}
                         </div>
+                        {outstanding === null && Number(statement.unresolvedCaptures ?? 0) > 0 && (
+                          <div className="text-[11px] font-semibold text-amber-300">
+                            {statement.unresolvedCaptures} capture
+                            {Number(statement.unresolvedCaptures) === 1 ? '' : 's'} need brand review
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-zinc-300">
                         {settlementPaidLabel(statement)}
@@ -369,6 +389,7 @@ export function SettlementsPage({
                                 setReference('');
                                 setPaidOn(todayIso());
                                 setNote('');
+                                setAmount('');
                               }}
                               className="min-h-11 px-3 py-2 rounded-lg bg-accent text-white font-bold"
                             >
@@ -416,6 +437,10 @@ export function SettlementsPage({
                                   <span>Orders count</span>
                                   <span className="font-semibold">{statement.cashOrders}</span>
                                 </li>
+                                <li className="flex justify-between gap-3">
+                                  <span>Counter UPI (not cash)</span>
+                                  <span className="font-semibold">{settlementMoney(statement.branchUpiCollectedPaise ?? 0)}</span>
+                                </li>
                                 {statement.cashPendingOrders > 0 && (
                                   <li className="flex justify-between gap-3 text-amber-300">
                                     <span>Still open (not yet in hand)</span>
@@ -438,6 +463,15 @@ export function SettlementsPage({
                                   <span>Fee for this month</span>
                                   <span className="font-semibold">{settlementMoney(statement.platformFeePaise)}</span>
                                 </li>
+                                {typeof statement.netAdjustmentPaise === 'number' && statement.netAdjustmentPaise !== 0 && (
+                                  <li className="flex justify-between gap-3 text-amber-300">
+                                    <span>Correction vs v{Math.max(1, statement.version - 1)}</span>
+                                    <span className="font-semibold">
+                                      {statement.netAdjustmentPaise < 0 ? '-' : '+'}
+                                      {settlementMoney(Math.abs(statement.netAdjustmentPaise))}
+                                    </span>
+                                  </li>
+                                )}
                                 <li className="flex justify-between gap-3 border-t border-neutral-800 pt-1">
                                   <span className="font-bold">Net payable</span>
                                   <span className={`font-black ${owing ? 'text-rose-300' : 'text-emerald-300'}`}>
@@ -451,6 +485,13 @@ export function SettlementsPage({
                                   </li>
                                 )}
                               </ul>
+                              {outstanding === null && Number(statement.unresolvedCaptures ?? 0) > 0 && (
+                                <p className="mt-2 text-[11px] font-semibold text-amber-300">
+                                  {statement.unresolvedCaptures} online capture
+                                  {Number(statement.unresolvedCaptures) === 1 ? '' : 's'} still need the
+                                  brand team to confirm the money, so this month cannot be paid yet.
+                                </p>
+                              )}
                               {statement.feeNote && (
                                 <p className="mt-2 text-[11px] text-zinc-500">{statement.feeNote}</p>
                               )}
@@ -501,10 +542,20 @@ export function SettlementsPage({
                       {totals.unpaidCount} unpaid · {totals.paidCount} paid
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-right">{settlementMoney(totals.onlineNetPaise)}</td>
-                  <td className="px-4 py-3 text-right"></td>
+                  <td className="px-4 py-3 text-right">
+                    {settlementMoney(totals.onlineCollectedPaise)}
+                    <div className="text-[11px] font-normal text-zinc-500">
+                      net {settlementMoney(totals.onlineNetPaise)}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-right">{settlementMoney(totals.onlineRefundedPaise)}</td>
                   <td className="px-4 py-3 text-right">{settlementMoney(totals.feePaise)}</td>
-                  <td className="px-4 py-3 text-right">{settlementMoney(totals.netPayablePaise)}</td>
+                  <td className="px-4 py-3 text-right">
+                    {settlementMoney(totals.payableToBranchesPaise)}
+                    <div className="text-[11px] font-normal text-rose-300">
+                      Owes brand {settlementMoney(totals.owesBrandPaise)}
+                    </div>
+                  </td>
                   <td className="px-4 py-3"></td>
                   <td className="px-4 py-3"></td>
                 </tr>
@@ -551,6 +602,24 @@ export function SettlementsPage({
                 onChange={(e) => setPaidOn(e.target.value)}
                 className="min-h-11 rounded-xl bg-neutral-950 border border-neutral-700 px-3 text-white text-xs focus:outline-none focus:border-accent"
               />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+                Actual amount (₹)
+              </span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min={0.01}
+                step="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder={(Math.abs(paidTarget.outstandingPaise ?? 0) / 100).toFixed(2)}
+                className="min-h-11 rounded-xl bg-neutral-950 border border-neutral-700 px-3 text-white text-xs focus:outline-none focus:border-accent"
+              />
+              <span className="text-[11px] text-zinc-500">
+                Leave blank to record the full outstanding balance.
+              </span>
             </label>
             <label className="flex flex-col gap-1 sm:col-span-2">
               <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500">

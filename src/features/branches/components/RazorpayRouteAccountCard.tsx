@@ -36,7 +36,7 @@ export function isValidRouteAccountId(raw: string): boolean {
 export function RazorpayRouteAccountCard({
   accountId,
   onChange,
-  monthlyFee = 2500,
+  monthlyFee = 2000,
   onMonthlyFeeChange,
   canEditMonthlyFee = true,
   isSuperAdmin = true,
@@ -45,7 +45,7 @@ export function RazorpayRouteAccountCard({
   const normalizedAccountId = normalizeRouteAccountId(accountId);
   const isLinked = isValidRouteAccountId(normalizedAccountId);
   const showFormatError = normalizedAccountId.length > 0 && !isLinked;
-  const fee = Number.isFinite(monthlyFee) && monthlyFee >= 0 ? monthlyFee : 2500;
+  const fee = Number.isFinite(monthlyFee) && monthlyFee >= 0 ? monthlyFee : 2000;
 
   return (
     <div className="p-4 bg-[#0A0A0A] border border-[#1E3A24] rounded-2xl space-y-3">

@@ -32,8 +32,18 @@ function IssueForm({ issue, onChange }: { issue: CaptureRecoveryIssue; onChange:
         message = result.regenerationPending ? "Conflict closed. Regeneration is pending." : "Conflict closed and audit recorded.";
       } else {
         const capturedAtMs = Date.parse(`${String(data.get("capturedAt"))}+05:30`);
-        if (!Number.isFinite(capturedAtMs)) throw new Error("Enter the verified capture date and time in IST.");
-        await partnerFunctionsApi.resolveCapture({ orderId: issue.orderId, razorpayPaymentId: issue.paymentId, capturedAtMs, reason: String(data.get("reason")) });
+        const notCaptured = data.get("notCaptured") === "on";
+        if (notCaptured) {
+          await partnerFunctionsApi.resolveCaptureNotCaptured({
+            orderId: issue.orderId,
+            razorpayPaymentId: issue.paymentId,
+            reason: String(data.get("reason")),
+          });
+          message = "Closed as not captured; the order is excluded from online money and audited.";
+        } else {
+          if (!Number.isFinite(capturedAtMs)) throw new Error("Enter the verified capture date and time in IST.");
+          await partnerFunctionsApi.resolveCapture({ orderId: issue.orderId, razorpayPaymentId: issue.paymentId, capturedAtMs, reason: String(data.get("reason")) });
+        }
       }
       await onChange(message);
     } catch (err) {
@@ -58,10 +68,20 @@ function IssueForm({ issue, onChange }: { issue: CaptureRecoveryIssue; onChange:
             </select>
           </label>
         ) : (
-          <label className="grid gap-1 text-sm">
-            Verified capture date and time (IST)
-            <input name="capturedAt" type="datetime-local" step="1" className={field} required />
-          </label>
+          <>
+            <label className="grid gap-1 text-sm">
+              Verified capture date and time (IST)
+              <input name="capturedAt" type="datetime-local" step="1" className={field} />
+            </label>
+            <label className="flex items-start gap-2 text-sm">
+              <input name="notCaptured" type="checkbox" className="mt-1" />
+              <span>
+                The provider reports this payment was <strong>NOT captured</strong>. The order
+                is excluded from online money and audited; never use this for a payment that
+                went through.
+              </span>
+            </label>
+          </>
         ))}
         {!pending && <label className="grid gap-1 text-sm">Reason (required)<textarea name="reason" className={field} rows={2} maxLength={500} required /></label>}
         {error && <p role="alert" className="text-sm">{error}</p>}
