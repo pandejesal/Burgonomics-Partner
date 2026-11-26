@@ -1,26 +1,29 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import capacitorConfig from '../../../capacitor.config';
+import { STATUS_BAR_CHROME } from './nativeBootstrap';
 
 /**
- * System-bar semantics for the Partner dark-green header (#0E4825).
+ * System-bar semantics for the Partner console.
+ *
+ * EMULATOR audit 2026-11-26: the status bar rendered near-white with
+ * light-content icons, so the clock and battery were invisible. The console is
+ * dark in every appearance (no light theme in src/index.css), so the bar is a
+ * constant #0A0A0A with light icons.
  *
  * Both Capacitor surfaces spell "light content on a dark background" the same
- * way, and both installed packages (8.5.2) map `DARK` to dark-icon OFF:
+ * way, and both installed packages map `DARK` to dark-icon OFF:
  *
- * - `@capacitor/status-bar` `Style.Dark` === "DARK" (definitions.d.ts: "Light
- *   text for dark backgrounds").
- * - `@capacitor/core` `SystemBarsStyle.Dark` === "DARK" (system-bars.md:241
- *   "Light system bar content on a dark background"); the installed Android
- *   implementation maps it to `setAppearanceLightStatusBars(false)` and
- *   `setAppearanceLightNavigationBars(false)` (SystemBars.java:292/297).
- *
- * `LIGHT` therefore means dark icons, which is why the previous
- * `Style.Light` / config `'LIGHT'` pair produced unreadable icons on the
- * green bar. These tests pin the value at config time and at runtime for both
- * platforms, and pin that a bar failure never strands the splash screen.
+ * - `@capacitor/status-bar` `Style.Dark` === "DARK" ("Light text for dark
+ *   backgrounds").
+ * - `@capacitor/core` `SystemBarsStyle.Dark` === "DARK" ("Light system bar
+ *   content on a dark background"); the Android implementation maps it to
+ *   `setAppearanceLightStatusBars(false)`.
  *
  * Scope: plugin boundaries are mocked. Nothing here launches a native shell,
- * measures contrast, or asserts on-device rendering.
+ * measures contrast, or asserts on-device rendering. The native
+ * res/values{-night}/colors.xml parity is asserted in
+ * tests/partner-android-chrome.test.ts (a plain node test, so this suite stays
+ * free of filesystem imports the app tsconfig does not cover).
  */
 
 /** Plugin availability is toggled per test to model an un-synced shell. */
@@ -129,7 +132,7 @@ const resetBarMocks = (): void => {
   for (const method of Object.values(loggerMock)) method.mockReset();
 };
 
-describe('capacitor config — light system-bar content on the green header', () => {
+describe('capacitor config — light system-bar content on the console canvas', () => {
   it('declares SystemBars DARK (light content) with the bars visible', () => {
     expect(pluginConfig.SystemBars?.style).toBe('DARK');
     expect(pluginConfig.SystemBars?.hidden).toBe(false);
@@ -144,10 +147,22 @@ describe('capacitor config — light system-bar content on the green header', ()
     expect(pluginConfig.SystemBars?.insetsHandling).not.toBe('native');
   });
 
-  it('aligns the legacy StatusBar block with the same light-content meaning', () => {
+  it('aligns the legacy StatusBar block with the console canvas', () => {
     expect(pluginConfig.StatusBar?.style).toBe('DARK');
-    expect(pluginConfig.StatusBar?.backgroundColor).toBe('#0E4825');
+    expect(pluginConfig.StatusBar?.backgroundColor?.toUpperCase()).toBe(
+      STATUS_BAR_CHROME.backgroundColor,
+    );
     expect(pluginConfig.StatusBar?.overlaysWebView).toBe(false);
+  });
+
+  it('keeps the splash off fullscreen/immersive (bars stay in place)', () => {
+    // The immersive splash hid the bars; on dismissal the app came back with a
+    // dead band at the top. The splash now sits under the normal bars.
+    const splash = capacitorConfig.plugins?.SplashScreen as Record<string, unknown> | undefined;
+    expect(splash?.splashFullScreen).toBe(false);
+    expect(splash?.splashImmersive).toBe(false);
+    // Splash until the app is ready: no fixed auto-hide timer.
+    expect(splash?.launchAutoHide).toBe(false);
   });
 });
 
@@ -182,7 +197,7 @@ describe('initNativeShell — runtime system-bar styling', () => {
     resetBarMocks();
   });
 
-  it('Android: applies DARK to both surfaces, keeps the green background, hides the splash', async () => {
+  it('Android: applies DARK to both surfaces, keeps the console background, hides the splash', async () => {
     resetBarMocks();
     availability.splashScreen = true;
     availability.statusBar = true;
@@ -194,7 +209,9 @@ describe('initNativeShell — runtime system-bar styling', () => {
     expect(coreSystemBars.setStyle).not.toHaveBeenCalledWith({ style: 'LIGHT' });
 
     expect(legacyStatusBar.setStyle).toHaveBeenCalledWith({ style: 'DARK' });
-    expect(legacyStatusBar.setBackgroundColor).toHaveBeenCalledWith({ color: '#0E4825' });
+    expect(legacyStatusBar.setBackgroundColor).toHaveBeenCalledWith({
+      color: STATUS_BAR_CHROME.backgroundColor,
+    });
     expect(legacyStatusBar.setOverlaysWebView).toHaveBeenCalledWith({ overlay: false });
 
     expect(splashScreen.hide).toHaveBeenCalledTimes(1);
@@ -238,7 +255,9 @@ describe('initNativeShell — runtime system-bar styling', () => {
     await expect(boot('android')).resolves.toBeUndefined();
 
     expect(legacyStatusBar.setStyle).toHaveBeenCalledWith({ style: 'DARK' });
-    expect(legacyStatusBar.setBackgroundColor).toHaveBeenCalledWith({ color: '#0E4825' });
+    expect(legacyStatusBar.setBackgroundColor).toHaveBeenCalledWith({
+      color: STATUS_BAR_CHROME.backgroundColor,
+    });
     expect(splashScreen.hide).toHaveBeenCalledWith({ fadeOutDuration: 200 });
 
     // The handled failure is reported through the structured logger: a
@@ -299,7 +318,9 @@ describe('initNativeShell — runtime system-bar styling', () => {
 
     expect(coreSystemBars.setStyle).toHaveBeenCalledWith({ style: 'DARK' });
     expect(legacyStatusBar.setStyle).toHaveBeenCalledWith({ style: 'DARK' });
-    expect(legacyStatusBar.setBackgroundColor).toHaveBeenCalledWith({ color: '#0E4825' });
+    expect(legacyStatusBar.setBackgroundColor).toHaveBeenCalledWith({
+      color: STATUS_BAR_CHROME.backgroundColor,
+    });
     expect(splashScreen.hide).not.toHaveBeenCalled();
     expect(loggerMock.warn).toHaveBeenCalledWith(
       'native.splashHideFailed',

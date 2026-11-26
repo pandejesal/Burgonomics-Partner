@@ -19,7 +19,7 @@ import { StrictMode } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import './index.css';
-import { initHardwareBackButton } from './shared/platform/hardwareBackButton.ts';
+import { initHardwareBackButton, routerHistory } from './shared/platform/hardwareBackButton.ts';
 import { initNativeShell } from './shared/platform/nativeBootstrap.ts';
 import { ConfigErrorScreen } from './shared/components/feedback/ConfigErrorScreen.tsx';
 import { startBoot } from './shared/platform/bootstrapFailure.ts';
@@ -80,6 +80,17 @@ void startBoot({
   hideNativeSplash: () => initNativeShell(),
 });
 
-// Android hardware back button → router-back, else minimize (native only).
-// Independent of which screen mounted — registered exactly once.
-initHardwareBackButton();
+// Android hardware back button: close any open modal, else router-back, else
+// two-press exit (native only). Independent of which screen mounted — registered
+// exactly once. `routerHistory()` reads react-router's own POP-stack index
+// instead of `window.history.length`, which is >1 on a cold start.
+initHardwareBackButton({
+  history: routerHistory(),
+  onArmExit: () => {
+    // Android's own convention for "press back again to exit": the first press
+    // on the login screen must say something, or it looks like nothing happened.
+    void import('sonner')
+      .then(({ toast }) => toast('Press back again to exit', { duration: 2000 }))
+      .catch(() => undefined);
+  },
+});

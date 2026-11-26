@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      The Partner console is dark in every appearance (there is no light theme
+      in src/index.css). This file exists so a device in system dark mode gets
+      the identical chrome instead of relying on the DayNight parent, and so the
+      values are explicit next to values/colors.xml.
+      Must match STATUS_BAR_CHROME.dark in
+      src/shared/platform/nativeBootstrap.ts.
+    -->
+    <color name="canvas">#0A0A0A</color>
+    <color name="statusBarColor">#0A0A0A</color>
+    <bool name="statusBarLightIcons">true</bool>
+</resources>

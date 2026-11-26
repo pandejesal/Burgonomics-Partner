@@ -16,10 +16,27 @@ import { logger } from '@/core/logging/logger';
  * without one of them must not skip the rest, and in particular must never
  * strand the splash screen.
  */
-const BRAND_BAR_COLOR = '#0E4825';
 const SPLASH_FADE_OUT_MS = 200;
 
-/** Light system-bar content on the dark-green header (core surface). */
+/**
+ * Console chrome (EMULATOR audit 2026-11-26: the status bar rendered near-white
+ * with light-content icons, so the clock/battery were invisible).
+ *
+ * The Partner console is dark in every appearance — there is no light theme in
+ * src/index.css and the Header paints `--color-bg` (#0A0A0A) — so the bar is a
+ * constant. `style: 'DARK'` means light icons, correct on near-black.
+ *
+ * `backgroundColor` must equal `statusBarColor` in
+ * android/app/src/main/res/values/colors.xml; nativeBootstrap.system-bars.test.ts
+ * reads that file, so the native first frame (painted before JS runs) and this
+ * runtime value cannot drift.
+ */
+export const STATUS_BAR_CHROME = Object.freeze({
+  backgroundColor: '#0A0A0A',
+  style: 'DARK' as const,
+});
+
+/** Light system-bar content on the dark console (core surface). */
 async function applySystemBarStyle(): Promise<void> {
   // `SystemBars` ships inside @capacitor/core, which this module already
   // imports statically — a second dynamic import would only add an
@@ -38,12 +55,30 @@ async function applyLegacyStatusBarStyle(platform: string): Promise<void> {
     const { StatusBar, Style } = await import('@capacitor/status-bar');
     await StatusBar.setStyle({ style: Style.Dark });
     if (platform === 'android') {
-      await StatusBar.setBackgroundColor({ color: BRAND_BAR_COLOR });
+      await StatusBar.setBackgroundColor({ color: STATUS_BAR_CHROME.backgroundColor });
       await StatusBar.setOverlaysWebView({ overlay: false });
     }
   } catch (error) {
     // StatusBar unavailable — web fallback styling already applies.
     logger.warn('native.statusBarFailed', error);
+  }
+}
+
+/**
+ * Re-asserts the bar after a resume. An operator switching the tablet between
+ * light and dark system UI used to come back to a bar recoloured by the OS;
+ * this re-applies the console chrome without touching the page.
+ */
+function watchSystemBars(): () => void {
+  try {
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      void applySystemBarStyle();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  } catch {
+    return () => undefined;
   }
 }
 
@@ -65,5 +100,6 @@ export async function initNativeShell(): Promise<void> {
   // sees already has readable icons.
   await applySystemBarStyle();
   await applyLegacyStatusBarStyle(platform);
+  watchSystemBars();
   await hideSplash();
 }

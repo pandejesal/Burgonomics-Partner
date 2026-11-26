@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Brand palette + system-bar chrome.
+
+      Before this file the app inherited @capacitor/android's library colors
+      (indigo #3F51B5) and the DayNight theme's default window background.
+      EMULATOR audit 2026-11-26: that default is near-white, and the console is
+      styled light-content (SystemBars DARK), so the status bar rendered white
+      icons on a near-white bar — invisible.
+
+      `canvas`/`statusBarColor` are the console's own canvas (#0A0A0A,
+      the `color-bg` token in src/index.css) and must match
+      STATUS_BAR_CHROME.dark.backgroundColor in
+      src/shared/platform/nativeBootstrap.ts — a unit test reads this file.
+      statusBarLightIcons = true means LIGHT icons, correct on near-black.
+    -->
+    <color name="colorPrimary">#0E4825</color>
+    <color name="colorPrimaryDark">#0A0A0A</color>
+    <color name="colorAccent">#FF802B</color>
+
+    <color name="canvas">#0A0A0A</color>
+    <color name="statusBarColor">#0A0A0A</color>
+    <bool name="statusBarLightIcons">true</bool>
+</resources>

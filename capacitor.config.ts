@@ -37,23 +37,31 @@ const config: CapacitorConfig = {
       androidSplashResourceName: 'splash',
       androidScaleType: 'CENTER_CROP',
       showSpinner: false,
-      splashFullScreen: true,
-      splashImmersive: true,
+      // EMULATOR audit 2026-11-26: the full-screen/immersive splash hid the
+      // system bars, and the activity came back with a dead band at the top.
+      // The splash now sits under the normal bars, whose launch-theme colours
+      // (android/app/src/main/res/values/styles.xml) keep the icons visible.
+      splashFullScreen: false,
+      splashImmersive: false,
     },
     // Modern shells (targetSdk 36) render the bar through core SystemBars.
-    // `DARK` here means LIGHT content on a dark background — the icon colour
-    // this deep-green header needs. Leaving it unset let the plugin default
-    // ('DEFAULT', device-appearance driven) override the intent.
+    // `DARK` here means LIGHT content on a dark background, i.e. exactly what
+    // the #0A0A0A console canvas needs. Change this and StatusBar together —
+    // native res/values{-night}/colors.xml carries the very first frame.
     SystemBars: {
       style: 'DARK',
       hidden: false,
+      // Explicit at the plugin's own default: native inset padding plus the
+      // --safe-area-inset-* CSS variables. Never `disable`.
+      insetsHandling: 'css',
     },
-    // Legacy surface for older shells and iOS. `Style.Dark` is the same
-    // "light text for dark backgrounds" value; `LIGHT` asked for dark icons
-    // on a #0E4825 bar.
+    // `Style.Dark` here means "light content on a dark background", which is
+    // correct only if the bar itself is dark. Must equal STATUS_BAR_CHROME
+    // backgroundColor in src/shared/platform/nativeBootstrap.ts and
+    // statusBarColor in res/values{-night}/colors.xml (both asserted in tests).
     StatusBar: {
       style: 'DARK',
-      backgroundColor: '#0E4825',
+      backgroundColor: '#0A0A0A',
       overlaysWebView: false,
     },
     Keyboard: {

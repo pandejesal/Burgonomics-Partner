@@ -13,10 +13,32 @@
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:background">@null</item>
+        <!--
+          Dark console chrome. EMULATOR audit 2026-11-26: the status bar was
+          near-white while its icons were light — unreadable.
+
+          The DayNight parent's default window background is the near-white
+          light surface, and on targetSdk 36 the legacy
+          StatusBar.setBackgroundColor is ignored (edge-to-edge), so the visible
+          strip is this window background. Pin it to the console canvas
+          (color-bg #0A0A0A) and switch the bar to light-content icons.
+        -->
+        <item name="android:windowBackground">@color/canvas</item>
+        <item name="android:statusBarColor">@color/statusBarColor</item>
+        <item name="android:navigationBarColor">@color/statusBarColor</item>
+        <item name="android:windowLightStatusBar">@bool/statusBarLightIcons</item>
+        <item name="android:windowLightNavigationBar">@bool/statusBarLightIcons</item>
     </style>
 
 
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
+        <!-- The launch window is the brand-green splash; keep the bars on the
+             same green so the first frame has no white strip. -->
+        <item name="android:windowBackground">@drawable/splash</item>
+        <item name="android:statusBarColor">@color/colorPrimary</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">@color/colorPrimary</item>
+        <item name="android:windowLightNavigationBar">false</item>
     </style>
 </resources>
