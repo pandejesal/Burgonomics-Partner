@@ -18,6 +18,15 @@ import { logger } from '@/core/logging/logger';
  */
 const SPLASH_FADE_OUT_MS = 200;
 
+/** Detach handle for the resume watcher, released on root teardown. */
+let detachSystemBars: (() => void) | null = null;
+
+/** Root teardown: stop re-asserting the bars after the shell is gone. */
+export function disposeNativeShell(): void {
+  detachSystemBars?.();
+  detachSystemBars = null;
+}
+
 /**
  * Console chrome (EMULATOR audit 2026-11-26: the status bar rendered near-white
  * with light-content icons, so the clock/battery were invisible).
@@ -100,6 +109,9 @@ export async function initNativeShell(): Promise<void> {
   // sees already has readable icons.
   await applySystemBarStyle();
   await applyLegacyStatusBarStyle(platform);
-  watchSystemBars();
+  detachSystemBars = watchSystemBars();
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pagehide', disposeNativeShell, { once: true });
+  }
   await hideSplash();
 }

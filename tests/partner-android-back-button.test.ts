@@ -165,12 +165,14 @@ describe('initHardwareBackButton — the registered listener', () => {
   let registered: Listener | null;
   let exitApp: ReturnType<typeof vi.fn>;
   let back: ReturnType<typeof vi.fn>;
+  let goHome: ReturnType<typeof vi.fn>;
+  let removeListener: ReturnType<typeof vi.fn>;
   let arm: ReturnType<typeof vi.fn>;
 
   const app: AppPluginLike = {
     addListener: (_event, listener) => {
       registered = listener as Listener;
-      return Promise.resolve({ remove: () => undefined });
+      return Promise.resolve({ remove: () => removeListener() });
     },
     exitApp: () => exitApp(),
   };
@@ -180,6 +182,8 @@ describe('initHardwareBackButton — the registered listener', () => {
     registered = null;
     exitApp = vi.fn();
     back = vi.fn();
+    goHome = vi.fn();
+    removeListener = vi.fn();
     arm = vi.fn();
     document.body.innerHTML = '';
     window.history.replaceState({}, '', '#/login');
@@ -189,18 +193,18 @@ describe('initHardwareBackButton — the registered listener', () => {
 
   it('is a no-op in a browser', () => {
     native.platform = 'web';
-    initHardwareBackButton({ app, history: { back }, onArmExit: arm });
+    initHardwareBackButton({ app, history: { back, goHome }, onArmExit: arm });
     expect(registered).toBeNull();
   });
 
   it('is a no-op on iOS', () => {
     native.platform = 'ios';
-    initHardwareBackButton({ app, history: { back }, onArmExit: arm });
+    initHardwareBackButton({ app, history: { back, goHome }, onArmExit: arm });
     expect(registered).toBeNull();
   });
 
   it('navigates back from an inner screen', () => {
-    initHardwareBackButton({ app, history: { back }, onArmExit: arm });
+    initHardwareBackButton({ app, history: { back, goHome }, onArmExit: arm });
     window.history.replaceState({}, '', '#/orders');
     press(true);
     expect(back).toHaveBeenCalledTimes(1);
@@ -209,7 +213,7 @@ describe('initHardwareBackButton — the registered listener', () => {
   });
 
   it('arms exit on login, then exits on the second press', () => {
-    initHardwareBackButton({ app, history: { back }, onArmExit: arm });
+    initHardwareBackButton({ app, history: { back, goHome }, onArmExit: arm });
     press(false);
     expect(arm).toHaveBeenCalledTimes(1);
     expect(exitApp).not.toHaveBeenCalled();
@@ -220,7 +224,7 @@ describe('initHardwareBackButton — the registered listener', () => {
   });
 
   it('never exits while a modal is open — it dismisses the modal', () => {
-    initHardwareBackButton({ app, history: { back }, onArmExit: arm });
+    initHardwareBackButton({ app, history: { back, goHome }, onArmExit: arm });
     document.body.innerHTML = '<div role="dialog" aria-modal="true"></div>';
     press(false);
     press(false);
@@ -235,7 +239,51 @@ describe('initHardwareBackButton — the registered listener', () => {
       },
     };
     expect(() =>
-      initHardwareBackButton({ app: throwing, history: { back }, onArmExit: arm }),
+      initHardwareBackButton({ app: throwing, history: { back, goHome }, onArmExit: arm }),
     ).not.toThrow();
+  });
+
+  it('goes home through the router, then pops router history on BACK', () => {
+    // r2 regression: pushState({}, ...) wiped react-router's idx/key, leaving
+    // historyCanGoBack false and BACK inert after any go-home. The router-owned
+    // goHome writes those fields itself, so the next BACK still pops.
+    const goHome = vi.fn(() => {
+      window.history.replaceState({ idx: 0, key: 'home' }, '', '#/dashboard');
+    });
+    const back = vi.fn(() => {
+      window.history.replaceState({ idx: 0, key: 'home' }, '', '#/dashboard');
+    });
+    const pushState = vi.spyOn(window.history, 'pushState');
+    initHardwareBackButton({
+      app,
+      history: { back, goHome, canGoBack: () => historyCanGoBack(window) },
+      onArmExit: arm,
+    });
+
+    window.history.replaceState({ idx: 0, key: 'deep' }, '', '#/orders/ord_1');
+    press(false);
+    expect(goHome).toHaveBeenCalledTimes(1);
+    expect(pushState).not.toHaveBeenCalled();
+    expect(exitApp).not.toHaveBeenCalled();
+
+    // react-router writes idx/key when it navigates to a sub-route.
+    window.history.replaceState({ idx: 1, key: 'orders' }, '', '#/orders');
+    press(false);
+    expect(back).toHaveBeenCalledTimes(1);
+    pushState.mockRestore();
+  });
+
+  it('removes the App listener when the root tears down', async () => {
+    const dispose = initHardwareBackButton({
+      app,
+      history: { back, goHome },
+      onArmExit: arm,
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(removeListener).not.toHaveBeenCalled();
+
+    dispose();
+    expect(removeListener).toHaveBeenCalledTimes(1);
   });
 });

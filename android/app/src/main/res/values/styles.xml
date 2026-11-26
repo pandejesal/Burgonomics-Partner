@@ -26,8 +26,8 @@
         <item name="android:windowBackground">@color/canvas</item>
         <item name="android:statusBarColor">@color/statusBarColor</item>
         <item name="android:navigationBarColor">@color/statusBarColor</item>
-        <item name="android:windowLightStatusBar">@bool/statusBarLightIcons</item>
-        <item name="android:windowLightNavigationBar">@bool/statusBarLightIcons</item>
+        <item name="android:windowLightStatusBar">@bool/statusBarDarkIcons</item>
+        <item name="android:windowLightNavigationBar">@bool/statusBarDarkIcons</item>
     </style>
 
 

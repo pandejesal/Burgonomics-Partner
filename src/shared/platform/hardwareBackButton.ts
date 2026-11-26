@@ -137,10 +137,17 @@ export function dismissOpenOverlay(win: Window, overlay: Element): boolean {
   return true;
 }
 
-/** Minimal router history surface (react-router's HashRouter backs onto this). */
+/**
+ * Minimal router surface (react-router's HashRouter backs onto this).
+ *
+ * `goHome` MUST come from react-router's `navigate`, never from a raw
+ * `history.pushState({}, ...)`: that wipes the idx/key fields react-router
+ * keeps in history.state, so BACK stops working after a go-home.
+ */
 export interface RouterHistoryLike {
   back: () => void;
   canGoBack?: () => boolean;
+  goHome: () => void;
 }
 
 /**
@@ -160,11 +167,27 @@ export function historyCanGoBack(win: Window): boolean {
   }
 }
 
+/**
+ * react-router's `navigate`, registered from inside the Router by App.tsx.
+ * Keeping the function here (rather than importing the router into this module)
+ * preserves the module's dependency-free, unit-testable surface.
+ */
+let navigateHome: (() => void) | null = null;
+
+export function registerRouterGoHome(navigate: (() => void) | null): void {
+  navigateHome = navigate;
+}
+
 /** Router history bridge used by main.tsx (one object per session). */
 export function routerHistory(): RouterHistoryLike {
   return {
     back: () => window.history.back(),
     canGoBack: () => historyCanGoBack(window),
+    goHome: () => {
+      // No pushState fallback: a raw write would erase idx/key. The bridge is
+      // registered on mount, before a user can press BACK on the native shell.
+      navigateHome?.();
+    },
   };
 }
 
@@ -180,7 +203,8 @@ export interface AppPluginLike {
 
 export interface BackHandlerOptions {
   app?: AppPluginLike;
-  history?: RouterHistoryLike;
+  /** Router bridge; required so go-home can never bypass the router. */
+  history: RouterHistoryLike;
   win?: Window;
   now?: () => number;
   /** Feedback for the first exit-arming press (a toast in main.tsx). */
@@ -217,13 +241,13 @@ export function createBackHandler(options: BackHandlerOptions): (event: {
         return action;
       case 'history-back':
         armedAt = null;
-        if (options.history) options.history.back();
-        else win.history.back();
+        options.history.back();
         return action;
       case 'go-home':
         armedAt = null;
-        win.history.pushState({}, '', '#/dashboard');
-        win.dispatchEvent(new (win as WindowWithEvents).PopStateEvent('popstate'));
+        // React-router's navigate() writes idx/key itself; a raw pushState({})
+        // left historyCanGoBack false and made the next BACK a no-op.
+        options.history.goHome();
         return action;
       case 'arm-exit':
         armedAt = now();
@@ -247,8 +271,22 @@ export function createBackHandler(options: BackHandlerOptions): (event: {
  * `@capacitor/app` is resolved lazily (and can be injected for tests), so this
  * module is importable from the web bundle without the plugin.
  */
-export function initHardwareBackButton(options: BackHandlerOptions = {}): void {
-  if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') return;
+let activeDisposer: (() => void) | null = null;
+
+/** Root teardown (React root unmount / WebView pagehide) hook. */
+export function disposeHardwareBackButton(): void {
+  activeDisposer?.();
+  activeDisposer = null;
+  window.removeEventListener('pagehide', disposeHardwareBackButton);
+}
+
+export function initHardwareBackButton(options: BackHandlerOptions): () => void {
+  if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
+    return () => undefined;
+  }
+
+  let handle: { remove: () => void } | null = null;
+  let disposed = false;
 
   const start = (app: AppPluginLike) => {
     const handler = createBackHandler({ ...options, app });
@@ -257,20 +295,35 @@ export function initHardwareBackButton(options: BackHandlerOptions = {}): void {
         app.addListener('backButton', (event) => {
           handler(event);
         }),
-      ).catch(() => undefined);
+      )
+        .then((registered) => {
+          const candidate = registered as { remove?: () => void } | null;
+          if (!candidate || typeof candidate.remove !== 'function') return;
+          if (disposed) candidate.remove();
+          else handle = candidate as { remove: () => void };
+        })
+        .catch(() => undefined);
     } catch {
       // App plugin not synced: leave the OS default BACK handling in place.
     }
   };
 
-  if (options.app) {
-    start(options.app);
-    return;
+  if (options.app) start(options.app);
+  else {
+    void import('@capacitor/app')
+      .then(({ App }) => start(App as AppPluginLike))
+      .catch(() => {
+        /* App plugin not synced — OS default BACK handling stays */
+      });
   }
 
-  void import('@capacitor/app')
-    .then(({ App }) => start(App as AppPluginLike))
-    .catch(() => {
-      /* App plugin not synced — OS default BACK handling stays */
-    });
+  const dispose = () => {
+    disposed = true;
+    handle?.remove();
+    handle = null;
+    if (activeDisposer === dispose) activeDisposer = null;
+  };
+  activeDisposer = dispose;
+  window.addEventListener('pagehide', disposeHardwareBackButton, { once: true });
+  return dispose;
 }

@@ -328,4 +328,37 @@ describe('initNativeShell — runtime system-bar styling', () => {
     );
     expect(loggerMock.warn).toHaveBeenCalledTimes(1);
   });
+
+  it('detaches the resume watcher on root teardown', async () => {
+    // This suite is a plain node project; stub a minimal document so the
+    // visibilitychange watcher can be observed without a DOM.
+    const fakeDocument = {
+      visibilityState: 'visible',
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    };
+    vi.stubGlobal('document', fakeDocument);
+    try {
+      resetBarMocks();
+      availability.splashScreen = true;
+      availability.statusBar = true;
+      vi.resetModules();
+      nativeState.platform = 'android';
+      const mod = await import('./nativeBootstrap');
+      await mod.initNativeShell();
+
+      expect(fakeDocument.addEventListener).toHaveBeenCalledWith(
+        'visibilitychange',
+        expect.any(Function),
+      );
+      expect(fakeDocument.removeEventListener).not.toHaveBeenCalled();
+      mod.disposeNativeShell();
+      expect(fakeDocument.removeEventListener).toHaveBeenCalledWith(
+        'visibilitychange',
+        expect.any(Function),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

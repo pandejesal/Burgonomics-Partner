@@ -1,4 +1,4 @@
-import { BrowserRouter, HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, type ReactNode } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -26,6 +26,7 @@ import { AdminRoutes, ADMIN_PORTAL_ROLES } from '@/pages/admin/AdminRoutes';
 import { ChatPage } from '@/pages/ChatPage';
 import { titleForPath } from '@/utils/routeTitle';
 import { GlobalOfflineBanner } from '@/components/ui/OfflineBanner';
+import { registerRouterGoHome } from '@/shared/platform/hardwareBackButton';
 
 import { AuthProvider } from '@/core/auth/AuthContext';
 import { Toaster } from 'sonner';
@@ -69,6 +70,20 @@ function RouteTitle() {
   return null;
 }
 
+/**
+ * Gives the native BACK handler a router-owned go-home. Registered from inside
+ * <Router> because `useNavigate` is only available there; a raw history write
+ * would drop react-router's idx/key and leave BACK inert afterwards.
+ */
+function RouterBackBridge() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    registerRouterGoHome(() => void navigate('/dashboard'));
+    return () => registerRouterGoHome(null);
+  }, [navigate]);
+  return null;
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
@@ -77,6 +92,7 @@ function App() {
           <Router>
           <GlobalOfflineBanner />
           <RouteTitle />
+          <RouterBackBridge />
           <RouteErrorBoundary>
           <Routes>
           {/* Public routes — single sign-in lives here. The legacy

@@ -10,5 +10,5 @@
     -->
     <color name="canvas">#0A0A0A</color>
     <color name="statusBarColor">#0A0A0A</color>
-    <bool name="statusBarLightIcons">true</bool>
+    <bool name="statusBarDarkIcons">false</bool>
 </resources>

@@ -57,9 +57,10 @@ describe('Partner native chrome matches the runtime chrome', () => {
   });
 
   it('keeps light icons on the dark bar in both resource sets', () => {
-    // true == light icons, the only readable choice on #0A0A0A.
-    expect(boolOf('values/colors.xml', 'statusBarLightIcons')).toBe(true);
-    expect(boolOf('values-night/colors.xml', 'statusBarLightIcons')).toBe(true);
+    // statusBarDarkIcons=false == light icons, the only readable choice on
+    // #0A0A0A. `android:windowLightStatusBar` takes the same value.
+    expect(boolOf('values/colors.xml', 'statusBarDarkIcons')).toBe(false);
+    expect(boolOf('values-night/colors.xml', 'statusBarDarkIcons')).toBe(false);
   });
 
   it('styles.xml paints an opaque bar, light icons and the console canvas', () => {
@@ -67,7 +68,7 @@ describe('Partner native chrome matches the runtime chrome', () => {
     expect(xml).toMatch(/<item name="android:statusBarColor">@color\/statusBarColor<\/item>/);
     expect(xml).toMatch(/<item name="android:windowBackground">@color\/canvas<\/item>/);
     expect(xml).toMatch(
-      /<item name="android:windowLightStatusBar">@bool\/statusBarLightIcons<\/item>/,
+      /<item name="android:windowLightStatusBar">@bool\/statusBarDarkIcons<\/item>/,
     );
     // Never translucent (that is how the near-white default showed through),
     // and never takes safe areas away from the SystemBars plugin.
