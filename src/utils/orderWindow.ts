@@ -71,8 +71,14 @@ export function orderWindowTruncationNotice(
 ): string | null {
   if (!capped) return null;
   const limit = Number.isFinite(pageSize) && pageSize > 0 ? pageSize : OPEN_ORDER_PAGE_SIZE;
+  // r2 finding 4: the first copy said "Close finished tickets, then refresh".
+  // The window is `orderBy(createdAt, desc) + limit(500)` — closing a ticket
+  // does not pull an older document into an already-full page, so that advice
+  // could not shrink anything. The real remedy is the status-filtered read this
+  // wave deferred until the composite indexes are live; say that plainly.
   return (
     `Showing the newest ${limit} orders — older still-open tickets may be outside this ` +
-    `window. Close finished tickets, then refresh the board.`
+    `window. The status filter that keeps open tickets in view is coming once the new ` +
+    `indexes are deployed; until then narrow the outlet filter to see older work.`
   );
 }

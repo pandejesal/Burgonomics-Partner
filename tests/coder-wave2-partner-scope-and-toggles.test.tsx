@@ -47,6 +47,10 @@ vi.mock('react', async (importOriginal) => {
       state.refs.push(ref);
       return ref;
     },
+    // The page tree is INSPECTED, not mounted, so an effect body has no renderer
+    // to run under. Stub it: the tree-shape assertions below are unaffected, and
+    // the alternative (a real renderer in a node environment) is not available.
+    useEffect: vi.fn(),
   };
 });
 

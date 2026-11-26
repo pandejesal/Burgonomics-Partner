@@ -43,7 +43,21 @@ export interface Branch {
   announcementBanner?: string;
   expectedLaunchDate?: string;
   bannerImage?: string;
+  /**
+   * @deprecated SEC-11: the POS / Route identifiers moved OUT of `branches/*`
+   * into the brand-only `branch_secrets/{branchId}` document, because every
+   * operator role can read the branch directory. Keep the field only so a
+   * legacy document or an update PAYLOAD can be typed: never read it from a
+   * branch document, and `useBranches.updateBranchSettings` strips it from the
+   * branches write and routes it to `branch_secrets` (brand roles only).
+   * Read it through `@/utils/branchSecrets` instead.
+   */
   petpoojaStoreId?: string;
+  /**
+   * @deprecated SEC-11: Razorpay Route per-order transfers are RETIRED and no
+   * reader exists in functions/src. It is never migrated, read or written —
+   * do not reintroduce an account-id field anywhere in Partner.
+   */
   razorpayAccountId?: string;
   /**
    * Fixed monthly branch fee in rupees (owner decision 1 Nov 2026). Absent

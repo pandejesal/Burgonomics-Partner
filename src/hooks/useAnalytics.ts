@@ -67,7 +67,7 @@ export interface BranchStats {
   unpaidOrders: number;
   averageOrderValue: number;
   linkedAccountId: string;
-  linkedStatus: 'active' | 'pending' | 'verified';
+  linkedStatus: 'active' | 'pending' | 'verified' | 'retired';
   deliveryOrders: number;
   takeawayOrders: number;
   dineinOrders: number;
@@ -104,7 +104,7 @@ export interface MonthlyStatementRow {
   branchName: string;
   city: string;
   linkedAccountId: string;
-  linkedStatus: 'active' | 'pending' | 'verified';
+  linkedStatus: 'active' | 'pending' | 'verified' | 'retired';
   razorpayEarnings: number;
   cashEarnings: number;
   /** Delivery fees the brand paid on completed cash orders (owed by branch). */
@@ -170,17 +170,15 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
       let branchIds: string[] = [];
       const branchMeta: Record<
         string,
-        { name: string; city: string; accountId: string; monthlyFee?: number }
+        { name: string; city: string; monthlyFee?: number }
       > = {
         branch_surat_01: {
           name: 'Surat Adajan Outlet',
           city: 'Surat',
-          accountId: 'acc_Rzp_Surat_01',
         },
         branch_ahmedabad_01: {
           name: 'Ahmedabad SG Highway Flagship',
           city: 'Ahmedabad',
-          accountId: 'acc_Rzp_Ahmd_01',
         },
       };
 
@@ -258,7 +256,6 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
             branchMeta[d.id] = {
               name: data.name || d.id,
               city: data.city || 'Gujarat',
-              accountId: data.razorpayAccountId || `acc_Rzp_${d.id}`,
               monthlyFee: Number.isFinite(Number(data.monthlyFee))
                 ? Number(data.monthlyFee)
                 : undefined,
@@ -297,7 +294,6 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
               branchMeta[d.id] = {
                 name: data.name || d.id,
                 city: data.city || 'Gujarat',
-                accountId: data.razorpayAccountId || `acc_Rzp_${d.id}`,
                 monthlyFee: Number.isFinite(Number(data.monthlyFee))
                   ? Number(data.monthlyFee)
                   : undefined,
@@ -330,7 +326,6 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
             branchMeta[missing[idx]] = {
               name: data.name || missing[idx],
               city: data.city || '',
-              accountId: data.razorpayAccountId || `acc_Rzp_${missing[idx]}`,
               monthlyFee: Number.isFinite(Number(data.monthlyFee))
                 ? Number(data.monthlyFee)
                 : undefined,
@@ -642,14 +637,15 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
             }
 
             const firstOrder = branchOrders[0];
-            const accountId = branchMeta[bid]?.accountId;
-            const hasRealAccount = !!accountId && !accountId.startsWith('acc_Rzp_');
             return {
               branchId: bid,
               branchName: branchMeta[bid]?.name || firstOrder?.branchName || bid,
               city: branchMeta[bid]?.city || firstOrder?.city || '',
-              linkedAccountId: hasRealAccount ? accountId : 'unlinked',
-              linkedStatus: (hasRealAccount ? 'verified' : 'pending') as MonthlyStatementRow['linkedStatus'],
+              // SEC-11: the linked Route account is RETIRED. `unlinked` is what
+              // the statement says for every row — never a fabricated acc_Rzp_*
+              // pseudo-id, and never a claim of settlement.
+              linkedAccountId: 'unlinked',
+              linkedStatus: 'retired' as MonthlyStatementRow['linkedStatus'],
               razorpayEarnings: branchSummary.razorpayRevenue,
               cashEarnings: branchSummary.cashRevenue,
               courierOnCash: Math.round(courierOnCash),
@@ -802,8 +798,6 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
       // earnings streams. No per-order royalty: the owner replaced it with a
       // fixed monthly branch fee (see the monthly statement).
       const branchStats: BranchStats[] = [...branchAgg.entries()].map(([bid, b]) => {
-        const realAccount = branchMeta[bid]?.accountId;
-        const hasRealAccount = !!realAccount && !realAccount.startsWith('acc_Rzp_');
         return {
           branchId: bid,
           branchName: b.name,
@@ -817,8 +811,10 @@ export function useAnalytics(period: 'week' | 'month' | 'year' = 'month') {
           cashPendingOrders: b.cashPendingOrders,
           unpaidOrders: b.unpaidOrders,
           averageOrderValue: b.orders > 0 ? Math.round(b.revenue / b.orders) : 0,
-          linkedAccountId: hasRealAccount ? realAccount : 'unlinked',
-          linkedStatus: hasRealAccount ? 'verified' : 'pending',
+          // SEC-11: the Route linked account is retired; a row is never
+          // "unlinked" as a failure state, it is simply not a concept.
+          linkedAccountId: 'unlinked',
+          linkedStatus: 'retired',
           deliveryOrders: b.delivery,
           takeawayOrders: b.takeaway,
           dineinOrders: b.dinein,

@@ -1925,7 +1925,11 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
             <div className="flex-1 overflow-y-auto p-6 bg-gray-100 dark:bg-[#121212] flex justify-center no-scrollbar">
               <div className="bg-white dark:bg-zinc-900 p-6 w-full max-w-[340px] shadow-md border border-gray-200/50 dark:border-zinc-800/60 font-mono text-[11px] leading-relaxed text-black dark:text-zinc-200 select-all overflow-x-hidden">
                 <pre className="whitespace-pre-wrap font-mono">
-                  {getThermalReceiptText(printReceiptData.order, printReceiptData.type)}
+                  {getThermalReceiptText(
+                    printReceiptData.order,
+                    printReceiptData.type,
+                    SLIP_COLUMNS[getStoredPrinterConfig().paperSize],
+                  )}
                 </pre>
               </div>
             </div>
@@ -1940,11 +1944,19 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
                   // one shared slip-document helper: the stored paper width and
                   // copy count are honoured, the text is escaped there, and a
                   // blocked popup is reported instead of silently doing nothing.
+                  // r2: the SLIP TEXT is laid out for the same width the print
+                  // document is sized for — 58 mm is a 32-column roll, so a
+                  // 48-column layout there wraps mid-token at the printer.
                   const config = getStoredPrinterConfig();
+                  const columns = SLIP_COLUMNS[config.paperSize];
                   const outcome = printSlipDocument({
                     title: `Burgonomics ${printReceiptData.type}`,
-                    text: getThermalReceiptText(printReceiptData.order, printReceiptData.type),
-                    columns: SLIP_COLUMNS[config.paperSize],
+                    text: getThermalReceiptText(
+                      printReceiptData.order,
+                      printReceiptData.type,
+                      columns,
+                    ),
+                    columns,
                     copies: config.copies,
                   });
                   if (!outcome.started) {
@@ -1963,7 +1975,11 @@ export const AdminOrdersPage: React.FC<AdminOrdersPageProps> = ({
               <button
                 onClick={() => {
                   void copyTextWithFeedback(
-                    getThermalReceiptText(printReceiptData.order, printReceiptData.type),
+                    getThermalReceiptText(
+                      printReceiptData.order,
+                      printReceiptData.type,
+                      SLIP_COLUMNS[getStoredPrinterConfig().paperSize],
+                    ),
                   );
                 }}
                 className="py-3 px-4 border border-gray-200 text-gray-500 hover:bg-gray-50 font-black text-xs uppercase rounded-2xl transition-all"

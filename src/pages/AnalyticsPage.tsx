@@ -81,7 +81,7 @@ export function AnalyticsPage() {
         { header: 'Delivery Orders', accessor: (r: any) => r.deliveryOrders },
         { header: 'Takeaway Orders', accessor: (r: any) => r.takeawayOrders },
         { header: 'Dine-In Orders', accessor: (r: any) => r.dineinOrders },
-        { header: 'Razorpay Linked Account', accessor: (r: any) => r.linkedAccountId },
+        { header: 'Route Account (retired)', accessor: (r: any) => r.linkedAccountId },
         { header: 'Reconciliation Status', accessor: (r: any) => r.status },
       ]
     );

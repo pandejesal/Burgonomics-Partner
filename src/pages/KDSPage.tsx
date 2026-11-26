@@ -120,9 +120,11 @@ export function KDSPage() {
   // state that on the header instead of silently hiding the remaining ones.
   // A feed that queries every assigned chunk has nothing to disclose.
   const scopeNotice = readsCompleteScope ? null : scopeTruncationNotice(scopeBranchIds);
-  // A7 #2: the makeline read is bounded; a full page means older still-open
-  // tickets may sit outside it. Never let the board look complete.
-  const windowNotice = readsCompleteScope ? null : windowTruncationNotice;
+  // A7 #2 / r2: the makeline read is bounded; a full page means older still-open
+  // tickets may sit outside it. Never let the board look complete — and the
+  // regional read's bound comes from `useOrders`, so this notice must NOT be
+  // gated on `readsCompleteScope` (that flag describes the branch `in` chunks).
+  const windowNotice = windowTruncationNotice;
   const [nowTick, setNowTick] = useState(0);
   useEffect(() => {
     const t = window.setInterval(() => setNowTick(Date.now()), 15000);
@@ -693,6 +695,7 @@ export function KDSPage() {
         {windowNotice && (
           <div
             role="note"
+            aria-label="Order window truncated"
             className="w-full rounded-lg border border-amber-500/40 bg-amber-950/40 px-3 py-2 text-[11px] font-bold text-amber-200"
           >
             {windowNotice}

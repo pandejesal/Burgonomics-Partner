@@ -125,6 +125,24 @@ describe('A7 #4 — the print document contains the slip and nothing else', () =
   it('starts the print dialog from inside the document (no window.print() on the app)', () => {
     expect(buildSlipPrintHtml({ title: 't', text: 'x' })).toContain('window.print()');
   });
+
+  /**
+   * r2 finding 2 (MEDIUM): the document called `window.print()` immediately AND
+   * again 400 ms later "as a fallback". On a real printer that is two jobs for
+   * one ticket — a duplicated KOT, or a duplicated customer invoice. The
+   * fallback existed because a window whose `load` event had already fired would
+   * never print; the fix is ONE guarded request, not a second unconditional one.
+   */
+  it('requests the print job EXACTLY once, never a timed second time', () => {
+    const html = buildSlipPrintHtml({ title: 't', text: 'x' });
+    const printCalls = html.match(/window\.print\(\)/g) ?? [];
+    expect(printCalls).toHaveLength(1);
+    // The unconditional +400 ms retry is the defect itself.
+    expect(html).not.toMatch(/setTimeout\([^)]*window\.print/);
+    // A guard must make a second invocation (load + readyState both firing) a
+    // no-op rather than a second job.
+    expect(html).toMatch(/Printed\s*=\s*true/);
+  });
 });
 
 describe('A7 #7 — the helper honours the stored paper configuration', () => {

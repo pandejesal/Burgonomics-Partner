@@ -316,6 +316,9 @@ export function useKDSRealtimeStream() {
     ordersDataScope,
     dataUpdatedAt = 0,
     refetch: refetchOrders,
+    // r2 finding 1: the one-shot feed's own page bound. The regional makeline
+    // reads ONLY through useOrders, so its cap is the cap that matters there.
+    windowCapped: ordersFeedCapped,
   } = useOrders();
 
   const [isOnline, setIsOnline] = useState<boolean>(
@@ -1363,10 +1366,14 @@ export function useKDSRealtimeStream() {
   // must not verify a foreign dataset.
   const dataVerified = regional ? regionalFeedVerified : verifiedForScope || (!isLoading && !ordersError && oneShotOwnedByScope);
 
-  // A7 #2 honesty copy. Regional rows come from useOrders, whose page bound this
-  // hook does not own, so nothing is claimed for that path.
-  const windowCapped = regional ? false : Object.values(cappedFeeds).some(Boolean);
-  const windowTruncationNotice = regional ? null : orderWindowTruncationNotice(windowCapped);
+  // A7 #2 / r2 finding 1 honesty copy. The regional makeline reads through
+  // `useOrders`, whose 500-row page bound this hook does not own — so the
+  // regionals' cap must come FROM that hook instead of being assumed complete.
+  // Non-regional feeds track their own snapshots (`cappedFeeds`).
+  const windowCapped = regional
+    ? !!ordersFeedCapped
+    : Object.values(cappedFeeds).some(Boolean);
+  const windowTruncationNotice = orderWindowTruncationNotice(windowCapped);
 
   return {
     isOnline,
@@ -1395,8 +1402,14 @@ export function useKDSRealtimeStream() {
     /** Regional rows come from useOrders, which queries every ≤10-id chunk. */
     readsCompleteScope: regional,
     /**
-     * A7 #2: a feed returned a FULL page, so older tickets may sit outside the
-     * window. Null when the window is known to be complete (or regional).
+     * A7 #2 / r2: a feed returned a FULL page (or the merged board was sliced
+     * to one page), so older tickets may sit outside the window. Boolean DATA —
+     * every KDS/board surface renders the notice from this, never a guess.
+     */
+    windowCapped,
+    /**
+     * A7 #2: the honest sentence for `windowCapped`. Null when the window is
+     * known to be complete.
      */
     windowTruncationNotice,
   };

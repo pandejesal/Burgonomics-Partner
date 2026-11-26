@@ -11,6 +11,14 @@ interface RazorpayRouteAccountCardProps {
   canEditMonthlyFee?: boolean;
   isSuperAdmin?: boolean;
   disabled?: boolean;
+  /**
+   * SEC-11: the Razorpay Route linked-account id is RETIRED — per-order Route
+   * transfers are gone and nothing in functions/src reads it any more. The
+   * branch form only needs the fixed monthly fee, so it mounts this card in
+   * fee-only mode. The default (account) mode remains for the pinned binding
+   * contract exercised by its own test; no screen mounts it.
+   */
+  monthlyFeeOnly?: boolean;
 }
 
 /**
@@ -41,6 +49,7 @@ export function RazorpayRouteAccountCard({
   canEditMonthlyFee = true,
   isSuperAdmin = true,
   disabled = false,
+  monthlyFeeOnly = false,
 }: RazorpayRouteAccountCardProps) {
   const normalizedAccountId = normalizeRouteAccountId(accountId);
   const isLinked = isValidRouteAccountId(normalizedAccountId);
@@ -55,14 +64,18 @@ export function RazorpayRouteAccountCard({
             <CreditCard className="w-4 h-4" />
           </div>
           <div>
-            <h4 className="text-xs font-bold text-white">Razorpay Route Settlement</h4>
+            <h4 className="text-xs font-bold text-white">
+              {monthlyFeeOnly ? 'Fixed Monthly Branch Fee' : 'Razorpay Route Settlement'}
+            </h4>
             <p className="text-[10px] text-zinc-400">
-              Linked account and the fixed monthly branch fee — no per-order split
+              {monthlyFeeOnly
+                ? 'Brand-level fee the outlet owes each month — no per-order split'
+                : 'Linked account and the fixed monthly branch fee — no per-order split'}
             </p>
           </div>
         </div>
 
-        {isLinked ? (
+        {monthlyFeeOnly ? null : isLinked ? (
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">
             <CheckCircle2 className="w-3 h-3 text-emerald-400" />
             <span>Route Linked</span>
@@ -75,7 +88,8 @@ export function RazorpayRouteAccountCard({
         )}
       </div>
 
-      {/* Account Input */}
+      {/* Account Input — hidden in fee-only mode: the Route account id is retired. */}
+      {monthlyFeeOnly ? null : (
       <div className="space-y-1">
         <label
           htmlFor="razorpay-route-account-id"
@@ -110,6 +124,7 @@ export function RazorpayRouteAccountCard({
           </p>
         )}
       </div>
+      )}
 
       {/* Fixed monthly fee */}
       <div className="space-y-1">
@@ -141,8 +156,9 @@ export function RazorpayRouteAccountCard({
           )}
         </div>
         <p className="text-[10px] text-zinc-400 leading-relaxed">
-          The first ₹{fee.toLocaleString()} of Razorpay money each month stays with the brand.
-          After that, each order goes to the branch in full.
+          {monthlyFeeOnly
+            ? `The outlet is billed ₹${fee.toLocaleString()} each month on the statement; order revenue settles directly to the outlet.`
+            : `The first ₹${fee.toLocaleString()} of Razorpay money each month stays with the brand.`}
         </p>
       </div>
     </div>

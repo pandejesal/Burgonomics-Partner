@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({
   role: 'branch_owner' as string,
   updates: [] as Array<{ id: string; data: Record<string, any> }>,
+  secrets: [] as Array<{ id: string; data: Record<string, any>; options?: any }>,
 }));
 
 vi.mock('@/config/firebase', () => ({ db: {} }));
@@ -19,9 +20,13 @@ vi.mock('@/stores/authStore', () => ({
 vi.mock('firebase/firestore', () => ({
   collection: () => ({}),
   getDocs: vi.fn(async () => ({ docs: [] })),
-  doc: (_db: unknown, _name: string, id: string) => ({ id }),
+  doc: (_db: unknown, name: string, id: string) => ({ name, id }),
   addDoc: vi.fn(async () => undefined),
-  setDoc: vi.fn(async () => undefined),
+  // SEC-11: the POS identifiers are written to `branch_secrets`, not `branches`.
+  setDoc: vi.fn(async (ref: { name: string; id: string }, data: Record<string, any>, options?: any) => {
+    state.secrets.push({ id: ref.id, data, options });
+  }),
+  getDoc: vi.fn(async () => ({ exists: () => false, data: () => ({}) })),
   updateDoc: vi.fn(async (ref: { id: string }, data: Record<string, any>) => {
     state.updates.push({ id: ref.id, data });
   }),
@@ -74,6 +79,7 @@ const protectedPayload = () => ({
 beforeEach(() => {
   state.role = 'branch_owner';
   state.updates.length = 0;
+  state.secrets.length = 0;
 });
 
 describe('useBranches.updateBranchSettings — protected fields', () => {
@@ -108,6 +114,14 @@ describe('useBranches.updateBranchSettings — protected fields', () => {
 
     expect(state.updates).toHaveLength(1);
     expect(state.updates[0].data.monthlyFee).toBe(999);
-    expect(state.updates[0].data.petpoojaStoreId).toBe('PP_SURAT_01');
+    // SEC-11: the POS ids go to `branch_secrets`; the branches payload must
+    // carry none of them.
+    for (const key of ['petpoojaStoreId', 'petpooja', 'restIDs', 'razorpayAccountId']) {
+      expect(key in state.updates[0].data, `branches write must not carry ${key}`).toBe(false);
+    }
+    expect(state.secrets).toHaveLength(1);
+    expect(state.secrets[0].data).toMatchObject({ petpoojaStoreId: 'PP_SURAT_01' });
+    // The retired Route account id is never migrated anywhere.
+    expect(JSON.stringify(state.secrets)).not.toContain('acc_A1B2C3D4E5F6G7');
   });
 });

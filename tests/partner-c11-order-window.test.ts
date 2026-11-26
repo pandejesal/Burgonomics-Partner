@@ -50,10 +50,28 @@ describe('A7 #2 — the open-ticket window is generous, bounded and explicit', (
 
     expect(notice).toContain(String(OPEN_ORDER_PAGE_SIZE));
     expect(notice).toMatch(/may be outside/i);
-    expect(notice).toMatch(/refresh/i);
     // An honest notice never asserts completeness.
     expect(notice).not.toMatch(/all (open )?tickets/i);
     expect(notice).not.toMatch(/everything/i);
+  });
+
+  /**
+   * r2 finding 4 (LOW): the first copy said "Close finished tickets, then
+   * refresh the board". The window is `orderBy(createdAt, desc) + limit(500)` —
+   * closing a ticket does not add an older document to a page that is already
+   * full, so the advice could not shrink anything and staff were told to do
+   * something that provably does nothing. The honest instruction names the real
+   * remedy: a status-filtered read, which is the FOLLOW-UP this wave deferred
+   * until the composite indexes are deployed.
+   */
+  it('names the status filter as the fix instead of advising a no-op refresh', () => {
+    const notice = orderWindowTruncationNotice(true)!;
+
+    expect(notice).toMatch(/status filter/i);
+    expect(notice).toMatch(/coming/i);
+    // The audited misleading instruction must be gone: a full page of the newest
+    // 500 cannot shrink because a finished ticket was closed.
+    expect(notice).not.toMatch(/close finished/i);
   });
 
   it('quotes the page size it was given, so the copy cannot drift from the query', () => {

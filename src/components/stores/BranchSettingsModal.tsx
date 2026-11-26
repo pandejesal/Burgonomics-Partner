@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import type { Branch, AcceptingOrdersStatus } from '@/types';
 import { isStoreClosedByStaff } from '@/features/stores/services/operatingGate';
+import { useAuthStore } from '@/stores/authStore';
+import { canReadBranchSecrets, readBranchSecrets } from '@/utils/branchSecrets';
 
 interface BranchSettingsModalProps {
   isOpen: boolean;
@@ -43,7 +45,34 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
   const [prepTime, setPrepTime] = useState(20);
   const [deliveryRadius, setDeliveryRadius] = useState(7);
   const [announcement, setAnnouncement] = useState('');
-  const [petpoojaStoreId, setPetpoojaStoreId] = useState('');
+  // SEC-11: the POS id is in the brand-only `branch_secrets/{branchId}`, not on
+  // the branch directory document. It is kept WITH the branch id it was read
+  // for, so a branch switch never shows the previous outlet's id while the new
+  // read is in flight — and no synchronous reset is needed inside an effect.
+  const [secret, setSecret] = useState<{ branchId: string; petpoojaStoreId: string } | null>(null);
+  const { user } = useAuthStore();
+  const canReadSecrets = canReadBranchSecrets(user?.role);
+  // Derived during render: the field shows a value only for the branch on
+  // screen. A role the rules deny sees an empty field — it must not read or
+  // write a collection it has no access to.
+  const petpoojaStoreId =
+    branch && secret?.branchId === branch.id ? secret.petpoojaStoreId : '';
+  const setPetpoojaStoreId = (value: string) => {
+    if (!branch) return;
+    setSecret({ branchId: branch.id, petpoojaStoreId: value });
+  };
+
+  useEffect(() => {
+    if (!branch || !canReadSecrets) return;
+    let active = true;
+    void readBranchSecrets(branch.id).then((secrets) => {
+      if (!active) return;
+      setSecret({ branchId: branch.id, petpoojaStoreId: secrets?.petpoojaStoreId ?? '' });
+    });
+    return () => {
+      active = false;
+    };
+  }, [branch, canReadSecrets]);
 
   useEffect(() => {
     if (branch) {
@@ -63,7 +92,6 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
       setPrepTime(branch.prepTimeMinutes || 20);
       setDeliveryRadius(branch.deliveryRadiusKm || 7);
       setAnnouncement(branch.announcementBanner || '');
-      setPetpoojaStoreId(branch.petpoojaStoreId || '');
     }
   }, [branch]);
 
@@ -83,8 +111,13 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
       prepTimeMinutes: prepTime,
       deliveryRadiusKm: deliveryRadius,
       announcementBanner: announcement,
-      petpoojaStoreId,
     };
+    // SEC-11: the POS id belongs to branch_secrets. Sent only when the role can
+    // read that collection (a branch role's payload must not carry it at all —
+    // `useBranches.updateBranchSettings` routes it for brand roles only).
+    if (canReadSecrets) {
+      payload.petpoojaStoreId = petpoojaStoreId;
+    }
     if (status !== originalStatus) {
       payload.active = status !== 'closed';
       payload.acceptingOrdersStatus = status;
@@ -309,9 +342,15 @@ export const BranchSettingsModal: React.FC<BranchSettingsModalProps> = ({
               <input
                 type="text"
                 value={petpoojaStoreId}
+                disabled={!canReadSecrets}
                 onChange={(e) => setPetpoojaStoreId(e.target.value)}
-                className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white focus:outline-none focus:border-accent"
+                className="w-full px-3.5 py-2.5 text-xs bg-bg border border-border rounded-xl text-white focus:outline-none focus:border-accent disabled:opacity-60"
               />
+              <p className="text-[10px] text-zinc-500 mt-1">
+                {canReadSecrets
+                  ? 'Saved to the brand-only branch_secrets record, not the outlet directory.'
+                  : 'Brand admins only — your role cannot read or write the POS link.'}
+              </p>
             </div>
           </div>
 

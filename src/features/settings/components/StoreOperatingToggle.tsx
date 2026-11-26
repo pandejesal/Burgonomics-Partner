@@ -99,7 +99,7 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
         });
         setPrepTime(bufferMins || prepTime);
         setLastSavedPrep(bufferMins || prepTime);
-        toast.info('Outlet is closed — prep buffer saved. Reopen it before using Busy/Rush.', {
+        toast.info('Outlet is closed — prep buffer saved. Reopen it before setting the kitchen to busy.', {
           description: 'The customer gate is still closed; no orders are being accepted.',
         });
       } catch {
@@ -204,7 +204,7 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
               </span>
             </h2>
             <p className="text-xs text-neutral-400 min-w-0 break-words">
-              Live online ordering switch, kitchen prep time buffer, and rush surge — closed means
+              Live online ordering switch and kitchen prep time buffer — closed means
               closed until staff reopen it.
             </p>
           </div>
@@ -237,11 +237,11 @@ export function StoreOperatingToggle({ branch }: StoreOperatingToggleProps) {
 
         <button
           type="button"
-          onClick={() => handleUpdateStatus('busy', 'Rush Hours (+15m buffer)', 35)}
+          onClick={() => handleUpdateStatus('busy', 'Kitchen busy (+15m buffer)', 35)}
           disabled={closedByStaff || !branch?.id}
           title={
             closedByStaff
-              ? 'Reopen the outlet before enabling Busy/Rush'
+              ? 'Reopen the outlet before setting the kitchen to busy'
               : 'Adds 15m prep buffer to customer ETA'
           }
           className={`p-4 rounded-2xl border text-left transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${

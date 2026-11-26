@@ -4,7 +4,6 @@ import { db } from '@/config/firebase';
 import {
   collection,
   doc,
-  getDoc,
   getDocs,
   query,
   setDoc,
@@ -17,6 +16,7 @@ import { useAppStore } from '@/stores/appStore';
 import { useAuth } from '@/hooks/useAuth';
 import { partnerFunctionsApi } from '@/services/partnerFunctionsApi';
 import { toast } from 'sonner';
+import { canReadBranchSecrets, readBranchSecrets } from '@/utils/branchSecrets';
 import type { EightSixDuration } from '../components/Instant86ingModal';
 import type { MenuItem } from '@/types';
 
@@ -282,15 +282,20 @@ export function useBranchMenu(branchIdOverride?: string | null) {
       const comboId = `combo_${Date.now().toString(36)}`;
       const itemRef = doc(db, 'products', comboId);
 
-      // Delivery reads by restId and 86-ing joins on petpoojaItemId — both
-      // must be stamped or the combo is invisible outside Partner.
+      // SEC-11: the POS store id lives in the brand-only `branch_secrets`
+      // collection now; `branches/*` no longer carries it (every operator role
+      // can read the directory). A role the rules deny cannot read the secret,
+      // so its combos go out without a restId — the app-only path it already
+      // had — rather than a stale or fabricated one.
       let restId: string | null = null;
-      try {
-        const branchSnap = await getDoc(doc(db, 'branches', branchId));
-        const b = branchSnap.data() as Record<string, any> | undefined;
-        if (b?.petpoojaStoreId) restId = b.petpoojaStoreId;
-      } catch {
-        // restId stays null — combo still visible to Partner scoped views
+      if (canReadBranchSecrets(user?.role)) {
+        try {
+          const secrets = await readBranchSecrets(branchId);
+          const value = secrets?.petpoojaStoreId;
+          if (typeof value === 'string' && value.trim()) restId = value.trim();
+        } catch {
+          // restId stays null — combo still visible to Partner scoped views
+        }
       }
       if (!restId) {
         console.warn(

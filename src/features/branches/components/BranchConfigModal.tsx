@@ -12,7 +12,6 @@ import {
 import type { CreateBranchInput } from '@/hooks/useBranches';
 import { GeofenceRadiusSlider } from './GeofenceRadiusSlider';
 import { RazorpayRouteAccountCard } from './RazorpayRouteAccountCard';
-
 interface BranchConfigModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -43,7 +42,6 @@ export function BranchConfigModal({
     bannerImage:
       'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=800&auto=format&fit=crop&q=80',
     petpoojaStoreId: '',
-    razorpayAccountId: '',
     monthlyFee: 2500,
     deliveryRadiusKm: 7,
     prepTimeMinutes: 20,
@@ -66,7 +64,6 @@ export function BranchConfigModal({
         status: initialData.status || prev.status,
         deliveryRadiusKm: initialData.deliveryRadiusKm ?? prev.deliveryRadiusKm,
         petpoojaStoreId: initialData.petpoojaStoreId || prev.petpoojaStoreId,
-        razorpayAccountId: initialData.razorpayAccountId || prev.razorpayAccountId,
         monthlyFee: initialData.monthlyFee ?? prev.monthlyFee,
         operatingHours: initialData.operatingHours || prev.operatingHours,
       }));
@@ -89,14 +86,6 @@ export function BranchConfigModal({
       (formData.deliveryRadiusKm < 1 || formData.deliveryRadiusKm > 20)
     ) {
       setValidationError('Delivery geofence radius must be between 1.0 km and 20.0 km.');
-      return;
-    }
-
-    if (
-      formData.razorpayAccountId &&
-      !/^acc_[a-zA-Z0-9_]+$/.test(formData.razorpayAccountId)
-    ) {
-      setValidationError('Razorpay linked account ID must follow the standard format: acc_xxxx.');
       return;
     }
 
@@ -126,7 +115,7 @@ export function BranchConfigModal({
                 {initialData ? 'Configure Store Outlet' : 'Onboard New Store Outlet'}
               </h2>
               <p className="text-xs text-zinc-400">
-                Manage delivery geofencing, Petpooja POS bridge & Razorpay Route settlements
+                Manage delivery geofencing, the Petpooja POS bridge & the fixed monthly fee
               </p>
             </div>
           </div>
@@ -282,10 +271,12 @@ export function BranchConfigModal({
             coordinates={formData.coordinates}
           />
 
-          {/* Razorpay Route settlement card */}
+          {/* Fixed monthly fee — SEC-11 retired the Razorpay Route account id,
+              so the card mounts in fee-only mode and never shows/stores one. */}
           <RazorpayRouteAccountCard
-            accountId={formData.razorpayAccountId || ''}
-            onChange={(accountId) => setFormData({ ...formData, razorpayAccountId: accountId })}
+            monthlyFeeOnly
+            accountId=""
+            onChange={() => {}}
             monthlyFee={formData.monthlyFee ?? 2500}
             onMonthlyFeeChange={(monthlyFee) => setFormData({ ...formData, monthlyFee })}
             canEditMonthlyFee={canEditMonthlyFee ?? isSuperAdmin}
@@ -301,7 +292,8 @@ export function BranchConfigModal({
               <div>
                 <h4 className="text-xs font-bold text-white">Petpooja POS Terminal Bridge</h4>
                 <p className="text-[10px] text-zinc-400">
-                  Maps orders from customer app & partner console to physical thermal KOT printer
+                  Maps orders from customer app & partner console to physical thermal KOT printer.
+                  Stored in the brand-only branch_secrets record, not on the outlet directory.
                 </p>
               </div>
             </div>

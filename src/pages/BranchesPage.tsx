@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useBranches, type CreateBranchInput } from '@/hooks/useBranches';
 import { useAuthStore } from '@/stores/authStore';
@@ -35,6 +35,7 @@ import {
 import type { Branch } from '@/types';
 import type { FranchiseLead } from '@/hooks/useFranchiseLeads';
 import { toast } from 'sonner';
+import { canReadBranchSecrets, readAllBranchSecrets, type BranchSecrets } from '@/utils/branchSecrets';
 
 const isActiveBranch = (branch: Branch): boolean =>
   branch.status === 'active' || (branch.active && !branch.status);
@@ -58,6 +59,25 @@ export function BranchesPage() {
   const [broadcastingBranch, setBroadcastingBranch] = useState<Branch | null>(null);
   const [activatingBranch, setActivatingBranch] = useState<Branch | null>(null);
   const [petpoojaInputId, setPetpoojaInputId] = useState('');
+  // SEC-11: the POS store id lives in the brand-only `branch_secrets/{branchId}`,
+  // not on `branches/*` (readable by every operator role). The cards render the
+  // id from THIS map; a role that cannot read the collection sees no id at all
+  // rather than a blank "not linked" claim about a live outlet. The gate is
+  // DERIVED below, so a denied role never renders a stale map and the effect
+  // does asynchronous work only.
+  const [branchSecrets, setBranchSecrets] = useState<Record<string, BranchSecrets>>({});
+  const canSeeSecrets = canReadBranchSecrets(user?.role);
+  const visibleSecrets = canSeeSecrets ? branchSecrets : {};
+  useEffect(() => {
+    if (!canSeeSecrets) return;
+    let active = true;
+    void readAllBranchSecrets().then((all) => {
+      if (active) setBranchSecrets(all);
+    });
+    return () => {
+      active = false;
+    };
+  }, [canSeeSecrets]);
 
   // Defense-in-depth page guard: router-level ProtectedRoute is the primary
   // gate, but this page must never render branch data for roles outside the
@@ -170,9 +190,12 @@ export function BranchesPage() {
 
   const handleActivateStoreConfirm = async () => {
     if (!activatingBranch) return;
+    // SEC-11: the existing POS id is read from `branch_secrets`, not from the
+    // branch directory document (which no longer carries it).
+    const existingId = visibleSecrets[activatingBranch.id]?.petpoojaStoreId ?? undefined;
     await activateStore.mutateAsync({
       branchId: activatingBranch.id,
-      petpoojaStoreId: petpoojaInputId || activatingBranch.petpoojaStoreId,
+      petpoojaStoreId: petpoojaInputId || existingId,
     });
     setActivatingBranch(null);
     setPetpoojaInputId('');
@@ -185,10 +208,9 @@ export function BranchesPage() {
       address: lead.notes || `${lead.preferredLocation || 'Prime Commercial Area'}, ${lead.city}`,
       phone: lead.phone,
       status: 'active',
-      // Loop: no fabricated account id (see useBranches.createBranch) — the
-      // operator must paste the real Razorpay linked account; empty stays
-      // empty and the Route worker skips the branch with a log.
-      razorpayAccountId: '',
+      // SEC-11: the retired Route account id is never seeded — it is not a
+      // concept any more. The POS store id is entered on the new outlet's
+      // branch_secrets record, not on the directory document.
       monthlyFee: 2500,
     });
     setShowAddBranchModal(true);
@@ -217,7 +239,7 @@ export function BranchesPage() {
             </span>
           </div>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Configure live restaurant outlet delivery settings, geofence radius, Razorpay Route settlements, and franchise CRM
+            Configure live restaurant outlet delivery settings, geofence radius, fixed monthly fee, and franchise CRM
           </p>
         </div>
 
@@ -414,12 +436,15 @@ export function BranchesPage() {
                         </div>
                       </div>
 
-                      {/* Petpooja Integration Tag */}
-                      {branch.petpoojaStoreId && (
+                      {/* Petpooja Integration Tag — SEC-11: the POS id is read
+                          from the brand-only branch_secrets document. */}
+                      {visibleSecrets[branch.id]?.petpoojaStoreId && (
                         <div className="flex items-center gap-1.5 text-[10px] text-zinc-400 bg-[#0A0A0A] px-2.5 py-1.5 rounded-lg border border-[#1E3A24]">
                           <Cpu className="w-3 h-3 text-[#4ADE80]" />
                           <span>Petpooja POS Bridge:</span>
-                          <span className="font-mono font-bold text-white">{branch.petpoojaStoreId}</span>
+                          <span className="font-mono font-bold text-white">
+                            {visibleSecrets[branch.id].petpoojaStoreId}
+                          </span>
                         </div>
                       )}
                     </div>

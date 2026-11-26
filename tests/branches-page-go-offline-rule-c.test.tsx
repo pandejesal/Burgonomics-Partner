@@ -40,6 +40,10 @@ vi.mock('react', async (importOriginal) => {
       vi.fn(),
     ],
     useRef: (initial: unknown) => ({ current: initial }),
+    // The page tree is INSPECTED, not mounted (node environment, no renderer),
+    // so an effect body has nothing to run under. Stub it — the tree-shape and
+    // onClick assertions this file makes are unaffected.
+    useEffect: vi.fn(),
   };
 });
 

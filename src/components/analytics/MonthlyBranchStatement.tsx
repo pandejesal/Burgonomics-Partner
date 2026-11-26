@@ -108,11 +108,13 @@ export function MonthlyBranchStatement({ current, previous }: MonthlyBranchState
                       {row.city} • ID: {row.branchId}
                     </div>
                     <div className="text-[9px] font-bold text-text-secondary uppercase">
-                      {row.linkedAccountId && row.linkedAccountId !== 'unlinked'
-                        ? row.linkedStatus === 'pending'
-                          ? 'Link pending'
-                          : 'Settlement not measured'
-                        : 'Unlinked — no Route split'}
+                      {row.linkedStatus === 'retired'
+                        ? 'Route settlement retired'
+                        : row.linkedAccountId && row.linkedAccountId !== 'unlinked'
+                          ? row.linkedStatus === 'pending'
+                            ? 'Link pending'
+                            : 'Settlement not measured'
+                          : 'Unlinked — no Route split'}
                     </div>
                   </td>
                   <td className="py-3.5 text-right font-mono font-bold text-purple-300">

@@ -91,11 +91,23 @@ export function buildSlipPrintHtml(request: SlipPrintRequest): string {
     '.slip-last { page-break-after: auto; break-after: auto; }',
     '</style></head><body>',
     slips.join('\n'),
-    // Print as soon as the document exists. The fallback timer covers a
-    // window whose load event already fired before the script was parsed.
-    '<script>window.focus();',
-    'window.print();',
-    'setTimeout(function () { try { window.print(); } catch (e) {} }, 400);',
+    // ONE guarded print request. This used to call `window.print()` and then
+    // call it AGAIN at +400 ms "in case the load event already fired" — on a
+    // real printer that is two jobs for one ticket (a duplicated KOT or a
+    // duplicated customer invoice). The guard makes a second invocation (load +
+    // readyState both firing) a no-op instead of a second job, and asking from
+    // an `onload` handler covers the window whose load fired before the script
+    // was parsed without a blind timer retry.
+    '<script>',
+    'var burgonomicsPrinted = false;',
+    'function burgonomicsPrintOnce() {',
+    '  if (burgonomicsPrinted) return;',
+    '  burgonomicsPrinted = true;',
+    '  try { window.focus(); } catch (e) {}',
+    '  window.print();',
+    '}',
+    'window.addEventListener("load", burgonomicsPrintOnce);',
+    'if (document.readyState === "complete") burgonomicsPrintOnce();',
     '</script>',
     '</body></html>',
   ].join('\n');

@@ -12,22 +12,53 @@ import {
 import type { Branch } from '@/types';
 import { useAuthStore } from '@/stores/authStore';
 import { isBrandRole } from '@/core/auth/routePolicy';
+import { BRANCH_SECRET_KEYS, restIDsForStoreId, writeBranchSecrets } from '@/utils/branchSecrets';
 
-/** Rules deny branch roles any write to these fields (see firestore.rules). */
+/**
+ * SEC-11: `petpoojaStoreId`, `petpooja` and `restIDs` live in the brand-only
+ * `branch_secrets/{branchId}` collection, NOT on `branches/*` (which every
+ * operator role can read). They are split out by `takeBranchSecrets` below.
+ *
+ * `razorpayAccountId` is RETIRED (Razorpay Route per-order transfers are gone,
+ * no reader exists in functions/src): it is never migrated, read or written.
+ */
 const BRANCH_DENIED_UPDATE_KEYS = [
   'monthlyFee',
   'packaging',
   'packagingFee',
   'royaltyPercentage',
   'brandRoyaltyPercent',
-  // firestore.rules branches update deny-list: restIDs and the Route account
-  // are brand-owned. A default-filled form value counts as a change, so these
-  // must be omitted from a branch-role payload.
-  'petpoojaStoreId',
-  'petpooja',
-  'razorpayAccountId',
   'servicedRadiusKm',
 ] as const;
+
+/**
+ * The secrets patch a caller sent, or `null`. Brand roles write it to
+ * `branch_secrets`; branch roles never write it at all (rules deny them that
+ * collection, and a default-filled form field counts as a change).
+ */
+function takeBranchSecrets(
+  branchId: string,
+  settings: Record<string, any>,
+  role: string | undefined,
+): Record<string, any> | null {
+  const patch: Record<string, any> = {};
+  let touched = false;
+  for (const key of BRANCH_SECRET_KEYS) {
+    if (!(key in settings)) continue;
+    patch[key] = settings[key] ?? null;
+    delete settings[key];
+    touched = true;
+  }
+  // A POS store id alone implies its restID list — the backend mirror writes
+  // exactly that, and a missing list would make the outlet invisible to the
+  // customer app's menu read.
+  if ('petpoojaStoreId' in patch && !('restIDs' in patch)) {
+    patch.restIDs = restIDsForStoreId(patch.petpoojaStoreId);
+  }
+  if (!touched) return null;
+  if (!isBrandRole(role as any)) return null;
+  return { branchId, ...patch };
+}
 
 export interface CreateBranchInput {
   name: string;
@@ -37,8 +68,8 @@ export interface CreateBranchInput {
   status: 'active' | 'coming_soon' | 'paused';
   expectedLaunchDate?: string;
   bannerImage?: string;
+  /** Written to `branch_secrets`, never to `branches` (SEC-11). */
   petpoojaStoreId?: string;
-  razorpayAccountId?: string;
   /** Fixed monthly branch fee in rupees; absent means ₹2,500, 0 means none. */
   monthlyFee?: number;
   deliveryRadiusKm?: number;
@@ -85,10 +116,8 @@ export function useBranches() {
           acceptingOrdersStatus: 'open',
           prepTimeMinutes: 20,
           deliveryRadiusKm: 7,
-          razorpayAccountId: 'acc_Rzp_Surat_01',
           monthlyFee: 2500,
           announcementBanner: '🔥 Weekend Special: Flat 20% off Gourmet Burgers!',
-          petpoojaStoreId: 'PP_SURAT_01',
           coordinates: { lat: 21.1959, lng: 72.7933 },
           operatingHours: { open: '11:00 AM', close: '11:30 PM' },
           createdAt: Timestamp.now(),
@@ -104,9 +133,7 @@ export function useBranches() {
           acceptingOrdersStatus: 'open',
           prepTimeMinutes: 25,
           deliveryRadiusKm: 8,
-          razorpayAccountId: 'acc_Rzp_Ahmd_01',
           monthlyFee: 2500,
-          petpoojaStoreId: 'PP_AMD_01',
           coordinates: { lat: 23.0525, lng: 72.512 },
           operatingHours: { open: '11:00 AM', close: '11:30 PM' },
           createdAt: Timestamp.now(),
@@ -124,7 +151,6 @@ export function useBranches() {
             'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=800&auto=format&fit=crop&q=80',
           allowComingSoonSubscribers: true,
           subscribersCount: 142,
-          razorpayAccountId: 'acc_Rzp_Vdr_01',
           monthlyFee: 2500,
           coordinates: { lat: 22.3106, lng: 73.1695 },
           createdAt: Timestamp.now(),
@@ -143,7 +169,7 @@ export function useBranches() {
         );
       }
       const branchRef = collection(db, 'branches');
-      return addDoc(branchRef, {
+      const created = await addDoc(branchRef, {
         name: branchInput.name,
         city: branchInput.city,
         address: branchInput.address,
@@ -152,11 +178,10 @@ export function useBranches() {
         status: branchInput.status,
         expectedLaunchDate: branchInput.expectedLaunchDate || null,
         bannerImage: branchInput.bannerImage || null,
-        petpoojaStoreId: branchInput.petpoojaStoreId || null,
-        // Loop: never fabricate a linked account id (the old default minted
-        // acc_Rzp_<timestamp>, routing real transfers at a nonexistent
-        // account). Absent → null; the Route worker skips with a log.
-        razorpayAccountId: branchInput.razorpayAccountId || null,
+        // SEC-11: the POS identifiers now live in the brand-only
+        // `branch_secrets/{branchId}` — `branches/*` is readable by every
+        // operator role, so an outlet's POS credentials must not sit here.
+        // `razorpayAccountId` is RETIRED (no reader anywhere): never written.
         // Fixed monthly fee (0 is valid and means no fee). Never write the
         // retired per-order royalty percentage on new branches.
         monthlyFee: branchInput.monthlyFee ?? 2500,
@@ -169,6 +194,16 @@ export function useBranches() {
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
       });
+      // Only when the form actually carried a POS id: an empty secrets document
+      // is not "linked", it is noise the ops tooling would have to ignore.
+      const petpoojaStoreId = branchInput.petpoojaStoreId?.trim();
+      if (petpoojaStoreId) {
+        await writeBranchSecrets(created.id, {
+          petpoojaStoreId,
+          restIDs: restIDsForStoreId(petpoojaStoreId),
+        });
+      }
+      return created;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['branches'] });
@@ -218,11 +253,9 @@ export function useBranches() {
     mutationFn: async ({
       branchId,
       petpoojaStoreId,
-      razorpayAccountId,
     }: {
       branchId: string;
       petpoojaStoreId?: string;
-      razorpayAccountId?: string;
     }) => {
       const branchRef = doc(db, 'branches', branchId);
       const updateData: Record<string, any> = {
@@ -230,10 +263,17 @@ export function useBranches() {
         status: 'active',
         updatedAt: Timestamp.now(),
       };
-      if (petpoojaStoreId) updateData.petpoojaStoreId = petpoojaStoreId;
-      if (razorpayAccountId) updateData.razorpayAccountId = razorpayAccountId;
-
       await updateDoc(branchRef, updateData);
+      // SEC-11: the POS id is a secret, not a directory field. `razorpayAccountId`
+      // is RETIRED and is not accepted at all (a caller still passing it is
+      // deliberately ignored rather than silently persisted).
+      const id = petpoojaStoreId?.trim();
+      if (id) {
+        await writeBranchSecrets(branchId, {
+          petpoojaStoreId: id,
+          restIDs: restIDsForStoreId(id),
+        });
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['branches'] });
@@ -250,6 +290,12 @@ export function useBranches() {
     }) => {
       const branchRef = doc(db, 'branches', branchId);
       const writable: Record<string, any> = { ...settings };
+      // SEC-11: the POS identifiers belong to `branch_secrets` (brand-only).
+      // Pulled out of the branches payload for EVERY role — writing them there is
+      // rejected by the hardened rule and would leak them to every operator.
+      // `razorpayAccountId` is retired: never written anywhere, by anyone.
+      delete writable.razorpayAccountId;
+      const secretsPatch = takeBranchSecrets(branchId, writable, user?.role);
       if (!isBrandRole(user?.role)) {
         // Rules reject ANY present value for these keys — even one identical
         // to the stored value. A default-filled form field therefore has to be
@@ -280,8 +326,12 @@ export function useBranches() {
             return false;
           });
           if (rejected) {
-            throw new Error('This outlet is closed — reopen it before enabling Busy/Rush.');
+            throw new Error('This outlet is closed — reopen it before setting the kitchen to busy.');
           }
+          // D-1: the transaction path must still persist the secrets patch;
+          // returning here without it silently dropped a POS id the operator
+          // just saved (or, worse, left the old one looking current).
+          if (secretsPatch) await writeBranchSecrets(branchId, secretsPatch);
           return;
         }
       }
@@ -291,6 +341,7 @@ export function useBranches() {
       }).catch(async () => {
         await setDoc(branchRef, { ...writable, updatedAt: Timestamp.now() }, { merge: true });
       });
+      if (secretsPatch) await writeBranchSecrets(branchId, secretsPatch);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['branches'] });

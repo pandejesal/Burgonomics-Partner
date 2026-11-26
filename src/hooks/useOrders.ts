@@ -21,7 +21,7 @@ import {
   orderDocTimeMs,
 } from '@/utils/orderContract';
 import { chunkOrderBranchIds, isGlobalRole, resolveOrderReadScope, resolveScopedBranchIds } from '@/utils/branchScope';
-import { OPEN_ORDER_PAGE_SIZE } from '@/utils/orderWindow';
+import { OPEN_ORDER_PAGE_SIZE, pageWasCapped } from '@/utils/orderWindow';
 
 /**
  * Demo seeds are DEV-only (Runbook §8). Production shows real orders or an
@@ -194,6 +194,22 @@ interface ScopedFeed {
   loading: boolean;
   error: Error | null;
   updatedAt: number;
+  /**
+   * A7 #2 / r2: the feed's page bound was hit, so older still-open tickets may
+   * sit outside the window. It is DATA, not a per-surface guess — the regional
+   * KDS reads through this hook and used to advertise a complete board.
+   */
+  windowCapped: boolean;
+}
+
+/**
+ * The unscoped read's result. It is an object (not a bare array) because the
+ * page bound has to travel with the rows: a caller that only sees the array
+ * cannot tell a 500-row page from a 500-row page that had a 501st document.
+ */
+interface OrdersPage {
+  orders: Order[];
+  windowCapped: boolean;
 }
 
 /**
@@ -215,7 +231,7 @@ function useScopedOrderFeed(user: ReturnType<typeof useAuthStore.getState>['user
   const assignedKey = [...new Set(assignedBranchIds)].sort();
   const key = JSON.stringify([user?.id, user?.role, assignedKey, selection]);
   const [generation, setGeneration] = useState(0);
-  const [feed, setFeed] = useState<ScopedFeed>({ key: '', orders: [], branchIds: [], loading: true, error: null, updatedAt: 0 });
+  const [feed, setFeed] = useState<ScopedFeed>({ key: '', orders: [], branchIds: [], loading: true, error: null, updatedAt: 0, windowCapped: false });
 
   useEffect(() => {
     if (!scoped || !user) return;
@@ -227,7 +243,7 @@ function useScopedOrderFeed(user: ReturnType<typeof useAuthStore.getState>['user
       if (!active) return;
       revision++;
       clearListeners();
-      setFeed({ key, orders: [], branchIds: [], loading: false, error, updatedAt: 0 });
+      setFeed({ key, orders: [], branchIds: [], loading: false, error, updatedAt: 0, windowCapped: false });
     };
     const start = (registry: unknown) => {
       revision++;
@@ -238,7 +254,7 @@ function useScopedOrderFeed(user: ReturnType<typeof useAuthStore.getState>['user
       // Ownership is provable only from a server-confirmed snapshot. A denied
       // or empty scope starts no listener, so it must NOT advertise a
       // descriptor — an empty board is not verified data.
-      setFeed({ key, orders: [], branchIds, loading: chunks.length > 0, error: null, updatedAt: 0 });
+      setFeed({ key, orders: [], branchIds, loading: chunks.length > 0, error: null, updatedAt: 0, windowCapped: false });
       const pages = new Map<number, Array<{ id: string; data: Record<string, any> }>>();
       chunks.forEach((chunk, index) => {
         const unsubscribe = onSnapshot(
@@ -247,19 +263,26 @@ function useScopedOrderFeed(user: ReturnType<typeof useAuthStore.getState>['user
             if (!active || revision !== currentRevision) return;
             pages.set(index, snapshot.docs.map((row) => ({ id: row.id, data: row.data() })).filter((row) => chunk.includes(row.data.branchId)));
             const merged = new Map([...pages.values()].flat().map((row) => [row.id, row]));
-            const orders = [...merged.values()]
-              .sort((a, b) => orderDocTimeMs(b.data) - orderDocTimeMs(a.data))
+            const sorted = [...merged.values()].sort((a, b) => orderDocTimeMs(b.data) - orderDocTimeMs(a.data));
+            // A7 #2 / r2: BOTH bounds are disclosed. A single full chunk proves
+            // that branch has older rows outside the window; a merged board
+            // sliced down to one page proves the slice dropped rows. Reading
+            // only the chunk size missed the second case entirely.
+            const capped =
+              pageWasCapped(sorted.length) ||
+              snapshot.docs.length >= OPEN_ORDER_PAGE_SIZE;
+            const orders = sorted
               .slice(0, OPEN_ORDER_PAGE_SIZE)
               .map((row) => normalizeOrderDoc(row.id, row.data));
             const complete = pages.size === chunks.length;
-            setFeed({ key, orders: complete ? orders : [], branchIds, loading: !complete, error: null, updatedAt: complete ? Date.now() : 0 });
+            setFeed({ key, orders: complete ? orders : [], branchIds, loading: !complete, error: null, updatedAt: complete ? Date.now() : 0, windowCapped: complete ? capped : false });
           },
           (error) => { if (revision === currentRevision) fail(error); },
         );
         orderUnsubscribers.push(unsubscribe);
       });
     };
-    setFeed({ key, orders: [], branchIds: [], loading: true, error: null, updatedAt: 0 });
+    setFeed({ key, orders: [], branchIds: [], loading: true, error: null, updatedAt: 0, windowCapped: false });
     const unsubscribeRegistry = user.role === 'regional_manager'
       ? onSnapshot(doc(db, 'admins', user.id), { includeMetadataChanges: true }, (snapshot) => {
           if (!active) return;
@@ -272,7 +295,7 @@ function useScopedOrderFeed(user: ReturnType<typeof useAuthStore.getState>['user
 
   const current = feed.key === key
     ? feed
-    : { key, orders: NO_SCOPED_ORDERS, branchIds: NO_SCOPED_BRANCHES, loading: true, error: null, updatedAt: 0 };
+    : { key, orders: NO_SCOPED_ORDERS, branchIds: NO_SCOPED_BRANCHES, loading: true, error: null, updatedAt: 0, windowCapped: false };
   // Stable like React Query's `refetch`: consumers list it in effect deps.
   const refresh = useCallback(() => setGeneration((value) => value + 1), []);
   return { scoped, ...current, refresh };
@@ -329,7 +352,14 @@ export function useOrders(params: UseOrdersParams = {}) {
     return [...new Set(capped)].sort();
   }, [user, selectedBranchId]);
 
-  const { data: orders = [], isLoading, error, refetch, dataUpdatedAt, isPlaceholderData } = useQuery({
+  const {
+    data: page = { orders: [] as Order[], windowCapped: false },
+    isLoading,
+    error,
+    refetch,
+    dataUpdatedAt,
+    isPlaceholderData,
+  } = useQuery<OrdersPage>({
     // Provenance boundary. The key carries the dimensions proven to drive this
     // query: uid, role, city, selection, params, the full normalised branch
     // scope, the RAW primary ("first assigned branch") projection input, and the
@@ -350,12 +380,12 @@ export function useOrders(params: UseOrdersParams = {}) {
       rawPrimaryBranchId,
       directReadBranchIds,
     ],
-    queryFn: async (): Promise<Order[]> => {
+    queryFn: async (): Promise<OrdersPage> => {
       // The UI selection is user-writable (localStorage) — scoped roles are
       // clamped to their assigned branches; a scoped role with no branches
       // sees nothing, never the global collection.
       const scopeBranchIds = resolveScopedBranchIds(user, selectedBranchId);
-      if (!scopeBranchIds.length && !isGlobalRole(user?.role)) return [];
+      if (!scopeBranchIds.length && !isGlobalRole(user?.role)) return { orders: [], windowCapped: false };
 
       // Order BEFORE limiting: sorting an arbitrary 100 document names cannot
       // recover newer orders excluded by the limit. Scoped reads require the
@@ -381,6 +411,10 @@ export function useOrders(params: UseOrdersParams = {}) {
       const readRole = user?.role ?? null;
 
       let rawDocs: Array<{ id: string; data: Record<string, any> }> = [];
+      // A7 #2 / r2: whether any READ in this query hit its page bound. Tracked
+      // here, not inferred from the filtered list, because a client-side
+      // status/city filter can shrink 500 rows to 3 and hide the cap entirely.
+      let windowCapped = false;
 
       if (scopeBranchIds.length > 0) {
         const scopedSnap = await getDocs(
@@ -392,6 +426,7 @@ export function useOrders(params: UseOrdersParams = {}) {
           )
         );
         rawDocs = toRawDocs(scopedSnap);
+        windowCapped = windowCapped || pageWasCapped(scopedSnap.docs.length);
       } else {
         // Global role: latest-first ordering on a lone orderBy needs only
         // the automatic single-field index on createdAt.
@@ -401,6 +436,7 @@ export function useOrders(params: UseOrdersParams = {}) {
         const pages = await Promise.all(['createdAt', 'placedAt'].map((field) =>
           getDocs(query(collection(db, 'orders'), orderBy(field, 'desc'), limit(OPEN_ORDER_PAGE_SIZE)))
         ));
+        windowCapped = windowCapped || pages.some((page) => pageWasCapped(page.docs.length));
         // A record with both fields belongs to the primary createdAt feed.
         // Otherwise a delayed placedAt snapshot could rewind its status.
         const rows = pages.flatMap((page, index) => toRawDocs(page).filter((doc) =>
@@ -485,7 +521,9 @@ export function useOrders(params: UseOrdersParams = {}) {
         );
       }
 
-      return list;
+      // The cap travels with the rows. A caller cannot recover it from the
+      // length: a client-side filter can turn a capped 500 into 3.
+      return { orders: list, windowCapped };
     },
     enabled: !!user && !scopedFeed.scoped,
     // One-shot getDocs: without a poll the "Auto-refreshes" badge was a lie
@@ -564,11 +602,17 @@ export function useOrders(params: UseOrdersParams = {}) {
     return true;
   }), [scopedFeed.orders, selectedCity, params.status, params.dateRange]);
   return {
-    orders: scopedFeed.scoped ? scopedOrders : orders,
+    orders: scopedFeed.scoped ? scopedOrders : page.orders,
     isLoading: scopedFeed.scoped ? scopedFeed.loading : isLoading,
     error: scopedFeed.scoped ? scopedFeed.error : error,
     refetch: scopedFeed.scoped ? scopedFeed.refresh : refetch,
     dataUpdatedAt: scopedFeed.scoped ? scopedFeed.updatedAt : dataUpdatedAt,
+    /**
+     * A7 #2 / r2 finding 1: the feed hit its page bound, so older still-open
+     * tickets may sit outside the window. Every surface that shows a board or a
+     * makeline must disclose this — it is the hook's truth, not a guess.
+     */
+    windowCapped: scopedFeed.scoped ? scopedFeed.windowCapped : page.windowCapped,
     updateOrderStatus,
     ordersDataScope,
   };

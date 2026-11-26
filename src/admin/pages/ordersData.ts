@@ -5,6 +5,7 @@ import {
   CartLine,
 } from "@/features/orders/models";
 import { modifierLabelsFrom } from "@/utils/orderContract";
+import { SLIP_COLUMNS } from "@/utils/printDocument";
 
 /**
  * A7 #6: the per-line kitchen note. `notes` is what the drawer's cart mapper
@@ -575,25 +576,122 @@ export const INITIAL_RICH_ORDERS: RichOrder[] = [
 export function getThermalReceiptText(
   order: RichOrder,
   type: "KOT" | "INVOICE" | "TAX_RECEIPT",
+  columns: number = SLIP_COLUMNS["80mm"],
 ): string {
-  const lineSeparator = "------------------------------------------";
-  const doubleLineSeparator = "==========================================";
-  const nowStr = new Date().toLocaleString();
+  // r2 finding 3: 58 mm paper is 32 COLUMNS. `@page { size: 58mm }` sizes the
+  // SHEET — it does not reflow text — so the old fixed 42-character separators
+  // and 22/24-character label columns wrapped mid-token on a 32-column roll,
+  // splitting item names across lines and pushing amounts away from their
+  // labels. Every width below comes from the paper, and `emit` guarantees no
+  // printed line is longer than the roll.
+  const width =
+    Number.isFinite(columns) && columns >= 20 ? Math.floor(columns) : SLIP_COLUMNS["80mm"];
+  const lineSeparator = "-".repeat(width);
+  const doubleLineSeparator = "=".repeat(width);
+  // Money row = label + ": ₹" + a 12-character amount, exactly as the 48-column
+  // slip prints it. On a narrow roll the label column shrinks so the amount
+  // still lands on the SAME line; a label that cannot fit (a coupon code, say)
+  // moves its amount to the next line instead of being clipped — a truncated
+  // "COUPON DISCOUNT" with no code is a receipt a customer cannot reconcile.
+  const moneyLabelWidth = Math.min(24, Math.max(6, width - 15));
+  // Item row = name + right-aligned quantity + right-aligned price.
+  const qtyWidth = 4;
+  const priceWidth = 11;
+  const nameWidth = Math.min(22, Math.max(8, width - qtyWidth - priceWidth));
+  const center = (line: string): string => {
+    if (line.length >= width) return line;
+    return " ".repeat(Math.floor((width - line.length) / 2)) + line;
+  };
+  /**
+   * A totals row. Keeps the 48-column shape (`LABEL… : ₹   amount`) whenever the
+   * label fits the roll; on a narrower roll the label column shrinks first, and
+   * a label that still cannot fit keeps its WHOLE text on continuation lines
+   * with the amount right-aligned beneath it. Never clip a label: a receipt that
+   * says "COUPON DISCOUN" with no code does not reconcile against the bill.
+   */
+  const money = (label: string, amount: string): string[] => {
+    const amountPart = `₹${amount.padStart(12)}`;
+    const single = `${label.padEnd(moneyLabelWidth)}: ${amountPart}`;
+    if (single.length <= width) return [single];
+    if (label.length <= moneyLabelWidth) {
+      // Label fits its column but the assembled row does not: right-align the
+      // amount on the next line so it stays adjacent to its label.
+      return [label, amountPart.padStart(width)];
+    }
+    const labelLines = wrap(label, "");
+    labelLines.push(amountPart.padStart(width));
+    return labelLines;
+  };
+  /**
+   * Reflow one line that overflows the roll. A thermal printer hard-wraps at
+   * ITS OWN column count, so an unbroken 40-character item name splits
+   * mid-token and loses the quantity/price association; breaking at a space
+   * keeps words intact and `indent` keeps continuation lines visually attached.
+   *
+   * Progress is guaranteed: every iteration consumes at least one character of
+   * the remaining content, so a long word (or an indent that leaves less than a
+   * full column of text) can never spin here.
+   */
+  const wrap = (line: string, indent = ""): string[] => {
+    if (line.length <= width) return [line];
+    const pad = indent.length < width - 1 ? indent : "";
+    const out: string[] = [];
+    let remaining = line;
+    let prefix = "";
+    while (remaining.length > 0) {
+      const room = width - prefix.length;
+      const segment = remaining.slice(0, Math.max(1, room));
+      if (remaining.length <= room) {
+        out.push(prefix + remaining);
+        break;
+      }
+      const spaceAt = segment.search(/[ ]\S*$/);
+      const cutAt =
+        spaceAt > 0 && segment.slice(spaceAt + 1).length > 0 ? spaceAt : Math.max(1, room);
+      out.push(prefix + remaining.slice(0, cutAt));
+      // Skip the break space so continuation lines do not start with a gap.
+      remaining = remaining.slice(cutAt).replace(/^ /, "");
+      prefix = pad;
+    }
+    return out;
+  };
+
+  /**
+   * A `LABEL : value` row. The label column never wraps (a split label reads as
+   * a different label); the VALUE wraps after the colon with an indent that
+   * lines the continuation up under the first character of the value.
+   */
+  const kv = (label: string, value: string): string[] => {
+    // Keep the 48-column alignment: labels pad to the money column, so a narrow
+    // roll still lines the values up under each other.
+    const padded = `${label.padEnd(moneyLabelWidth)}: `;
+    const indent = " ".repeat(Math.min(padded.length, Math.max(0, width - 8)));
+    return wrap(`${padded}${value}`, indent);
+  };
 
   let text = "";
+  const emit = (line: string | string[], indent = ""): void => {
+    if (Array.isArray(line)) {
+      for (const part of line) text += part + "\n";
+      return;
+    }
+    for (const part of wrap(line, indent)) text += part + "\n";
+  };
+
+  const nowStr = new Date().toLocaleString();
 
   if (type === "KOT") {
-    text += "           KITCHEN ORDER TICKET           \n";
-    text += `ORDER ID: ${order.id}    (${order.fulfillment.toUpperCase()})\n`;
-    text += `KOT NO  : ${order.petpoojaDetails?.kotId || "KOT-PENDING"}\n`;
-    text += `STORE   : ${order.store.name}\n`;
-    text += `TIME    : ${order.placedAt ? new Date(order.placedAt).toLocaleTimeString() : nowStr}\n`;
-    text += doubleLineSeparator + "\n";
-    text += "QTY   ITEM NAME / MODIFIERS\n";
-    text += lineSeparator + "\n";
+    emit(center("KITCHEN ORDER TICKET"));
+    emit(`ORDER ID: ${order.id}    (${order.fulfillment.toUpperCase()})`, "         ");
+    emit(`KOT NO  : ${order.petpoojaDetails?.kotId || "KOT-PENDING"}`);
+    emit(`STORE   : ${order.store.name}`);
+    emit(`TIME    : ${order.placedAt ? new Date(order.placedAt).toLocaleTimeString() : nowStr}`);
+    emit(doubleLineSeparator);
+    emit("QTY   ITEM NAME / MODIFIERS");
+    emit(lineSeparator);
 
     order.items.forEach((item) => {
-      text += `${item.quantity.toString().padEnd(5)} ${item.name.toUpperCase()}\n`;
+      emit(`${item.quantity.toString().padEnd(5)} ${item.name.toUpperCase()}`, "      ");
       // A7 #6: this loop read only `customizations`, so a line carrying
       // `modifiers: ["No onion"]` (the shape the customer app writes) or a line
       // note (`notes`/`specialInstructions`) printed as a bare item name —
@@ -601,43 +699,47 @@ export function getThermalReceiptText(
       // Both now come from the same helpers every other Partner surface uses.
       const modifiers = modifierLabelsFrom(item);
       modifiers.forEach((label) => {
-        text += `      >> ${label.toUpperCase()}\n`;
+        emit(`      >> ${label.toUpperCase()}`, "         ");
       });
       const lineNote = strOfLineNote(item);
       if (lineNote) {
-        text += `      * ${lineNote.toUpperCase()}\n`;
+        emit(`      * ${lineNote.toUpperCase()}`, "        ");
       }
     });
 
-    text += lineSeparator + "\n";
+    emit(lineSeparator);
     if (order.notes) {
-      text += `SPECIAL NOTES:\n${order.notes.toUpperCase()}\n`;
-      text += lineSeparator + "\n";
+      emit("SPECIAL NOTES:");
+      emit(order.notes.toUpperCase(), "  ");
+      emit(lineSeparator);
     }
-    text += "         BURGONOMICS KITCHEN CORE         \n";
+    emit(center("BURGONOMICS KITCHEN CORE"));
   } else if (type === "INVOICE" || type === "TAX_RECEIPT") {
-    text += "               BURGONOMICS                \n";
-    text += "         CRISP BURGERS & SIDES            \n";
-    text += `STORE   : ${order.store.name}\n`;
-    text += `ADDRESS : ${order.store.address}\n`;
-    text += `PHONE   : ${order.store.phone}\n`;
-    text += `GSTIN   : [see outlet board / request tax invoice]\n`;
-    text += lineSeparator + "\n";
-    text += `INVOICE : ${order.id}\n`;
-    text += `DATE    : ${order.placedAt ? new Date(order.placedAt).toLocaleString() : nowStr}\n`;
-    text += `CUST    : ${order.address?.contactName || order.id}\n`;
-    text += `PHONE   : ${order.address?.contactPhone || "N/A"}\n`;
-    text += `TYPE    : ${order.fulfillment.toUpperCase()}\n`;
-    text += doubleLineSeparator + "\n";
-    text += "ITEM DESCRIPTION          QTY      PRICE  \n";
-    text += lineSeparator + "\n";
+    emit(center("BURGONOMICS"));
+    emit(center("CRISP BURGERS & SIDES"));
+    emit(`STORE   : ${order.store.name}`, "          ");
+    emit(`ADDRESS : ${order.store.address}`, "          ");
+    emit(`PHONE   : ${order.store.phone}`);
+    emit("GSTIN   : [see outlet board / request tax invoice]");
+    emit(lineSeparator);
+    emit(`INVOICE : ${order.id}`);
+    emit(`DATE    : ${order.placedAt ? new Date(order.placedAt).toLocaleString() : nowStr}`, "          ");
+    emit(`CUST    : ${order.address?.contactName || order.id}`, "          ");
+    emit(`PHONE   : ${order.address?.contactPhone || "N/A"}`);
+    emit(`TYPE    : ${order.fulfillment.toUpperCase()}`);
+    emit(doubleLineSeparator);
+    emit(
+      `${"ITEM DESCRIPTION".padEnd(nameWidth)}${"QTY".padStart(qtyWidth)}${"PRICE".padStart(priceWidth)}`,
+    );
+    emit(lineSeparator);
 
     order.items.forEach((item) => {
-      const namePart = item.name.length > 22 ? item.name.substring(0, 22) : item.name.padEnd(22);
-      const qtyPart = item.quantity.toString().padStart(4);
+      const namePart =
+        item.name.length > nameWidth ? item.name.substring(0, nameWidth) : item.name.padEnd(nameWidth);
+      const qtyPart = item.quantity.toString().padStart(qtyWidth);
       const itemPx = (item.price ?? item.unitPrice ?? 0) as number;
-      const pricePart = `₹${(itemPx * item.quantity).toFixed(2)}`.padStart(11);
-      text += `${namePart}${qtyPart}${pricePart}\n`;
+      const pricePart = `₹${(itemPx * item.quantity).toFixed(2)}`.padStart(priceWidth);
+      emit(`${namePart}${qtyPart}${pricePart}`);
 
       if (item.customizations && item.customizations.length > 0) {
         item.customizations.forEach((cust: any) => {
@@ -645,37 +747,42 @@ export function getThermalReceiptText(
           const custPx = (cust.price || cust.priceDelta || 0) as number;
           const custName = `+ ${custLabel}`;
           const custNamePart =
-            custName.length > 22 ? custName.substring(0, 22) : custName.padEnd(22);
-          const custPricePart = `₹${(custPx * item.quantity).toFixed(2)}`.padStart(11);
-          text += `${custNamePart}    ${custPricePart}\n`;
+            custName.length > nameWidth ? custName.substring(0, nameWidth) : custName.padEnd(nameWidth);
+          const custPricePart = `₹${(custPx * item.quantity).toFixed(2)}`.padStart(priceWidth);
+          // 4 spaces at 48 columns (as printed before); on a narrow roll the gap
+          // shrinks so the price still lands inside the paper.
+          const gap = " ".repeat(Math.max(1, Math.min(4, width - nameWidth - priceWidth)));
+          emit(`${custNamePart}${gap}${custPricePart}`);
         });
       }
     });
 
-    text += lineSeparator + "\n";
-    text += `SUBTOTAL                : ₹${order.totals.subtotal.toFixed(2).padStart(12)}\n`;
+    emit(lineSeparator);
+    emit(money("SUBTOTAL", order.totals.subtotal.toFixed(2)));
     // c9: print only the discount fields the server supplied. `discount` is a
     // legacy aggregate and cannot distinguish an item discount from a coupon;
     // using it made the coupon invisible (and could double-count a client-side
     // sum). Customer receipts use the same explicit item/promo fields and label.
     const itemDiscountVal = order.totals.itemDiscount ?? 0;
     if (itemDiscountVal > 0) {
-      text += `${'ITEM DISCOUNT'.padEnd(24)}: ₹${(-itemDiscountVal).toFixed(2).padStart(12)}\n`;
+      emit(money("ITEM DISCOUNT", (-itemDiscountVal).toFixed(2)));
     }
     const couponDiscountVal = order.totals.promoDiscount || order.promo?.discount || 0;
     if (couponDiscountVal > 0) {
       const couponCode =
         typeof order.promo?.code === 'string' ? order.promo.code.trim() : '';
       const couponLabel = `COUPON DISCOUNT${couponCode ? ` (${couponCode})` : ''}`;
-      text += `${couponLabel.padEnd(24)}: ₹${(-couponDiscountVal).toFixed(2).padStart(12)}\n`;
+      // A coupon code is a short token; on a narrow roll the label goes on its
+      // own line with the amount right-aligned below, never clipped.
+      emit(money(couponLabel, (-couponDiscountVal).toFixed(2)));
     }
     const delVal = order.totals.deliveryCharge ?? order.totals.deliveryFee ?? 0;
     if (delVal > 0) {
-      text += `DELIVERY CHARGE         : ₹${delVal.toFixed(2).padStart(12)}\n`;
+      emit(money("DELIVERY CHARGE", delVal.toFixed(2)));
     }
     const packVal = order.totals.packagingCharge ?? order.totals.packingFee ?? 0;
     if (packVal > 0) {
-      text += `PACKAGING CHARGE        : ₹${packVal.toFixed(2).padStart(12)}\n`;
+      emit(money("PACKAGING CHARGE", packVal.toFixed(2)));
     }
     const taxVal = order.totals.tax ?? order.totals.taxes ?? 0;
     // R1: split in paise — CGST rounds the inclusive share, SGST is the
@@ -685,17 +792,18 @@ export function getThermalReceiptText(
     const taxPaise = Math.round(taxVal * 100);
     const cgstPaise = Math.round(taxPaise / 2);
     const sgstPaise = taxPaise - cgstPaise;
-    text += `CGST (2.5%)             : ₹${(cgstPaise / 100).toFixed(2).padStart(12)}\n`;
-    text += `SGST (2.5%)             : ₹${(sgstPaise / 100).toFixed(2).padStart(12)}\n`;
-    text += doubleLineSeparator + "\n";
-    text += `GRAND TOTAL             : ₹${order.totals.grandTotal.toFixed(2).padStart(12)}\n`;
-    text += doubleLineSeparator + "\n";
-    text += `PAYMENT METHOD          : ${order.payment.label.toUpperCase()}\n`;
-    text += `TXN ID                  : ${order.payment.transactionId || "CASH_SETTLED"}\n`;
-    text += `STATUS                  : ${order.paymentStatus.toUpperCase()}\n`;
-    text += lineSeparator + "\n";
-    text += "       Thank you for your business!       \n";
-    text += "          BURGONOMICS DELIVERS            \n";
+    emit(money("CGST (2.5%)", (cgstPaise / 100).toFixed(2)));
+    emit(money("SGST (2.5%)", (sgstPaise / 100).toFixed(2)));
+    emit(doubleLineSeparator);
+    emit(doubleLineSeparator);
+    emit(money("GRAND TOTAL", order.totals.grandTotal.toFixed(2)));
+    emit(doubleLineSeparator);
+    emit(kv("PAYMENT METHOD", order.payment.label.toUpperCase()));
+    emit(kv("TXN ID", order.payment.transactionId || "CASH_SETTLED"));
+    emit(kv("STATUS", order.paymentStatus.toUpperCase()));
+    emit(lineSeparator);
+    emit(center("Thank you for your business!"));
+    emit(center("BURGONOMICS DELIVERS"));
   }
 
   return text;

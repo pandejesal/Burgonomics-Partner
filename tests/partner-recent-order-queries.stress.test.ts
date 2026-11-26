@@ -143,7 +143,9 @@ describe.each(['iso', 'timestamp'] as const)('bounded recent-order queries (%s)'
     if (scope === 'global') { h.user.role = 'brand_owner'; h.selectedBranchId = null; }
     seed('pending', shape);
     useOrders({ dateRange: 'all' });
-    const orders = await h.queryOptions.queryFn();
+    // r2: the queryFn returns `{ orders, windowCapped }` — the page bound is
+    // DATA now, so it cannot be inferred from the filtered list length.
+    const orders = (await h.queryOptions.queryFn()).orders;
     expect(orders.map((o: any) => o.id)).toContain(newestId);
     if (scope === 'scoped') expect(orders.map((o: any) => o.id)).not.toContain('foreign_newest');
     expect(h.queries[0].constraints).toContainEqual({ kind: 'limit', count: OPEN_ORDER_PAGE_SIZE });
@@ -282,7 +284,7 @@ describe.each(['iso', 'timestamp'] as const)('bounded recent-order queries (%s)'
       let orders: any[];
       if (surface === 'orders') {
         useOrders({ dateRange: 'all' });
-        orders = await h.queryOptions.queryFn();
+        orders = (await h.queryOptions.queryFn()).orders;
       } else if (surface === 'history') {
         orders = await adminOrdersService.getHistory(null, 100);
       } else if (surface === 'board') {
@@ -322,7 +324,7 @@ describe.each(['iso', 'timestamp'] as const)('bounded recent-order queries (%s)'
       let orders: any[];
       if (surface === 'orders') {
         useOrders({ dateRange: 'all' });
-        orders = await h.queryOptions.queryFn();
+        orders = (await h.queryOptions.queryFn()).orders;
       } else if (surface === 'history') {
         orders = await adminOrdersService.getHistory(null, 100);
       } else if (surface === 'board') {
